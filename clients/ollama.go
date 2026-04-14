@@ -11,7 +11,7 @@ type OllamaClient struct {
 	Client  *http.Client
 }
 
-// OllamaTool 定义发送给Ollama的工具格式
+// OllamaTool 定义发送给Ollama的Tool格式
 type OllamaTool struct {
 	Type     string         `json:"type"`
 	Function OllamaFunction `json:"function"`

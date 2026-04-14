@@ -7,7 +7,7 @@ type Tool interface {
 	Name() string
 	Description() string
 	Parameters() map[string]interface{}
-	Call(args map[string]interface{}) string
+	Call(args map[string]interface{}, WorkPath string) string
 }
 
 // ToolCall 表示模型返回的工具调用
@@ -48,10 +48,10 @@ func (r *Registry) GetAll() []Tool {
 }
 
 // RunTool 按名称执行工具
-func (r *Registry) RunTool(toolName string, args map[string]interface{}) string {
+func (r *Registry) RunTool(toolName string, args map[string]interface{}, WorkPath string) string {
 	t, ok := r.tools[toolName]
 	if !ok {
 		return fmt.Sprintf("Unknown tool: %s", toolName)
 	}
-	return t.Call(args)
+	return t.Call(args, WorkPath)
 }

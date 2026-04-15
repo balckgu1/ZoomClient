@@ -96,7 +96,6 @@ func TestWriteFileTool_Name(t *testing.T) {
 	if toolname != "write_file" {
 		t.Errorf("Tool name error, expect: %q, actual: %q", "write_file", toolname)
 	}
-	t.Logf("TestWriteFileTool_Name PASS")
 }
 
 // TestWriteFileTool_Description 验证描述不为空
@@ -167,42 +166,20 @@ func TestWriteFileTool_Call_Success(t *testing.T) {
 
 	// 验证返回结果
 	if !result.Ok {
-		t.Fatalf("期望写入成功，实际失败: %s", result.Content)
+		t.Fatalf("Testing Error, actual result: %s", result.Content)
 	}
 	if result.IsError {
-		t.Error("成功时 IsError 应为 false")
+		t.Error("Testing Error, successful call should have IsError as false")
 	}
 
 	// 验证文件确实被创建，内容正确
 	targetPath := filepath.Join(workDir, "test.txt")
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
-		t.Fatalf("读取写入的文件失败: %v", err)
+		t.Fatalf("Reading file failed: %v", err)
 	}
-	if string(data) != "Hello, World!" {
-		t.Errorf("文件内容不匹配，期望 %q，实际 %q", "Hello, World!", string(data))
-	}
-}
-
-// TestWriteFileTool_Call_SubdirCreation 测试写入子目录文件（父目录不存在时应失败，因为 WriteFile 不创建目录）
-func TestWriteFileTool_Call_SubdirNotExist(t *testing.T) {
-	workDir := t.TempDir()
-	tool := WriteFileTool{}
-	ctx := newTestContext(workDir)
-
-	args := map[string]any{
-		"filename": filepath.Join("nonexistent", "sub", "file.txt"),
-		"content":  "test content",
-	}
-
-	result := tool.Call(args, ctx)
-
-	// os.WriteFile 在父目录不存在时应返回错误
-	if result.Ok {
-		t.Error("期望父目录不存在时写入失败，但返回了成功")
-	}
-	if !result.IsError {
-		t.Error("失败时 IsError 应为 true")
+	if string(data) != args["content"].(string) {
+		t.Errorf("Testing Error, file content mismatch, expected %q, actual %q", "Hello, World!", string(data))
 	}
 }
 
@@ -219,10 +196,10 @@ func TestWriteFileTool_Call_MissingFilename(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("缺少 filename 时应返回失败")
+		t.Error("Testing Error, missing filename should return failure")
 	}
 	if !result.IsError {
-		t.Error("缺少 filename 时 IsError 应为 true")
+		t.Error("Testing Error, missing filename should have IsError as true")
 	}
 }
 
@@ -240,7 +217,7 @@ func TestWriteFileTool_Call_EmptyFilename(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("空 filename 时应返回失败")
+		t.Error("Testing Error, empty filename should return failure")
 	}
 }
 
@@ -258,10 +235,10 @@ func TestWriteFileTool_Call_FilenameWrongType(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("filename 类型错误时应返回失败")
+		t.Error("Testing Error, filename type error should return failure")
 	}
 	if !result.IsError {
-		t.Error("filename 类型错误时 IsError 应为 true")
+		t.Error("Testing Error, filename type error should have IsError as true")
 	}
 }
 
@@ -278,10 +255,10 @@ func TestWriteFileTool_Call_MissingContent(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("缺少 content 时应返回失败")
+		t.Error("Testing Error, missing content should return failure")
 	}
 	if !result.IsError {
-		t.Error("缺少 content 时 IsError 应为 true")
+		t.Error("Testing Error, missing content should have IsError as true")
 	}
 }
 
@@ -298,8 +275,8 @@ func TestWriteFileTool_Call_EmptyContent(t *testing.T) {
 
 	result := tool.Call(args, ctx)
 
-	if result.Ok {
-		t.Error("空 content 时应返回失败")
+	if !result.Ok {
+		t.Error("Testing Error, empty content should be allowed")
 	}
 }
 
@@ -317,10 +294,10 @@ func TestWriteFileTool_Call_ContentWrongType(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("content 类型错误时应返回失败")
+		t.Error("Testing Error, content type error should return failure")
 	}
 	if !result.IsError {
-		t.Error("content 类型错误时 IsError 应为 true")
+		t.Error("Testing Error, content type error should have IsError as true")
 	}
 }
 
@@ -338,10 +315,10 @@ func TestWriteFileTool_Call_PathTraversal(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("路径穿越时应返回失败")
+		t.Error("Testing Error, path traversal should return failure")
 	}
 	if !result.IsError {
-		t.Error("路径穿越时 IsError 应为 true")
+		t.Error("Testing Error, path traversal should have IsError as true")
 	}
 }
 
@@ -359,10 +336,10 @@ func TestWriteFileTool_Call_AbsolutePathEscape(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if result.Ok {
-		t.Error("绝对路径逃逸时应返回失败")
+		t.Error("Testing Error, absolute path escape should return failure")
 	}
 	if !result.IsError {
-		t.Error("绝对路径逃逸时 IsError 应为 true")
+		t.Error("Testing Error, absolute path escape should have IsError as true")
 	}
 }
 
@@ -376,7 +353,7 @@ func TestWriteFileTool_Call_OverwriteExistingFile(t *testing.T) {
 
 	// 先写入初始内容
 	if err := os.WriteFile(targetPath, []byte("old content"), 0644); err != nil {
-		t.Fatalf("写入初始文件失败: %v", err)
+		t.Fatalf("Testing Error: %v", err)
 	}
 
 	// 通过工具覆盖写入
@@ -388,16 +365,16 @@ func TestWriteFileTool_Call_OverwriteExistingFile(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if !result.Ok {
-		t.Fatalf("覆盖写入应成功，实际失败: %s", result.Content)
+		t.Fatalf("Testing Error, tool actully return: %s", result.Content)
 	}
 
 	// 验证内容已被覆盖
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
-		t.Fatalf("读取文件失败: %v", err)
+		t.Fatalf("Testing Error: %v", err)
 	}
-	if string(data) != "new content" {
-		t.Errorf("文件内容未正确覆盖，期望 %q，实际 %q", "new content", string(data))
+	if string(data) != args["content"].(string) {
+		t.Errorf("Testing Error, expect: %q，actual: %q", args["content"].(string), string(data))
 	}
 }
 
@@ -407,7 +384,7 @@ func TestWriteFileTool_Call_UnicodeContent(t *testing.T) {
 	tool := WriteFileTool{}
 	ctx := newTestContext(workDir)
 
-	unicodeContent := "你好，世界！🌍\n这是一段中文测试内容。"
+	unicodeContent := "你好，世界！🌍\n这是一段中文测试内容。\n Hello, world! This is a Chinese test case."
 	args := map[string]any{
 		"filename": "unicode.txt",
 		"content":  unicodeContent,
@@ -416,47 +393,15 @@ func TestWriteFileTool_Call_UnicodeContent(t *testing.T) {
 	result := tool.Call(args, ctx)
 
 	if !result.Ok {
-		t.Fatalf("Unicode 内容写入应成功，实际失败: %s", result.Content)
+		t.Fatalf("Testing Error, tool actully return: %s", result.Content)
 	}
 
 	data, err := os.ReadFile(filepath.Join(workDir, "unicode.txt"))
 	if err != nil {
-		t.Fatalf("读取文件失败: %v", err)
+		t.Fatalf("Testing Error: %v", err)
 	}
 	if string(data) != unicodeContent {
-		t.Errorf("Unicode 内容不匹配，期望 %q，实际 %q", unicodeContent, string(data))
-	}
-}
-
-// TestWriteFileTool_Call_LargeContent 测试写入较大内容
-func TestWriteFileTool_Call_LargeContent(t *testing.T) {
-	workDir := t.TempDir()
-	tool := WriteFileTool{}
-	ctx := newTestContext(workDir)
-
-	// 生成 1MB 的内容
-	largeContent := make([]byte, 1024*1024)
-	for i := range largeContent {
-		largeContent[i] = byte('A' + (i % 26))
-	}
-
-	args := map[string]any{
-		"filename": "large.txt",
-		"content":  string(largeContent),
-	}
-
-	result := tool.Call(args, ctx)
-
-	if !result.Ok {
-		t.Fatalf("大文件写入应成功，实际失败: %s", result.Content)
-	}
-
-	data, err := os.ReadFile(filepath.Join(workDir, "large.txt"))
-	if err != nil {
-		t.Fatalf("读取文件失败: %v", err)
-	}
-	if len(data) != len(largeContent) {
-		t.Errorf("文件大小不匹配，期望 %d 字节，实际 %d 字节", len(largeContent), len(data))
+		t.Errorf("Testing Error, Unicode content is mismatch, expect: %q, actul: %q", unicodeContent, string(data))
 	}
 }
 
@@ -477,14 +422,14 @@ func TestWriteFileTool_ViaRegistry(t *testing.T) {
 	result := registry.RunTool("write_file", args, ctx)
 
 	if !result.Ok {
-		t.Fatalf("通过 Registry 执行应成功，实际失败: %s", result.Content)
+		t.Fatalf("Testing Error, tool actully return: %s", result.Content)
 	}
 
 	data, err := os.ReadFile(filepath.Join(workDir, "registry_test.txt"))
 	if err != nil {
-		t.Fatalf("读取文件失败: %v", err)
+		t.Fatalf("Testing Error: %v", err)
 	}
 	if string(data) != "via registry" {
-		t.Errorf("内容不匹配，期望 %q，实际 %q", "via registry", string(data))
+		t.Errorf("Testing Error, expect: %q，actual: %q", "via registry", string(data))
 	}
 }

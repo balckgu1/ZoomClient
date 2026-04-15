@@ -71,8 +71,8 @@ func (t WriteFileTool) Call(args map[string]any, toolCtx *ToolContext) ToolResul
 		}
 	}
 	content, ok := args["content"].(string)
-	if !ok || content == "" {
-		return ToolResult{Ok: false, Content: "Error: missing content parameter or content parameter is not a string", IsError: true}
+	if !ok {
+		return ToolResult{Ok: false, Content: "Error: missing content parameter", IsError: true}
 	}
 
 	targetPath, err := isSafePath(toolCtx.WorkPath, filename)

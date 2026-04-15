@@ -7,7 +7,31 @@ type Tool interface {
 	Name() string
 	Description() string
 	Parameters() map[string]interface{}
-	Call(args map[string]interface{}, WorkPath string) string
+	Call(args map[string]interface{}, ctx *ToolContext) ToolResult
+}
+
+// ToolContext 工具执行上下文
+type ToolContext struct {
+	WorkPath          string         // 当前工作目录
+	Handlers          map[string]any // 额外处理器（预留给 MCP / agent 等能力来源）
+	PermissionContext map[string]any // 权限上下文
+	McpClients        map[string]any // MCP 外部客户端
+	Messages          []any          // 当前消息列表
+	AppState          map[string]any // 应用状态
+	Notifications     []any          // 通知队列
+}
+
+// ToolResult 工具执行结果
+type ToolResult struct {
+	Ok          bool   // 是否成功
+	Content     string // 返回内容
+	IsError     bool   // 是否为错误结果
+	Attachments []any
+}
+
+// String 返回结果内容，便于直接使用
+func (r ToolResult) String() string {
+	return r.Content
 }
 
 // ToolCall 表示模型返回的工具调用
@@ -48,10 +72,10 @@ func (r *Registry) GetAll() []Tool {
 }
 
 // RunTool 按名称执行工具
-func (r *Registry) RunTool(toolName string, args map[string]interface{}, WorkPath string) string {
+func (r *Registry) RunTool(toolName string, args map[string]interface{}, toolCtx *ToolContext) ToolResult {
 	t, ok := r.tools[toolName]
 	if !ok {
-		return fmt.Sprintf("Unknown tool: %s", toolName)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Unknown tool: %s", toolName), IsError: true}
 	}
-	return t.Call(args, WorkPath)
+	return t.Call(args, toolCtx)
 }

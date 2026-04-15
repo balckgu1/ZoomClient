@@ -29,18 +29,18 @@ func (t ReadFileTool) Parameters() map[string]any {
 	return parameters
 }
 
-func (t ReadFileTool) Call(args map[string]any, workpath string) string {
+func (t ReadFileTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult {
 	filename, ok := args["filename"].(string)
 	if !ok || filename == "" {
-		return "Error: missing filename parameter or filename parameter is not a string"
+		return ToolResult{Ok: false, Content: "Error: missing filename parameter or filename parameter is not a string", IsError: true}
 	}
-	targetPath, err := isSafePath(workpath, filename)
+	targetPath, err := isSafePath(ToolCtx.WorkPath, filename)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
 	content, err := os.ReadFile(targetPath)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
-	return string(content)
+	return ToolResult{Ok: true, Content: string(content), IsError: false, Attachments: nil}
 }

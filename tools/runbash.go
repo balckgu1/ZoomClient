@@ -39,18 +39,22 @@ func (t RunBashTool) Parameters() map[string]any {
 	return parameters
 }
 
-func (t RunBashTool) Call(args map[string]any, workpath string) string {
+func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult {
 	command, ok := args["command"].(string)
 	if command == "" || !ok {
-		return "Error: command parameter is missing or not a string"
+		return ToolResult{Ok: false, Content: "Error: command parameter is missing or not a string", IsError: true}
 	}
 	if isDangerousCommand(command) {
-		return "Error: dangerous command detected"
+		return ToolResult{Ok: false, Content: "Error: dangerous command detected", IsError: true}
 	}
 	// Execute the command
+	_, err := isSafePath(ToolCtx.WorkPath, command)
+	if err != nil {
+		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
+	}
 	output, err := exec.Command("bash", "-c", command).CombinedOutput()
 	if err != nil {
-		return "Error: " + err.Error()
+		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
-	return string(output)
+	return ToolResult{Ok: true, Content: string(output), IsError: false, Attachments: nil}
 }

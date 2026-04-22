@@ -40,11 +40,68 @@ func TestRunBashTool_Description(t *testing.T) {
 func TestRunBashTool_Parameters(t *testing.T) {
 	tool := RunBashTool{}
 	param := tool.Parameters()
+	// parameters := map[string]any{
+	// 	"type": "object",
+	// 	"properties": map[string]any{
+	// 		"command": map[string]any{
+	// 			"type":        "string",
+	// 			"description": "Command to execute",
+	// 		},
+	// 	},
+	// 	"required": []string{"command"},
+	// }
 	if param == nil {
 		t.Fatalf("tool parameters should not be nil")
 	}
 	if param["type"] != "object" {
 		t.Errorf("tool parameters type should be object")
 	}
+	if param["properties"] == nil {
+		t.Errorf("tool parameters properties should not be nil")
+	}
+	if param["required"] == nil {
+		t.Errorf("tool parameters required should not be nil")
+	}
+	if param["properties"].(map[string]any)["command"] == nil {
+		t.Errorf("tool parameters properties command should not be nil")
+	}
+	command_require := []string{"type", "description"}
+	command_param := param["properties"].(map[string]any)["command"]
+	for _, value := range command_require {
+		if _, ok := command_param.(map[string]any)[value]; !ok {
+			t.Errorf("tool parameters properties command %s should exist", value)
+		}
+	}
+	param_require := []string{"command"}
+	for _, value := range param_require {
+		exists := false
+		for _, param := range param["required"].([]string) {
+			if param == value {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			t.Errorf("tool parameters required %s should exist", value)
+		}
+	}
+}
 
+func TestRunBashTool_Call_Normal(t *testing.T) {
+	workDir := t.TempDir()
+	tool := RunBashTool{}
+	args := map[string]any{
+		"command": "ls",
+	}
+	if isDangerousCommand(args["command"].(string)) {
+		t.Errorf("tool should not be dangerous")
+	}
+	toolCtx := newTestContext(workDir)
+	result := tool.Call(args, toolCtx)
+	if !result.Ok {
+		t.Errorf("tool result should be ok")
+	}
+	if result.IsError {
+		t.Errorf("tool result should not have error")
+	}
 }

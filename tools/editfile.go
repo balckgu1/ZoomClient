@@ -33,31 +33,40 @@ func (t EditFileTool) Parameters() map[string]any {
 	return parameters
 }
 
-func (t EditFileTool) Call(args map[string]any, workpath string) string {
+func (t EditFileTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult {
 	filename, ok := args["filename"].(string)
 	if filename == "" || !ok {
-		return "Error: missing filename parameter or filename parameter is not a string"
+		return ToolResult{Ok: false, Content: "Error: missing filename parameter or filename parameter is not a string", IsError: true}
 	}
 	content, ok := args["content"].(string)
 	if content == "" || !ok {
-		return "Error: missing content parameter or content parameter is not a string"
+		return ToolResult{Ok: false, Content: "Error: missing content parameter or content parameter is not a string", IsError: true}
 	}
-	targetPath, err := isSafePath(workpath, filename)
+	targetPath, err := isSafePath(ToolCtx.WorkPath, filename)
 	if err != nil {
-		return "Error: " + err.Error()
+		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
 	file, err := os.OpenFile(targetPath, os.O_RDWR, 0644)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Sprintf("Error: file '%s' does not exist", filename)
+			return ToolResult{
+				Ok:      false,
+				Content: fmt.Sprintf("Error: file '%s' does not exist", filename),
+				IsError: true,
+			}
 		}
-		return fmt.Sprintf("Error: %v", err)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
 	defer file.Close()
 
 	nbytes, err := file.WriteString(content)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
-	return fmt.Sprintf("Success: wrote %d bytes to file %s", nbytes, targetPath)
+	return ToolResult{
+		Ok:          true,
+		Content:     fmt.Sprintf("Success: wrote %d bytes to file %s", nbytes, targetPath),
+		IsError:     false,
+		Attachments: nil,
+	}
 }

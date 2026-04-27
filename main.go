@@ -2,14 +2,17 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"zoomClient/clients"
 	"zoomClient/fsm"
+	"zoomClient/logger"
 	"zoomClient/tools"
+
+	"go.uber.org/zap"
 )
 
 // agentLoop Agent主循环
-func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, WorkPath string) {
+func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext) {
+	log := logger.Log
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
 		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
@@ -25,7 +28,7 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 			"temperature": 0.7,
 		})
 		if err != nil {
-			fmt.Printf("Error calling Ollama: %v\n", err)
+			log.Error("调用 Ollama 失败", zap.Error(err))
 			break
 		}
 
@@ -36,25 +39,42 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 			ToolCalls: response.Message.ToolCalls,
 		})
 
-		// fmt.Printf("Assistant: %s\n================================================\n", response.Message.Content)
-
 		// 检查是否有工具调用
 		if len(response.Message.ToolCalls) == 0 {
 			state.TransitionReason = nil
 			break
 		}
 
-		fmt.Printf("Model requested %d tool call(s)\n", len(response.Message.ToolCalls))
+		log.Info("模型请求工具调用", zap.Int("工具数量", len(response.Message.ToolCalls)))
 
-		// 执行工具调用，并将每个结果以 role:"tool" 消息回传
-		for _, tc := range response.Message.ToolCalls {
-			fmt.Printf("  -> Calling tool: %s, args: %v\n", tc.Function.Name, tc.Function.Arguments)
-			output := registry.RunTool(tc.Function.Name, tc.Function.Arguments, WorkPath)
-			fmt.Printf("  <- Tool result: %s\n", output)
+		// 第一步：按并发安全性将工具调用分批，并打印分批信息（便于观察调度策略）
+		toolCalls := response.Message.ToolCalls
+		batches := tools.PartitionToolCalls(toolCalls)
+		log.Info("工具调用分批情况", zap.Int("批次数量", len(batches)))
+		for batchIndex, batch := range batches {
+			batchToolNames := make([]string, 0, len(batch.Tools))
+			for _, tracked := range batch.Tools {
+				batchToolNames = append(batchToolNames, tracked.Name)
+			}
+			log.Info("批次详情",
+				zap.Int("批次序号", batchIndex),
+				zap.Bool("可并发执行", batch.IsConcurrencySafe),
+				zap.Strings("工具列表", batchToolNames),
+			)
+		}
 
+		// 第二步：执行所有批次
+		results := tools.ExecuteBatches(batches, registry, toolCtx)
+
+		// 第三步：按原始顺序将结果写回消息历史，而非按完成顺序
+		for resultIndex, result := range results {
+			log.Info("工具执行完成",
+				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
+				zap.String("执行结果", result.Content),
+			)
 			state.Messages = append(state.Messages, fsm.Message{
 				Role:    "tool",
-				Content: output,
+				Content: result.Content,
 			})
 		}
 
@@ -64,19 +84,26 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 
 		// 限制最大轮次，避免无限循环
 		if state.TurnCount >= 10 {
-			fmt.Println("Max turns reached, stopping...")
+			log.Warn("已达最大轮次限制，停止循环", zap.Int("max_turns", 10))
 			break
 		}
 	}
 }
 
 func main() {
+	// 初始化全局日志记录器
+	logger.Init()
+	defer logger.Sync()
+	log := logger.Log
+
 	// 创建Ollama客户端
 	client := clients.NewOllamaClient("http://127.0.0.1:11434")
 	modelname := "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
-	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'，并运行它"
+	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'。并读取该文件内容。之后修改hello.py，修改为'print(\"Hello, China!\")'"
 	systemPrompt := "You are a helpful AI assistant. You can use tools when needed."
-	WorkPath := "./"
+	toolCtx := &tools.ToolContext{
+		WorkPath: "./",
+	}
 
 	// 创建工具注册表并注册工具
 	registry := tools.NewRegistry()
@@ -84,6 +111,7 @@ func main() {
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.RunBashTool{})
+	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAll()))
 
 	// 初始化状态
 	state := &fsm.State{
@@ -94,11 +122,11 @@ func main() {
 	}
 
 	// 运行Agent循环
-	fmt.Println("Starting agent loop...")
-	agentLoop(client, state, modelname, systemPrompt, registry, WorkPath)
+	log.Info("Agent 循环启动")
+	agentLoop(client, state, modelname, systemPrompt, registry, toolCtx)
 
-	fmt.Printf("\nFinal state after %d turns:\n", state.TurnCount)
-	fmt.Printf("%+v\n--------------------\n", state.Messages)
+	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
+	log.Debug("完整消息历史", zap.Any("messages", state.Messages))
 	for _, msg := range state.Messages {
 		role := msg.Role
 		content := ""
@@ -113,6 +141,10 @@ func main() {
 			contentBytes, _ := json.Marshal(v)
 			content = string(contentBytes)
 		}
-		fmt.Printf("%s: %s, Tool: %+v", role, content, toolsname)
+		log.Info("消息记录",
+			zap.String("role", role),
+			zap.String("content", content),
+			zap.Strings("tools", toolsname),
+		)
 	}
 }

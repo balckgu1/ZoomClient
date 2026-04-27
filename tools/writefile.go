@@ -60,24 +60,29 @@ func (t WriteFileTool) Parameters() map[string]any {
 	return parameter
 }
 
-func (t WriteFileTool) Call(args map[string]any, workpath string) string {
+func (t WriteFileTool) Call(args map[string]any, toolCtx *ToolContext) ToolResult {
 	filename, ok := args["filename"].(string)
 	if !ok || filename == "" {
-		return "Error: missing filename parameter or filename parameter is not a string"
+		return ToolResult{
+			Ok:          false,
+			Content:     "Error: missing filename parameter or filename parameter is not a string",
+			IsError:     true,
+			Attachments: nil,
+		}
 	}
 	content, ok := args["content"].(string)
-	if !ok || content == "" {
-		return "Error: missing content parameter or content parameter is not a string"
+	if !ok {
+		return ToolResult{Ok: false, Content: "Error: missing content parameter", IsError: true}
 	}
 
-	targetPath, err := isSafePath(workpath, filename)
+	targetPath, err := isSafePath(toolCtx.WorkPath, filename)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
 
 	err = os.WriteFile(targetPath, []byte(content), 0644)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err)
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
-	return fmt.Sprintf("Success to write file: %s，content length: %d bytes", targetPath, len(content))
+	return ToolResult{Ok: true, Content: fmt.Sprintf("Success to write file: %s, content length: %d bytes", targetPath, len(content))}
 }

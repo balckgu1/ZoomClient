@@ -1,6 +1,8 @@
 
-./.qoder
+.qoder/
 
-./.idea
+.idea/
 
-./bak
+bak/
+
+doc/

@@ -45,20 +45,36 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 			break
 		}
 
-		log.Info("模型请求工具调用", zap.Int("count", len(response.Message.ToolCalls)))
+		log.Info("模型请求工具调用", zap.Int("工具数量", len(response.Message.ToolCalls)))
 
-		// 执行工具调用，并将每个结果以 role:"tool" 消息回传
-		for _, tc := range response.Message.ToolCalls {
-			log.Info("调用工具",
-				zap.String("tool", tc.Function.Name),
-				zap.Any("args", tc.Function.Arguments),
+		// 第一步：按并发安全性将工具调用分批，并打印分批信息（便于观察调度策略）
+		toolCalls := response.Message.ToolCalls
+		batches := tools.PartitionToolCalls(toolCalls)
+		log.Info("工具调用分批情况", zap.Int("批次数量", len(batches)))
+		for batchIndex, batch := range batches {
+			batchToolNames := make([]string, 0, len(batch.Tools))
+			for _, tracked := range batch.Tools {
+				batchToolNames = append(batchToolNames, tracked.Name)
+			}
+			log.Info("批次详情",
+				zap.Int("批次序号", batchIndex),
+				zap.Bool("可并发执行", batch.IsConcurrencySafe),
+				zap.Strings("工具列表", batchToolNames),
 			)
-			output := registry.RunTool(tc.Function.Name, tc.Function.Arguments, toolCtx)
-			log.Info("工具返回结果", zap.String("output", output.Content))
+		}
 
+		// 第二步：执行所有批次
+		results := tools.ExecuteBatches(batches, registry, toolCtx)
+
+		// 第三步：按原始顺序将结果写回消息历史，而非按完成顺序
+		for resultIndex, result := range results {
+			log.Info("工具执行完成",
+				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
+				zap.String("执行结果", result.Content),
+			)
 			state.Messages = append(state.Messages, fsm.Message{
 				Role:    "tool",
-				Content: output.Content,
+				Content: result.Content,
 			})
 		}
 
@@ -83,7 +99,7 @@ func main() {
 	// 创建Ollama客户端
 	client := clients.NewOllamaClient("http://127.0.0.1:11434")
 	modelname := "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
-	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'，并运行它"
+	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'。并读取该文件内容。之后修改hello.py，修改为'print(\"Hello, China!\")'"
 	systemPrompt := "You are a helpful AI assistant. You can use tools when needed."
 	toolCtx := &tools.ToolContext{
 		WorkPath: "./",

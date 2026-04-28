@@ -1,3 +1,4 @@
+.vscode/
 
 .qoder/
 
@@ -6,3 +7,5 @@
 bak/
 
 doc/
+
+*.exe

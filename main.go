@@ -11,7 +11,8 @@ import (
 )
 
 // agentLoop Agent主循环
-func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext) {
+// todoManager 用于维护当前会话的计划状态，实现计划外显与提醒机制
+func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager) {
 	log := logger.Log
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
@@ -63,10 +64,19 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 			)
 		}
 
-		// 第二步：执行所有批次
+		// 第二步：检查本轮是否调用了 todo 工具
+		usedTodo := false
+		for _, tc := range toolCalls {
+			if tc.Function.Name == "todo" {
+				usedTodo = true
+				break
+			}
+		}
+
+		// 第三步：执行所有批次
 		results := tools.ExecuteBatches(batches, registry, toolCtx)
 
-		// 第三步：按原始顺序将结果写回消息历史，而非按完成顺序
+		// 第四步：按原始顺序将结果写回消息历史，而非按完成顺序
 		for resultIndex, result := range results {
 			log.Info("工具执行完成",
 				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
@@ -76,6 +86,22 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 				Role:    "tool",
 				Content: result.Content,
 			})
+		}
+
+		// 第五步：维护会话计划状态
+		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时将提醒注入到消息历史，
+		// 使模型在下一轮对话开始时看到提醒并刷新计划
+		if !usedTodo {
+			todoManager.IncrementRoundsSinceUpdate()
+			if reminder := todoManager.Reminder(); reminder != "" {
+				log.Info("计划长时间未更新，注入提醒",
+					zap.Int("连续未更新轮次", todoManager.PlanningState.RoundsSinceUpdate),
+				)
+				state.Messages = append(state.Messages, fsm.Message{
+					Role:    "user",
+					Content: reminder,
+				})
+			}
 		}
 
 		state.TurnCount++
@@ -100,18 +126,23 @@ func main() {
 	client := clients.NewOllamaClient("http://127.0.0.1:11434")
 	modelname := "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
 	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'。并读取该文件内容。之后修改hello.py，修改为'print(\"Hello, China!\")'"
-	systemPrompt := "You are a helpful AI assistant. You can use tools when needed."
+	// 系统提示中告知模型使用 todo 工具规划多步骤任务，并保持计划持续更新
+	systemPrompt := "You are a helpful AI assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
 	toolCtx := &tools.ToolContext{
 		WorkPath: "./",
 	}
 
-	// 创建工具注册表并注册工具
+	// 创建会话计划管理器
+	todoManager := tools.NewTodoManager()
+
+	// 创建工具注册表并注册所有工具（含 todo 计划管理工具）
 	registry := tools.NewRegistry()
 	registry.Register(tools.WriteFileTool{})
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.RunBashTool{})
-	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAll()))
+	registry.Register(todoManager)
+	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAllNames()))
 
 	// 初始化状态
 	state := &fsm.State{
@@ -123,7 +154,7 @@ func main() {
 
 	// 运行Agent循环
 	log.Info("Agent 循环启动")
-	agentLoop(client, state, modelname, systemPrompt, registry, toolCtx)
+	agentLoop(client, state, modelname, systemPrompt, registry, toolCtx, todoManager)
 
 	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
 	log.Debug("完整消息历史", zap.Any("messages", state.Messages))

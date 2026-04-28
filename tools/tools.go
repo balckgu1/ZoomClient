@@ -71,6 +71,15 @@ func (r *Registry) GetAll() []Tool {
 	return result
 }
 
+// GetAllNames 返回所有已注册的工具名
+func (r *Registry) GetAllNames() []string {
+	toolList := make([]string, 0, len(r.tools))
+	for _, t := range r.tools {
+		toolList = append(toolList, t.Name())
+	}
+	return toolList
+}
+
 // RunTool 按名称执行工具
 func (r *Registry) RunTool(toolName string, args map[string]interface{}, toolCtx *ToolContext) ToolResult {
 	t, ok := r.tools[toolName]

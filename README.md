@@ -5,6 +5,8 @@ my leaning notebook
     s01: The Agent Loop
     s02: Tool-Use
     s02a: Tool Control Plane
+    s02b: Tool Execution Runtime
+    s03: Todo Write
 
 ## TODO: 
-    s02b: Tool Execution Runtime
+    s04: Subagents

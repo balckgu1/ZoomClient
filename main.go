@@ -2,42 +2,50 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
+	"os"
+	"strings"
 	"zoomClient/clients"
 	"zoomClient/fsm"
 	"zoomClient/logger"
 	"zoomClient/tools"
+	"zoomClient/utils"
 
 	"go.uber.org/zap"
 )
 
 // agentLoop Agent主循环
+// client 为抽象的 ChatClient，可为 Ollama 、 DeepSeek 等不同后端实现
 // todoManager 用于维护当前会话的计划状态，实现计划外显与提醒机制
-func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager) {
+func agentLoop(client clients.ChatClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager) {
 	log := logger.Log
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
 		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
 	}
 
-	// 将工具列表转换为 Ollama API 格式
-	ollamaTools := clients.BuildOllamaTools(registry.GetAll())
+	// 取出已注册的工具列表（由具体客户端内部负责转换为各自的协议格式）
+	toolList := registry.GetAll()
 
 	// 无限循环，直到没有工具调用或达到最大轮次限制
 	for {
-		// 调用Ollama API
-		response, err := client.Chat(model, state.Messages, ollamaTools, map[string]interface{}{
+		// 调用上游 LLM API
+		response, err := client.Chat(model, state.Messages, toolList, map[string]interface{}{
 			"temperature": 0.7,
 		})
 		if err != nil {
-			log.Error("调用 Ollama 失败", zap.Error(err))
+			log.Error("调用 LLM 失败", zap.Error(err))
 			break
 		}
 
 		// 将助手的响应添加到消息历史
+		// 注意：DeepSeek 在 thinking 模式下返回的 reasoning_content 必须原样透传回 API，
+		// 否则下一轮请求会被服务端以 invalid_request_error 拒绝。
 		state.Messages = append(state.Messages, fsm.Message{
-			Role:      "assistant",
-			Content:   response.Message.Content,
-			ToolCalls: response.Message.ToolCalls,
+			Role:             "assistant",
+			Content:          response.Message.Content,
+			ToolCalls:        response.Message.ToolCalls,
+			ReasoningContent: response.Message.ReasoningContent,
 		})
 
 		// 检查是否有工具调用
@@ -82,9 +90,11 @@ func agentLoop(client *clients.OllamaClient, state *fsm.State, model string, sys
 				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
 				zap.String("执行结果", result.Content),
 			)
+			// ToolCallID 在 OpenAI 兼容协议（DeepSeek）中必须回填；Ollama 忽略该字段不影响。
 			state.Messages = append(state.Messages, fsm.Message{
-				Role:    "tool",
-				Content: result.Content,
+				Role:       "tool",
+				Content:    result.Content,
+				ToolCallID: toolCalls[resultIndex].ID,
 			})
 		}
 
@@ -122,9 +132,41 @@ func main() {
 	defer logger.Sync()
 	log := logger.Log
 
-	// 创建Ollama客户端
-	client := clients.NewOllamaClient("http://127.0.0.1:11434")
-	modelname := "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
+	// 读取配置文件
+	utils.InitConfig()
+	cfg := utils.GetConfig()
+	apiKey := cfg.ApiKey.Deepseek
+
+	// 解析命令行参数：-m 指定模型后端类型（默认 ollama）
+	var modelType string
+	flag.StringVar(&modelType, "m", "ollama", "模型后端类型: ollama 或 deepseek")
+	flag.Parse()
+
+	// 根据 -m 参数选择对应的 ChatClient 实现与模型名称
+	var (
+		client    clients.ChatClient
+		modelname string
+	)
+	switch strings.ToLower(modelType) {
+	case "deepseek":
+		if apiKey == "" {
+			// DeepSeek 客户端需要从环境变量读取 API Key，避免密钥硬编码
+			apiKey = os.Getenv("DEEPSEEK_API_KEY")
+		}
+		if apiKey == "" {
+			log.Fatal("使用 deepseek 后端时必须设置API密钥 DEEPSEEK_API_KEY")
+		}
+		client = clients.NewDeepSeekClient("https://api.deepseek.com", apiKey)
+		modelname = "deepseek-v4-flash"
+		log.Info("已选择 DeepSeek 后端", zap.String("model", modelname))
+	case "ollama", "":
+		client = clients.NewOllamaClient("http://127.0.0.1:11434")
+		modelname = "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
+		log.Info("已选择 Ollama 后端", zap.String("model", modelname))
+	default:
+		log.Fatal("不支持的模型后端类型", zap.String("-m", modelType))
+	}
+
 	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'。并读取该文件内容。之后修改hello.py，修改为'print(\"Hello, China!\")'"
 	// 系统提示中告知模型使用 todo 工具规划多步骤任务，并保持计划持续更新
 	systemPrompt := "You are a helpful AI assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
@@ -157,7 +199,7 @@ func main() {
 	agentLoop(client, state, modelname, systemPrompt, registry, toolCtx, todoManager)
 
 	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
-	log.Debug("完整消息历史", zap.Any("messages", state.Messages))
+	// log.Debug("完整消息历史", zap.Any("messages", state.Messages))
 	for _, msg := range state.Messages {
 		role := msg.Role
 		content := ""

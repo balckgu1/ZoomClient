@@ -6,6 +6,8 @@
 
 bak/
 
+*.yaml
+
 doc/
 
 *.exe

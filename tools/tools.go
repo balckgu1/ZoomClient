@@ -35,7 +35,10 @@ func (r ToolResult) String() string {
 }
 
 // ToolCall 表示模型返回的工具调用
+// ID 字段为 OpenAI 兼容协议（如 DeepSeek）所必需，用于关联 tool 角色消息；
+// 在 Ollama 协议中该字段可能为空，序列化时会被自动忽略。
 type ToolCall struct {
+	ID       string           `json:"id,omitempty"`
 	Function ToolCallFunction `json:"function"`
 }
 

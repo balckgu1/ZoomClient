@@ -29,7 +29,11 @@ type ChatResponse struct {
 }
 
 // Chat 发起聊天请求
-func (c *OllamaClient) Chat(model string, messages []fsm.Message, ollamaTools []OllamaTool, options map[string]interface{}) (*ChatResponse, error) {
+// 入参中的 toolList 为通用工具接口列表，本方法内部将其转换为 Ollama 所需的 OllamaTool 格式。
+func (c *OllamaClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
+	// 将通用工具列表转换为 Ollama API 格式
+	ollamaTools := BuildOllamaTools(toolList)
+
 	reqData := ChatRequest{
 		Model:    model,
 		Messages: messages,

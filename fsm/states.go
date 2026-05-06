@@ -11,7 +11,9 @@ type State struct {
 
 // Message 表示单条消息
 type Message struct {
-	Role      string           `json:"role"`
-	Content   interface{}      `json:"content"`              // 可以是字符串或工具结果数组
-	ToolCalls []tools.ToolCall `json:"tool_calls,omitempty"` // 模型返回的工具调用
+	Role             string           `json:"role"`
+	Content          interface{}      `json:"content"`                     // 可以是字符串或工具结果数组
+	ToolCalls        []tools.ToolCall `json:"tool_calls,omitempty"`        // 模型返回的工具调用
+	ToolCallID       string           `json:"tool_call_id,omitempty"`      // tool 角色消息所关联的工具调用 ID（OpenAI 兼容协议必需）
+	ReasoningContent string           `json:"reasoning_content,omitempty"` // DeepSeek 等模型在 thinking 模式下返回的推理内容，多轮对话需原样回传
 }

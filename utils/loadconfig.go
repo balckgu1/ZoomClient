@@ -7,16 +7,24 @@ import (
 	"github.com/spf13/viper"
 )
 
-// config struct
+// Config config struct
 type Config struct {
-	ApiKey ApiKeyConfig `mapstructure:"api_key"`
+	ApiKey   ApiKeyConfig   `mapstructure:"api_key"`
+	Subagent SubagentConfig `mapstructure:"subagent"`
 }
 
-// api_key config
+// ApiKeyConfig api_key config
 type ApiKeyConfig struct {
 	Deepseek string `mapstructure:"deepseek"`
 	Openai   string `mapstructure:"openai"`
 	Qwen     string `mapstructure:"qwen"`
+}
+
+// SubagentConfig subagent config
+type SubagentConfig struct {
+	DefaultMaxTurns         int    `mapstructure:"defaultMaxTurns"`
+	DefaultSystemPrompt     string `mapstructure:"defaultSystemPrompt"`
+	ForkSubtaskPromptPrefix string `mapstructure:"forkSubtaskPromptPrefix"`
 }
 
 // global config variable

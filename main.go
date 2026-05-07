@@ -8,6 +8,7 @@ import (
 	"zoomClient/clients"
 	"zoomClient/fsm"
 	"zoomClient/logger"
+	"zoomClient/subagent"
 	"zoomClient/tools"
 	"zoomClient/utils"
 
@@ -90,7 +91,7 @@ func agentLoop(client clients.ChatClient, state *fsm.State, model string, system
 				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
 				zap.String("执行结果", result.Content),
 			)
-			// ToolCallID 在 OpenAI 兼容协议（DeepSeek）中必须回填；Ollama 忽略该字段不影响。
+			// ToolCallID 在 OpenAI 协议中必须回填；Ollama 忽略该字段不影响。
 			state.Messages = append(state.Messages, fsm.Message{
 				Role:       "tool",
 				Content:    result.Content,
@@ -137,9 +138,9 @@ func main() {
 	cfg := utils.GetConfig()
 	apiKey := cfg.ApiKey.Deepseek
 
-	// 解析命令行参数：-m 指定模型后端类型（默认 ollama）
+	// 解析命令行参数：-m 指定模型后端类型（默认 deepseek）
 	var modelType string
-	flag.StringVar(&modelType, "m", "ollama", "模型后端类型: ollama 或 deepseek")
+	flag.StringVar(&modelType, "m", "deepseek", "模型后端类型: ollama 或 deepseek，默认deepseek")
 	flag.Parse()
 
 	// 根据 -m 参数选择对应的 ChatClient 实现与模型名称
@@ -167,32 +168,59 @@ func main() {
 		log.Fatal("不支持的模型后端类型", zap.String("-m", modelType))
 	}
 
-	userPrompt := "创建一个hello.py文件，内容为'print(\"Hello, World!\")'。并读取该文件内容。之后修改hello.py，修改为'print(\"Hello, China!\")'"
-	// 系统提示中告知模型使用 todo 工具规划多步骤任务，并保持计划持续更新
-	systemPrompt := "You are a helpful AI assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
+	var userPrompt string
+	userPrompt = "请帮我编写一个能实现基础数学计算的python脚本。之后使用subtask在独立的环境中运行测试，确保没有问题后再把代码给我。"
+	//userPrompt, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+
+	// 系统提示中告知模型使用todotool规划多步骤任务，并保持计划持续更新
+	systemPrompt := "You are a helpful assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
 	toolCtx := &tools.ToolContext{
 		WorkPath: "./",
 	}
 
-	// 创建会话计划管理器
-	todoManager := tools.NewTodoManager()
-
-	// 创建工具注册表并注册所有工具（含 todo 计划管理工具）
+	// 创建工具注册表并注册所有工具
 	registry := tools.NewRegistry()
 	registry.Register(tools.WriteFileTool{})
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.RunBashTool{})
-	registry.Register(todoManager)
-	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAllNames()))
 
-	// 初始化状态
+	// 创建会话计划管理器
+	todoManager := tools.NewTodoManager()
+	//将todoManager注册为工具
+	registry.Register(todoManager)
+
+	// 先初始化 state（空 messages），便于后续 parentMessagesProvider 闭包捕获 state 指针
+	// 注意：agentLoop 运行时会往 state.Messages 追加消息，provider 每次调用都能拿到最新快照
 	state := &fsm.State{
 		Messages: []fsm.Message{
 			{Role: "user", Content: userPrompt},
 		},
 		TurnCount: 0,
 	}
+
+	// 创建 subagent
+	subAgent := subagent.NewSubAgent(client, modelname, cfg.Subagent.DefaultSystemPrompt, cfg.Subagent.ForkSubtaskPromptPrefix,
+		subagent.BuildSubAgentRegistry(), toolCtx, cfg.Subagent.DefaultMaxTurns)
+
+	// 子智能体统一运行器
+	subAgentRunner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+		if parentMessages == nil {
+			return subAgent.Run(prompt)
+		}
+		return subAgent.RunWithFork(prompt, parentMessages)
+	}
+
+	// 父消息提供者：fork=true 时由 TaskTool 回调，取最新的 state.Messages 快照
+	// 闭包通过指针引用 state，保证每次调用都读取当时最新的 messages
+	parentMessagesProvider := func() []fsm.Message {
+		return state.Messages
+	}
+
+	// 注册 sub_task 工具
+	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))
+
+	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAllNames()))
 
 	// 运行Agent循环
 	log.Info("Agent 循环启动")

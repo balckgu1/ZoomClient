@@ -11,6 +11,8 @@ import (
 type Config struct {
 	ApiKey   ApiKeyConfig   `mapstructure:"api_key"`
 	Subagent SubagentConfig `mapstructure:"subagent"`
+	Skills   SkillsConfig   `mapstructure:"skills"`
+	App      AppConfig      `mapstructure:"app"`
 }
 
 // ApiKeyConfig api_key config
@@ -25,6 +27,14 @@ type SubagentConfig struct {
 	DefaultMaxTurns         int    `mapstructure:"defaultMaxTurns"`
 	DefaultSystemPrompt     string `mapstructure:"defaultSystemPrompt"`
 	ForkSubtaskPromptPrefix string `mapstructure:"forkSubtaskPromptPrefix"`
+}
+
+type SkillsConfig struct {
+	Dir string `mapstructure:"dir"`
+}
+
+type AppConfig struct {
+	MaxTurns int `mapstructure:"maxTurns"`
 }
 
 // global config variable

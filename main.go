@@ -3,11 +3,13 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"zoomClient/clients"
 	"zoomClient/fsm"
 	"zoomClient/logger"
+	"zoomClient/skills"
 	"zoomClient/subagent"
 	"zoomClient/tools"
 	"zoomClient/utils"
@@ -18,7 +20,7 @@ import (
 // agentLoop Agent主循环
 // client 为抽象的 ChatClient，可为 Ollama 、 DeepSeek 等不同后端实现
 // todoManager 用于维护当前会话的计划状态，实现计划外显与提醒机制
-func agentLoop(client clients.ChatClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager) {
+func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager) {
 	log := logger.Log
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
@@ -120,8 +122,8 @@ func agentLoop(client clients.ChatClient, state *fsm.State, model string, system
 		state.TransitionReason = &reason
 
 		// 限制最大轮次，避免无限循环
-		if state.TurnCount >= 10 {
-			log.Warn("已达最大轮次限制，停止循环", zap.Int("max_turns", 10))
+		if state.TurnCount >= cfg.App.MaxTurns {
+			log.Warn("已达最大轮次限制，停止循环", zap.Int("max_turns", cfg.App.MaxTurns))
 			break
 		}
 	}
@@ -140,7 +142,7 @@ func main() {
 
 	// 解析命令行参数：-m 指定模型后端类型（默认 deepseek）
 	var modelType string
-	flag.StringVar(&modelType, "m", "deepseek", "模型后端类型: ollama 或 deepseek，默认deepseek")
+	flag.StringVar(&modelType, "m", "deepseek", "模型后端类型: ollama 或 deepseek, 默认deepseek")
 	flag.Parse()
 
 	// 根据 -m 参数选择对应的 ChatClient 实现与模型名称
@@ -168,14 +170,30 @@ func main() {
 		log.Fatal("不支持的模型后端类型", zap.String("-m", modelType))
 	}
 
+	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
 	var userPrompt string
-	userPrompt = "请帮我编写一个能实现基础数学计算的python脚本。之后使用subtask在独立的环境中运行测试，确保没有问题后再把代码给我。"
-	//userPrompt, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	fmt.Println("> 请输入您的问题")
+	userPrompt = "使用skill-function-test技能, 对skill功能进行测试"
+	// userPrompt, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 
 	// 系统提示中告知模型使用todotool规划多步骤任务，并保持计划持续更新
 	systemPrompt := "You are a helpful assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
 	toolCtx := &tools.ToolContext{
 		WorkPath: "./",
+	}
+
+	skillregistry, err := skills.NewRegistry(cfg.Skills.Dir)
+	if err != nil {
+		log.Warn("Load skills failed, continue with empty registry", zap.Error(err))
+		skillregistry, _ = skills.NewRegistry("")
+	}
+
+	systemPromptSuffix := skillregistry.DescribeAvailable()
+	if systemPromptSuffix != "" {
+		systemPrompt += "\n\nSkills available (call the load_skill tool to load the full body on demand):\n" + systemPromptSuffix
+		log.Info("Added skills to system prompt", zap.Int("count", skillregistry.Count()), zap.Strings("names", skillregistry.Names()))
+	} else {
+		log.Info("No skills available, skip adding skills to system prompt")
 	}
 
 	// 创建工具注册表并注册所有工具
@@ -185,12 +203,15 @@ func main() {
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.RunBashTool{})
 
+	// 将load_skills tool 注册到工具注册表
+	registry.Register(skills.NewLoadSkillTool(skillregistry))
+
 	// 创建会话计划管理器
 	todoManager := tools.NewTodoManager()
 	//将todoManager注册为工具
 	registry.Register(todoManager)
 
-	// 先初始化 state（空 messages），便于后续 parentMessagesProvider 闭包捕获 state 指针
+	// 先初始化空 messages，便于后续 parentMessagesProvider 闭包捕获 state 指针
 	// 注意：agentLoop 运行时会往 state.Messages 追加消息，provider 每次调用都能拿到最新快照
 	state := &fsm.State{
 		Messages: []fsm.Message{
@@ -224,7 +245,7 @@ func main() {
 
 	// 运行Agent循环
 	log.Info("Agent 循环启动")
-	agentLoop(client, state, modelname, systemPrompt, registry, toolCtx, todoManager)
+	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager)
 
 	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
 	// log.Debug("完整消息历史", zap.Any("messages", state.Messages))

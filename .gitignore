@@ -13,3 +13,5 @@ bak/
 doc/
 
 *.exe
+
+.task_outputs/

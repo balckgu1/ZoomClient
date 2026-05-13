@@ -9,10 +9,11 @@ import (
 
 // Config config struct
 type Config struct {
-	ApiKey   ApiKeyConfig   `mapstructure:"api_key"`
-	Subagent SubagentConfig `mapstructure:"subagent"`
-	Skills   SkillsConfig   `mapstructure:"skills"`
-	App      AppConfig      `mapstructure:"app"`
+	ApiKey    ApiKeyConfig    `mapstructure:"api_key"`
+	Subagent  SubagentConfig  `mapstructure:"subagent"`
+	Skills    SkillsConfig    `mapstructure:"skills"`
+	AgentLoop AgentLoopConfig `mapstructure:"agentloop"`
+	Compact   CompactConfig   `mapstructure:"compact"`
 }
 
 // ApiKeyConfig api_key config
@@ -33,8 +34,16 @@ type SkillsConfig struct {
 	Dir string `mapstructure:"dir"`
 }
 
-type AppConfig struct {
+type AgentLoopConfig struct {
 	MaxTurns int `mapstructure:"maxTurns"`
+}
+
+type CompactConfig struct {
+	PersistThreshold      int    `mapstructure:"persistThreshold"`
+	PreviewBytes          int    `mapstructure:"previewBytes"`
+	KeepRecentToolResults int    `mapstructure:"keepRecentToolResults"`
+	ContextLimit          int    `mapstructure:"contextLimit"`
+	PersistDir            string `mapstructure:"persistDir"`
 }
 
 // global config variable

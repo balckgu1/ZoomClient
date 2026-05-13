@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"zoomClient/clients"
+	"zoomClient/compact"
 	"zoomClient/fsm"
 	"zoomClient/logger"
 	"zoomClient/skills"
@@ -20,7 +21,10 @@ import (
 // agentLoop Agent主循环
 // client 为抽象的 ChatClient，可为 Ollama 、 DeepSeek 等不同后端实现
 // todoManager 用于维护当前会话的计划状态，实现计划外显与提醒机制
-func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager) {
+// compactManager 负责三层上下文压缩（落盘 / 微压缩 / 整体摘要）
+func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State,
+	model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext,
+	todoManager *tools.TodoManager, compactManager *compact.CompactManager) {
 	log := logger.Log
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
@@ -32,6 +36,9 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 
 	// 无限循环，直到没有工具调用或达到最大轮次限制
 	for {
+		// 上下文压缩 · 第 2 层（微压缩）: 每次调模型前，把更早的 tool result替换为占位
+		state.Messages = compactManager.MicroCompact(state.Messages)
+
 		// 调用上游 LLM API
 		response, err := client.Chat(model, state.Messages, toolList, map[string]interface{}{
 			"temperature": 0.7,
@@ -93,10 +100,20 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
 				zap.String("执行结果", result.Content),
 			)
-			// ToolCallID 在 OpenAI 协议中必须回填；Ollama 忽略该字段不影响。
+
+			// 上下文压缩 第 1 层（大输出落盘），单条工具结果太大时，把全文写到磁盘，消息里只保留预览
+			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
+			if persistedContent != result.Content {
+				log.Info("tool result content too large, persisted to disk and replaced with preview",
+					zap.String("工具名称", toolCalls[resultIndex].Function.Name),
+					zap.Int("原始字节数", len(result.Content)),
+				)
+			}
+
+			// ToolCallID 在 OpenAI 协议中必须回填；Ollama 忽略该字段不影响
 			state.Messages = append(state.Messages, fsm.Message{
 				Role:       "tool",
-				Content:    result.Content,
+				Content:    persistedContent,
 				ToolCallID: toolCalls[resultIndex].ID,
 			})
 		}
@@ -121,9 +138,31 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		reason := "tool_result"
 		state.TransitionReason = &reason
 
+		// === 上下文压缩 · 第 3 层（整体摘要）===
+		// 在本轮所有 tool 结果都已 append 之后再判断是否触发完整压缩。
+		// 触发条件：
+		//   1) 模型/用户调用了 compact 工具，标记了 pendingManualCompact；
+		//   2) 估算的整体上下文体积超过 Config.ContextLimit
+		// 压缩成功后，state.Messages 会被替换为 system + 一条连续性摘要
+		if compactManager.ShouldAutoCompact(state.Messages) {
+			beforeSize := compactManager.EstimateSize(state.Messages)
+			newMessages, cerr := compactManager.CompactHistory(state.Messages)
+			if cerr != nil {
+				log.Warn("完整压缩失败，保留原始消息历史继续", zap.Error(cerr))
+			} else {
+				afterSize := compactManager.EstimateSize(newMessages)
+				log.Info("已完成整体压缩",
+					zap.Int("压缩前字节数", beforeSize),
+					zap.Int("压缩后字节数", afterSize),
+					zap.Int("消息条数", len(newMessages)),
+				)
+				state.Messages = newMessages
+			}
+		}
+
 		// 限制最大轮次，避免无限循环
-		if state.TurnCount >= cfg.App.MaxTurns {
-			log.Warn("已达最大轮次限制，停止循环", zap.Int("max_turns", cfg.App.MaxTurns))
+		if state.TurnCount >= cfg.AgentLoop.MaxTurns {
+			log.Warn("已达最大轮次限制，停止循环", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
 			break
 		}
 	}
@@ -211,8 +250,13 @@ func main() {
 	//将todoManager注册为工具
 	registry.Register(todoManager)
 
+	// 创建上下文压缩管理器
+	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)
+	// 注册 compact 工具，模型/用户可以主动请求一次完整压缩
+	registry.Register(compact.NewCompactTool(compactManager))
+
 	// 先初始化空 messages，便于后续 parentMessagesProvider 闭包捕获 state 指针
-	// 注意：agentLoop 运行时会往 state.Messages 追加消息，provider 每次调用都能拿到最新快照
+	// agentLoop 运行时会往 state.Messages 追加消息，provider 每次调用都能拿到最新快照
 	state := &fsm.State{
 		Messages: []fsm.Message{
 			{Role: "user", Content: userPrompt},
@@ -245,7 +289,7 @@ func main() {
 
 	// 运行Agent循环
 	log.Info("Agent 循环启动")
-	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager)
+	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager)
 
 	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
 	// log.Debug("完整消息历史", zap.Any("messages", state.Messages))

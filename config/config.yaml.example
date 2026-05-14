@@ -11,5 +11,37 @@ subagent:
 skills:
   dir: "./.skills"
 
-app:
-  maxTurns: 20
+agentloop:
+  maxTurns: 25
+  todoRoundsThreshold: 9
+
+
+# 模式说明：
+#   default 未命中规则时问用户
+#   plan    只允许读，任何写/执行类工具都拒绝
+#   auto    只读工具自动放行，写/执行类工具问用户
+permission:
+  mode: "auto"
+  interactive: true   # 命中 ask 时是否从 stdin 询问；CI / 非交互场景请改为 false
+  denyRules:
+    - tool: "run_bash"
+      content: "sudo "
+    - tool: "run_bash"
+      content: "rm -rf /"
+    - tool: "run_bash"
+      content: "rm -rf /*"
+    - tool: "run_bash"
+      content: "mkfs"
+    - tool: "run_bash"
+      content: "shutdown"
+    - tool: "run_bash"
+      content: "reboot"
+    - tool: "run_bash"
+      content: "> /dev/sda"
+    - tool: "run_bash"
+      content: ":(){:|:&};:"
+  allowRules:
+    - tool: "run_bash"
+      content: "git status"
+    - tool: "run_bash"
+      content: "git diff"

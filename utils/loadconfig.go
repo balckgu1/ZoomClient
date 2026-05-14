@@ -9,11 +9,12 @@ import (
 
 // Config config struct
 type Config struct {
-	ApiKey    ApiKeyConfig    `mapstructure:"api_key"`
-	Subagent  SubagentConfig  `mapstructure:"subagent"`
-	Skills    SkillsConfig    `mapstructure:"skills"`
-	AgentLoop AgentLoopConfig `mapstructure:"agentloop"`
-	Compact   CompactConfig   `mapstructure:"compact"`
+	ApiKey     ApiKeyConfig     `mapstructure:"api_key"`
+	Subagent   SubagentConfig   `mapstructure:"subagent"`
+	Skills     SkillsConfig     `mapstructure:"skills"`
+	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
+	Compact    CompactConfig    `mapstructure:"compact"`
+	Permission PermissionConfig `mapstructure:"permission"`
 }
 
 // ApiKeyConfig api_key config
@@ -35,7 +36,8 @@ type SkillsConfig struct {
 }
 
 type AgentLoopConfig struct {
-	MaxTurns int `mapstructure:"maxTurns"`
+	MaxTurns            int `mapstructure:"maxTurns"`
+	TodoRoundsThreshold int `mapstructure:"todoRoundsThreshold"`
 }
 
 type CompactConfig struct {
@@ -44,6 +46,26 @@ type CompactConfig struct {
 	KeepRecentToolResults int    `mapstructure:"keepRecentToolResults"`
 	ContextLimit          int    `mapstructure:"contextLimit"`
 	PersistDir            string `mapstructure:"persistDir"`
+}
+
+// PermissionConfig 权限系统配置
+type PermissionConfig struct {
+	Mode        string                 `mapstructure:"mode"`        // default | plan | auto，未配置或非法值时回退到 default
+	Interactive bool                   `mapstructure:"interactive"` // 命中 ask 时是否从 stdin 询问用户
+	DenyRules   []PermissionRuleConfig `mapstructure:"denyRules"`   // 命中即拒绝的命令
+	AllowRules  []PermissionRuleConfig `mapstructure:"allowRules"`  // 命中即放行的命令
+}
+
+// PermissionRuleConfig 单条权限规则的 yaml 表达。
+//   - Tool    ：针对哪个工具（"" 或 "*" 表示任意工具）
+//   - Behavior：allow / deny / ask
+//   - Path    ：可选，匹配 filename / path / file 参数（"re:" 前缀视为正则）
+//   - Content ：可选，匹配 command / content / prompt 参数（"re:" 前缀视为正则）
+type PermissionRuleConfig struct {
+	Tool     string `mapstructure:"tool"`
+	Behavior string `mapstructure:"behavior"`
+	Path     string `mapstructure:"path"`
+	Content  string `mapstructure:"content"`
 }
 
 // global config variable

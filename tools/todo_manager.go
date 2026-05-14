@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -176,8 +177,8 @@ func (tm *TodoManager) Update(items []PlanItem) (string, error) {
 }
 
 // Render 将当前计划渲染为可读文本
-// pending 显示为 [ ]，in_progress 显示为 [>]，completed 显示为 [√]
-// 当步骤处于 in_progress 且设置了 ActivateForm 时，附加进行时描述
+//   - pending 显示为 [ ]，in_progress 显示为 [>]，completed 显示为 [√]
+//   - 当步骤处于 in_progress 且设置了 ActivateForm 时，附加进行时描述
 func (tm *TodoManager) Render() string {
 	if len(tm.PlanningState.PlanItems) == 0 {
 		return "No plan items."
@@ -213,18 +214,16 @@ func (tm *TodoManager) Render() string {
 	return strings.Join(lines, "\n")
 }
 
-// ===================== 提醒机制 =====================
-
 // IncrementRoundsSinceUpdate 增加未更新轮次计数，由主循环在每轮结束（未调用 todo）后调用
 func (tm *TodoManager) IncrementRoundsSinceUpdate() {
 	tm.PlanningState.RoundsSinceUpdate++
 }
 
 // Reminder 返回提醒文本
-// 当连续 3 轮未更新计划时触发，返回提醒文本以注入到下一轮对话；否则返回空字符串
-func (tm *TodoManager) Reminder() string {
-	if tm.PlanningState.RoundsSinceUpdate >= 3 {
-		return "<reminder>Your plan has not been updated for 3 rounds. Refresh your current plan before continuing.</reminder>"
+//   - 当连续 TodoRoundsThreshold 轮未更新计划时触发，返回提醒文本以注入到下一轮对话；否则返回空字符串
+func (tm *TodoManager) Reminder(todoRoundsThreshold int) string {
+	if tm.PlanningState.RoundsSinceUpdate >= todoRoundsThreshold {
+		return "<reminder>Your plan has not been updated for " + strconv.Itoa(todoRoundsThreshold) + " rounds. Refresh your current plan before continuing.</reminder>"
 	}
 	return ""
 }

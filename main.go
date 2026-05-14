@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"zoomClient/compact"
 	"zoomClient/fsm"
 	"zoomClient/logger"
+	"zoomClient/permission"
 	"zoomClient/skills"
 	"zoomClient/subagent"
 	"zoomClient/tools"
@@ -123,7 +125,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State,
 		// 使模型在下一轮对话开始时看到提醒并刷新计划
 		if !usedTodo {
 			todoManager.IncrementRoundsSinceUpdate()
-			if reminder := todoManager.Reminder(); reminder != "" {
+			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
 				log.Info("计划长时间未更新，注入提醒",
 					zap.Int("连续未更新轮次", todoManager.PlanningState.RoundsSinceUpdate),
 				)
@@ -212,13 +214,14 @@ func main() {
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
 	var userPrompt string
 	fmt.Println("> 请输入您的问题")
-	userPrompt = "使用skill-function-test技能, 对skill功能进行测试"
-	// userPrompt, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	// userPrompt = "在./workdir目录下创建hello.py，内容为打印hello字符串。之后运行hello.py"
+	userPrompt, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	userPrompt = strings.TrimSpace(userPrompt)
 
 	// 系统提示中告知模型使用todotool规划多步骤任务，并保持计划持续更新
 	systemPrompt := "You are a helpful assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
 	toolCtx := &tools.ToolContext{
-		WorkPath: "./",
+		WorkPath: "./workdir",
 	}
 
 	skillregistry, err := skills.NewRegistry(cfg.Skills.Dir)
@@ -285,6 +288,26 @@ func main() {
 	// 注册 sub_task 工具
 	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))
 
+	// 装配 permission 系统
+	permitMgr := permission.NewManager(
+		permission.Mode(cfg.Permission.Mode),
+		buildPermissionRules(cfg.Permission.DenyRules),
+		buildPermissionRules(cfg.Permission.AllowRules),
+		buildAsker(cfg.Permission.Interactive),
+	)
+	// 注入 permission 阀门
+	registry.SetPermissionDecider(permitMgr.Decide)
+	// 子智能体使用独立的工具注册表，但应共享同一套权限策略
+	if subAgent.Registry != nil {
+		subAgent.Registry.SetPermissionDecider(permitMgr.Decide)
+	}
+	log.Info("权限系统已启用",
+		zap.String("模式", string(permitMgr.GetMode())),
+		zap.Int("deny规则数", len(cfg.Permission.DenyRules)),
+		zap.Int("allow规则数", len(cfg.Permission.AllowRules)),
+		zap.Bool("交互式询问", cfg.Permission.Interactive),
+	)
+
 	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAllNames()))
 
 	// 运行Agent循环
@@ -307,10 +330,34 @@ func main() {
 			contentBytes, _ := json.Marshal(v)
 			content = string(contentBytes)
 		}
-		log.Info("消息记录",
+		log.Debug("消息记录",
 			zap.String("role", role),
 			zap.String("content", content),
 			zap.Strings("tools", toolsname),
 		)
 	}
+}
+
+// buildPermissionRules 把配置中的 PermissionRuleConfig 列表转换为 permission.Rule。
+func buildPermissionRules(rawRules []utils.PermissionRuleConfig) []permission.Rule {
+	rules := make([]permission.Rule, 0, len(rawRules))
+	for _, raw := range rawRules {
+		rules = append(rules, permission.Rule{
+			Tool:     raw.Tool,
+			Behavior: permission.Behavior(raw.Behavior),
+			Path:     raw.Path,
+			Content:  raw.Content,
+		})
+	}
+	return rules
+}
+
+// buildAsker 根据配置选择命中 ask 时的交互方式。
+//   - interactive=true  从 stdin 询问用户
+//   - interactive=false 一律拒绝，适合 CI / 后台作业场景的安全默认
+func buildAsker(interactive bool) permission.Asker {
+	if interactive {
+		return permission.NewStdinAsker()
+	}
+	return permission.DenyAsker{}
 }

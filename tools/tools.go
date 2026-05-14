@@ -48,9 +48,15 @@ type ToolCallFunction struct {
 	Arguments map[string]interface{} `json:"arguments"`
 }
 
+// PermissionDecider 在工具真正执行前的权限闸门函数。
+//
+// 返回 allow=false 时，RunTool 直接以错误结果返回，不会调用工具本体。
+type PermissionDecider func(toolName string, args map[string]interface{}) (allow bool, reason string)
+
 // Registry 工具注册表，管理所有可用工具
 type Registry struct {
-	tools map[string]Tool
+	tools  map[string]Tool
+	permit PermissionDecider // 可选：执行前的权限闸门，为 nil 时不做权限检查
 }
 
 // NewRegistry 创建新的工具注册表
@@ -63,6 +69,11 @@ func NewRegistry() *Registry {
 // Register 注册一个工具
 func (r *Registry) Register(t Tool) {
 	r.tools[t.Name()] = t
+}
+
+// SetPermissionDecider 注入权限闸门，为 nil 时 RunTool 不做权限检查
+func (r *Registry) SetPermissionDecider(fn PermissionDecider) {
+	r.permit = fn
 }
 
 // GetAll 返回所有已注册的工具
@@ -83,11 +94,24 @@ func (r *Registry) GetAllNames() []string {
 	return toolList
 }
 
-// RunTool 按名称执行工具
+// RunTool 按名称执行工具。 若已通过 SetPermissionDecider 注入权限闸门，会先做一次权限判定；拒绝时直接返回，不调用工具
 func (r *Registry) RunTool(toolName string, args map[string]interface{}, toolCtx *ToolContext) ToolResult {
 	t, ok := r.tools[toolName]
 	if !ok {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Unknown tool: %s", toolName), IsError: true}
 	}
+
+	// permission check
+	if r.permit != nil {
+		allow, reason := r.permit(toolName, args)
+		if !allow {
+			return ToolResult{
+				Ok:      false,
+				Content: "Permission denied: " + reason,
+				IsError: true,
+			}
+		}
+	}
+
 	return t.Call(args, toolCtx)
 }

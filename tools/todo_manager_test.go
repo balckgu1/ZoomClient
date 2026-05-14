@@ -219,30 +219,30 @@ func TestRoundsSinceUpdate_Reminder(t *testing.T) {
 	tm := NewTodoManager()
 
 	// 初始状态不应提醒
-	if tm.Reminder() != "" {
+	if tm.Reminder(3) != "" {
 		t.Error("初始状态不应触发提醒")
 	}
 
 	// 经过 2 轮，仍不应提醒
 	tm.IncrementRoundsSinceUpdate()
 	tm.IncrementRoundsSinceUpdate()
-	if tm.Reminder() != "" {
+	if tm.Reminder(3) != "" {
 		t.Error("2 轮未更新不应触发提醒")
 	}
 
 	// 第 3 轮，应触发提醒
 	tm.IncrementRoundsSinceUpdate()
-	if tm.Reminder() == "" {
+	if tm.Reminder(3) == "" {
 		t.Error("3 轮未更新应触发提醒")
 	}
-	reminder := tm.Reminder()
+	reminder := tm.Reminder(3)
 	if !strings.Contains(reminder, "Refresh your current plan before continuing") || !strings.Contains(reminder, "<reminder>") {
 		t.Errorf("提醒文本格式不正确：%s", reminder)
 	}
 
 	// 更新计划后，计数归零
 	_, _ = tm.Update([]PlanItem{{Content: "新任务", Status: "in_progress"}})
-	if tm.Reminder() != "" {
+	if tm.Reminder(3) != "" {
 		t.Error("更新计划后不应再触发提醒")
 	}
 	if tm.PlanningState.RoundsSinceUpdate != 0 {

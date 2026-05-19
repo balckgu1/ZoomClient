@@ -10,6 +10,7 @@ import (
 	"zoomClient/clients"
 	"zoomClient/compact"
 	"zoomClient/fsm"
+	"zoomClient/hook"
 	"zoomClient/logger"
 	"zoomClient/permission"
 	"zoomClient/skills"
@@ -21,17 +22,19 @@ import (
 )
 
 // agentLoop Agent主循环
-// client 为抽象的 ChatClient，可为 Ollama 、 DeepSeek 等不同后端实现
-// todoManager 用于维护当前会话的计划状态，实现计划外显与提醒机制
-// compactManager 负责三层上下文压缩（落盘 / 微压缩 / 整体摘要）
-func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State,
-	model string, systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext,
-	todoManager *tools.TodoManager, compactManager *compact.CompactManager) {
+func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
+	systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
+	compactManager *compact.CompactManager, hookRunner *hook.Runner) {
 	log := logger.Log
+
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
 		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
 	}
+
+	// === Hook 时机 1：SessionStart ===
+	// 在主循环正式开始前触发；handler 可借此打印欢迎信息、初始化外部资源等。
+	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": model, "system_prompt": systemPrompt})
 
 	// 取出已注册的工具列表（由具体客户端内部负责转换为各自的协议格式）
 	toolList := registry.GetAll()
@@ -51,7 +54,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State,
 		}
 
 		// 将助手的响应添加到消息历史
-		// 注意：DeepSeek 在 thinking 模式下返回的 reasoning_content 必须原样透传回 API，
+		// DeepSeek 在 thinking 模式下返回的 reasoning_content 必须原样透传回 API，
 		// 否则下一轮请求会被服务端以 invalid_request_error 拒绝。
 		state.Messages = append(state.Messages, fsm.Message{
 			Role:             "assistant",
@@ -93,8 +96,34 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State,
 			}
 		}
 
-		// 第三步：执行所有批次
-		results := tools.ExecuteBatches(batches, registry, toolCtx)
+		// 在工具执行前，对每个工具触发 EventPreToolUse
+		preDecisions := make([]hook.HookResult, len(toolCalls))
+		for i, tc := range toolCalls {
+			preDecisions[i] = hookRunner.Run(hook.EventPreToolUse, map[string]any{
+				"tool_name":       tc.Function.Name,
+				"input":           tc.Function.Arguments,
+				"call_index":      i,
+				"max_tools":       cfg.AgentLoop.MaxTools,
+				"tool_ctx":        toolCtx,
+				"sensitive_files": cfg.AgentLoop.SensitiveFiles,
+			})
+			if preDecisions[i].ExitCode == hook.ExitInject && preDecisions[i].Message != "" {
+				state.Messages = append(state.Messages, fsm.Message{
+					Role:    "user",
+					Content: preDecisions[i].Message,
+				})
+			}
+		}
+
+		// 第三步：执行所有批次（被 hook 阻止的工具会跳过执行，由 mergeToolResults 填充阻止结果）
+		allowedCalls, allowedIndex := filterAllowedCalls(toolCalls, preDecisions)
+		allowedBatches := tools.PartitionToolCalls(allowedCalls)
+		allowedResults := tools.ExecuteBatches(allowedBatches, registry, toolCtx)
+		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
+
+		// === Hook 时机 3：PostToolUse ===
+		// 工具执行后
+		runPostToolUseHooks(hookRunner, toolCalls, results, state)
 
 		// 第四步：按原始顺序将结果写回消息历史，而非按完成顺序
 		for resultIndex, result := range results {
@@ -310,9 +339,17 @@ func main() {
 
 	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAllNames()))
 
+	// 装配 hook 系统：Runner 集中调度所有事件，handler 按事件名注册到 Runner 上
+	hookRunner := buildHookRunner()
+	log.Info("hook 系统已启用",
+		zap.Int("SessionStart handler数", hookRunner.HandlerCount(hook.EventSessionStart)),
+		zap.Int("PreToolUse handler数", hookRunner.HandlerCount(hook.EventPreToolUse)),
+		zap.Int("PostToolUse handler数", hookRunner.HandlerCount(hook.EventPostToolUse)),
+	)
+
 	// 运行Agent循环
 	log.Info("Agent 循环启动")
-	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager)
+	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager, hookRunner)
 
 	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
 	// log.Debug("完整消息历史", zap.Any("messages", state.Messages))
@@ -360,4 +397,73 @@ func buildAsker(interactive bool) permission.Asker {
 		return permission.NewStdinAsker()
 	}
 	return permission.DenyAsker{}
+}
+
+// ===================== Hook 装配与主循环辅助函数 =====================
+
+// buildHookRunner 构造一个 hook runner
+func buildHookRunner() *hook.Runner {
+	runner := hook.NewRunner() // Build a new hook runner instance
+	runner.Register(hook.EventSessionStart, hook.OnSessionStart)
+
+	runner.Register(hook.EventPreToolUse, hook.PreToolBlockDangerous)
+	runner.Register(hook.EventPreToolUse, hook.PreToolRateLimit)
+	runner.Register(hook.EventPreToolUse, hook.PreToolSensitiveFileGuard)
+
+	runner.Register(hook.EventPostToolUse, hook.PostToolAuditLog)
+	runner.Register(hook.EventPostToolUse, hook.PostToolErrorRecovery)
+	return runner
+}
+
+// filterAllowedCalls 筛选出未被 hook 阻止的工具调用，并保留它们到原始下标的映射。
+func filterAllowedCalls(toolCalls []tools.ToolCall, decisions []hook.HookResult) ([]tools.ToolCall, []int) {
+	allowedCalls := make([]tools.ToolCall, 0, len(toolCalls))
+	allowedIndex := make([]int, 0, len(toolCalls))
+	for i, tc := range toolCalls {
+		if decisions[i].ExitCode == hook.ExitBlock {
+			continue
+		}
+		allowedCalls = append(allowedCalls, tc)
+		allowedIndex = append(allowedIndex, i)
+	}
+	return allowedCalls, allowedIndex
+}
+
+// mergeToolResults 把执行结果按原始顺序合并回去；被 hook 阻止的位置用阻止结果填充。
+func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
+	allowedIndex []int, allowedResults []tools.ToolResult) []tools.ToolResult {
+	results := make([]tools.ToolResult, len(toolCalls))
+
+	for i, dec := range decisions {
+		if dec.ExitCode == hook.ExitBlock {
+			results[i] = tools.ToolResult{
+				Ok:      false,
+				IsError: true,
+				Content: "[hook blocked] " + dec.Message,
+			}
+		}
+	}
+	for j, r := range allowedResults {
+		results[allowedIndex[j]] = r
+	}
+	return results
+}
+
+// runPostToolUseHooks 对每一个工具结果触发 PostToolUse 事件。
+// exit=2 时把 Message 作为 user 消息注入历史。
+func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, state *fsm.State) {
+	for i, tc := range toolCalls {
+		decision := runner.Run(hook.EventPostToolUse, map[string]any{
+			"tool_name": tc.Function.Name,
+			"input":     tc.Function.Arguments,
+			"output":    results[i].Content,
+		})
+
+		if decision.ExitCode == hook.ExitInject && decision.Message != "" {
+			state.Messages = append(state.Messages, fsm.Message{
+				Role:    "user",
+				Content: decision.Message,
+			})
+		}
+	}
 }

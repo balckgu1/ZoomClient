@@ -68,8 +68,6 @@ func IsConcurrencySafe(toolName string) bool {
 // ===================== 第一步：分批 =====================
 
 // PartitionToolCalls 将一组工具调用按并发安全性划分为多个批次。
-// 连续的同类型（同为安全或同为不安全）工具会被分到同一批次。
-// 这样可以最大化并发执行的机会，同时保证写操作的串行安全性。
 func PartitionToolCalls(toolCalls []ToolCall) []*ToolExecutionBatch {
 	if len(toolCalls) == 0 {
 		return nil

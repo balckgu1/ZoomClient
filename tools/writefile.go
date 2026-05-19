@@ -24,7 +24,7 @@ func isSafePath(workpath string, filename string) (string, error) {
 		targetPath = filepath.Clean(filepath.Join(cleanWorkpath, filename))
 	}
 
-	// 检查目标路径是否在工作区内（加分隔符避免前缀误判，如 /work2 匹配 /work）
+	// 检查目标路径是否在工作区内
 	if targetPath != cleanWorkpath && !strings.HasPrefix(targetPath, cleanWorkpath+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escape: %q is not within the work directory %q", targetPath, cleanWorkpath)
 	}

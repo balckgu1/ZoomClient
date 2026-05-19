@@ -36,8 +36,10 @@ type SkillsConfig struct {
 }
 
 type AgentLoopConfig struct {
-	MaxTurns            int `mapstructure:"maxTurns"`
-	TodoRoundsThreshold int `mapstructure:"todoRoundsThreshold"`
+	MaxTurns            int      `mapstructure:"maxTurns"`
+	TodoRoundsThreshold int      `mapstructure:"todoRoundsThreshold"`
+	MaxTools            int      `mapstructure:"maxTools"`
+	SensitiveFiles      []string `mapstructure:"sensitiveFiles"`
 }
 
 type CompactConfig struct {

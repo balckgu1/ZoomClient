@@ -39,7 +39,7 @@ func (t WriteFileTool) Name() string {
 }
 
 func (t WriteFileTool) Description() string {
-	return "Create a new file and write content to it. "
+	return "Create a new file and write content to it. Parent directories are created automatically if they do not exist."
 }
 
 func (t WriteFileTool) Parameters() map[string]any {
@@ -78,6 +78,11 @@ func (t WriteFileTool) Call(args map[string]any, toolCtx *ToolContext) ToolResul
 	targetPath, err := isSafePath(toolCtx.WorkPath, filename)
 	if err != nil {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
+	}
+
+	err = os.MkdirAll(filepath.Dir(targetPath), 0755)
+	if err != nil {
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: failed to create directory: %v", err), IsError: true}
 	}
 
 	err = os.WriteFile(targetPath, []byte(content), 0644)

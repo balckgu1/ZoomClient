@@ -119,10 +119,6 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		allowedResults := tools.ExecuteBatches(allowedBatches, registry, toolCtx)
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
-		// === Hook 时机 3：PostToolUse ===
-		// 工具执行后
-		runPostToolUseHooks(hookRunner, toolCalls, results, state)
-
 		// 第四步：按原始顺序将结果写回消息历史，而非按完成顺序
 		for resultIndex, result := range results {
 			log.Info("工具执行完成",
@@ -146,6 +142,10 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				ToolCallID: toolCalls[resultIndex].ID,
 			})
 		}
+
+		// === Hook 时机 3：PostToolUse ===
+		// 工具执行后，全部 tool result 已写入消息历史，居此时再注入附加消息才能保证顺序
+		runPostToolUseHooks(hookRunner, toolCalls, results, state)
 
 		// 第五步：维护会话计划状态
 		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时将提醒注入到消息历史，

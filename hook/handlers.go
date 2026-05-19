@@ -63,11 +63,23 @@ func PreToolRateLimit(payload map[string]any) HookResult {
 
 // PreToolSensitiveFileGuard 阻止访问敏感文件
 func PreToolSensitiveFileGuard(payload map[string]any) HookResult {
-	input := payload["input"].(map[string]any)
-	sensitiveFiles := payload["sensitive_files"].([]string)
+	input, ok := payload["input"].(map[string]any)
+	if !ok {
+		return HookResult{ExitCode: ExitContinue}
+	}
+	sensitiveFiles, ok := payload["sensitive_files"].([]string)
+	if !ok {
+		log := logger.Log
+		log.Warn("[hook] sensitive_files not found")
+		return HookResult{ExitCode: ExitContinue}
+	}
+	filename, ok := input["filename"].(string)
+	if !ok {
+		return HookResult{ExitCode: ExitContinue}
+	}
 
 	for _, file := range sensitiveFiles {
-		if strings.Contains(input["filename"].(string), file) {
+		if strings.Contains(filename, file) {
 			return HookResult{
 				ExitCode: ExitBlock,
 				Message:  fmt.Sprintf("access to sensitive file %s blocked by hook", file),

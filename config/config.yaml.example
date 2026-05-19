@@ -11,9 +11,18 @@ subagent:
 skills:
   dir: "./.skills"
 
+compact:
+  persistThreshold:      4000
+  previewBytes:          1000
+  keepRecentToolResults: 4
+  contextLimit:          60000
+  persistDir:            ".task_outputs/tool-results"
+
 agentloop:
-  maxTurns: 25
-  todoRoundsThreshold: 9
+  maxTurns: 25 # 默认最大轮数
+  todoRoundsThreshold: 9 # 默认待办轮数阈值
+  maxTools: 5 # 默认每轮可调用最大工具数
+  sensitiveFiles: [".env", "id_rsa"]
 
 
 # 模式说明：

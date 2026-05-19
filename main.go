@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -32,8 +31,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
 	}
 
-	// === Hook 时机 1：SessionStart ===
-	// 在主循环正式开始前触发；handler 可借此打印欢迎信息、初始化外部资源等。
+	// Hook 时机 1：SessionStart
 	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": model, "system_prompt": systemPrompt})
 
 	// 取出已注册的工具列表（由具体客户端内部负责转换为各自的协议格式）
@@ -96,7 +94,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			}
 		}
 
-		// 在工具执行前，对每个工具触发 EventPreToolUse
+		// Hook 时机2: 在工具执行前，对每个工具触发 EventPreToolUse
 		preDecisions := make([]hook.HookResult, len(toolCalls))
 		for i, tc := range toolCalls {
 			preDecisions[i] = hookRunner.Run(hook.EventPreToolUse, map[string]any{
@@ -352,27 +350,30 @@ func main() {
 	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager, hookRunner)
 
 	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
-	// log.Debug("完整消息历史", zap.Any("messages", state.Messages))
-	for _, msg := range state.Messages {
-		role := msg.Role
-		content := ""
-		toolsname := []string{}
-		for _, tc := range msg.ToolCalls {
-			toolsname = append(toolsname, tc.Function.Name)
-		}
-		switch v := msg.Content.(type) {
-		case string:
-			content = v
-		default:
-			contentBytes, _ := json.Marshal(v)
-			content = string(contentBytes)
-		}
-		log.Debug("消息记录",
-			zap.String("role", role),
-			zap.String("content", content),
-			zap.Strings("tools", toolsname),
-		)
-	}
+
+	// 会话结束，触发EventSessionEnd
+	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
+	// // log.Debug("完整消息历史", zap.Any("messages", state.Messages))
+	// for _, msg := range state.Messages {
+	// 	role := msg.Role
+	// 	content := ""
+	// 	toolsname := []string{}
+	// 	for _, tc := range msg.ToolCalls {
+	// 		toolsname = append(toolsname, tc.Function.Name)
+	// 	}
+	// 	switch v := msg.Content.(type) {
+	// 	case string:
+	// 		content = v
+	// 	default:
+	// 		contentBytes, _ := json.Marshal(v)
+	// 		content = string(contentBytes)
+	// 	}
+	// 	log.Debug("消息记录",
+	// 		zap.String("role", role),
+	// 		zap.String("content", content),
+	// 		zap.Strings("tools", toolsname),
+	// 	)
+	// }
 }
 
 // buildPermissionRules 把配置中的 PermissionRuleConfig 列表转换为 permission.Rule。
@@ -411,7 +412,9 @@ func buildHookRunner() *hook.Runner {
 	runner.Register(hook.EventPreToolUse, hook.PreToolSensitiveFileGuard)
 
 	runner.Register(hook.EventPostToolUse, hook.PostToolAuditLog)
-	runner.Register(hook.EventPostToolUse, hook.PostToolErrorRecovery)
+	runner.Register(hook.EventToolError, hook.OnToolErrorRecovery)
+
+	runner.Register(hook.EventSessionEnd, hook.OnSessionEnd)
 	return runner
 }
 
@@ -439,7 +442,7 @@ func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 			results[i] = tools.ToolResult{
 				Ok:      false,
 				IsError: true,
-				Content: "[hook blocked] " + dec.Message,
+				Content: "<hook blocked> " + dec.Message,
 			}
 		}
 	}
@@ -453,17 +456,23 @@ func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 // exit=2 时把 Message 作为 user 消息注入历史。
 func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, state *fsm.State) {
 	for i, tc := range toolCalls {
-		decision := runner.Run(hook.EventPostToolUse, map[string]any{
+		if results[i].IsError {
+			errordecision := runner.Run(hook.EventToolError, map[string]any{
+				"tool_name": tc.Function.Name,
+				"input":     tc.Function.Arguments,
+				"output":    results[i].Content,
+			})
+			if errordecision.ExitCode == hook.ExitInject && errordecision.Message != "" {
+				state.Messages = append(state.Messages, fsm.Message{
+					Role:    "user",
+					Content: errordecision.Message,
+				})
+			}
+		}
+		runner.Run(hook.EventPostToolUse, map[string]any{
 			"tool_name": tc.Function.Name,
 			"input":     tc.Function.Arguments,
 			"output":    results[i].Content,
 		})
-
-		if decision.ExitCode == hook.ExitInject && decision.Message != "" {
-			state.Messages = append(state.Messages, fsm.Message{
-				Role:    "user",
-				Content: decision.Message,
-			})
-		}
 	}
 }

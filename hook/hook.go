@@ -7,23 +7,27 @@ import (
 )
 
 const (
-	ExitContinue = 0
-	ExitBlock    = 1
-	ExitInject   = 2
+	ExitContinue = 0 // Continue
+	ExitBlock    = 1 // Block
+	ExitInject   = 2 // Inject
+	ExitRetry    = 3 // Retry
 )
 
 const (
 	EventSessionStart = "SessionStart" // Session start
 	EventPreToolUse   = "PreToolUse"   // Tool execution before
 	EventPostToolUse  = "PostToolUse"  // Tool execution after
+	EventToolError    = "ToolError"    // Tool execution error
+	EventSessionEnd   = "SessionEnd"   // Session end
 )
 
 type Handler func(payload map[string]any) HookResult
 
 // HookResult Define the hook handler result structure
 type HookResult struct {
-	ExitCode int
-	Message  string
+	ExitCode      int
+	Message       string
+	ModifiedInput map[string]any // When ExitCode = 3, modify the input
 }
 
 // Runner Define the Runner class

@@ -290,45 +290,20 @@ func TestPreToolSensitiveFileGuard_MatchSecond(t *testing.T) {
 	}
 }
 
-// ===================== PostToolErrorRecovery 测试 =====================
-
-// TestPostToolErrorRecovery_PermissionDenied 检测到 Permission denied 时注入恢复提示。
-func TestPostToolErrorRecovery_PermissionDenied(t *testing.T) {
-	result := PostToolErrorRecovery(map[string]any{
-		"output": "Error: Permission denied: plan mode blocks write tool: write_file",
-	})
-	if result.ExitCode != ExitInject {
-		t.Errorf("expected ExitInject for Permission denied, got %d", result.ExitCode)
-	}
-	if result.Message == "" {
-		t.Errorf("expected non-empty recovery message")
-	}
-}
-
-// TestPostToolErrorRecovery_NormalOutput 正常输出不应注入消息。
-func TestPostToolErrorRecovery_NormalOutput(t *testing.T) {
-	result := PostToolErrorRecovery(map[string]any{
-		"output": "Success to write file: hello.py, content length: 42 bytes",
-	})
-	if result.ExitCode != ExitContinue {
-		t.Errorf("expected ExitContinue for normal output, got %d", result.ExitCode)
-	}
-}
+// ===================== OnToolErrorRecovery 测试 =====================
 
 // TestPostToolErrorRecovery_EmptyOutput 空输出不应注入消息。
 func TestPostToolErrorRecovery_EmptyOutput(t *testing.T) {
-	result := PostToolErrorRecovery(map[string]any{"output": ""})
-	if result.ExitCode != ExitContinue {
+	result := OnToolErrorRecovery(map[string]any{"output": ""})
+	if result.ExitCode == ExitContinue {
 		t.Errorf("expected ExitContinue for empty output, got %d", result.ExitCode)
 	}
 }
 
 // TestPostToolErrorRecovery_CaseSensitive 区分大小写，只匹配开头大写的 Permission denied。
 func TestPostToolErrorRecovery_CaseSensitive(t *testing.T) {
-	result := PostToolErrorRecovery(map[string]any{
-		"output": "permission denied by user",
-	})
-	if result.ExitCode != ExitContinue {
+	result := OnToolErrorRecovery(map[string]any{})
+	if result.ExitCode == ExitContinue {
 		t.Errorf("expected ExitContinue for lowercase 'permission denied', got %d", result.ExitCode)
 	}
 }

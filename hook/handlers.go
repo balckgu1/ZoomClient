@@ -97,16 +97,12 @@ func PostToolAuditLog(payload map[string]any) HookResult {
 	return HookResult{ExitCode: ExitContinue}
 }
 
-// PostToolErrorRecovery 在工具执行出错后进行错误恢复
-func PostToolErrorRecovery(payload map[string]any) HookResult {
-	output := payload["output"].(string)
-	if strings.Contains(output, "Permission denied") {
-		return HookResult{
-			ExitCode: ExitInject,
-			Message:  "[hook reminder] The last operation was rejected by the permission system. Please consider: finding an alternative solution that does not require write permission or using only read-only tools to complete the current step.",
-		}
+// PostToolErrorRecovery 在工具执行出错后给模型进行提示
+func OnToolErrorRecovery(payload map[string]any) HookResult {
+	return HookResult{
+		ExitCode: ExitInject,
+		Message:  "<internal> The last operation executed error, please consider executing the task in a different way. </internal>",
 	}
-	return HookResult{ExitCode: ExitContinue}
 }
 
 // // PreToolInjectReminder 在写文件前注入一条提醒消息给模型。
@@ -121,3 +117,10 @@ func PostToolErrorRecovery(payload map[string]any) HookResult {
 // 		Message:  "[hook reminder] Please ensure that the content is correct and the path is secure when writing files.",
 // 	}
 // }
+
+func OnSessionEnd(payload map[string]any) HookResult {
+	log := logger.Log
+	turns, _ := payload["total_turns"].(int)
+	log.Info("[hook] Session end", zap.Int("total_turns", turns))
+	return HookResult{ExitCode: ExitContinue}
+}

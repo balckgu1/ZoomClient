@@ -17,3 +17,5 @@ doc/
 .task_outputs/
 
 workdir/
+
+logs/

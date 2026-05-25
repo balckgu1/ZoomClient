@@ -61,7 +61,7 @@ func (r *Runner) Run(event string, payload map[string]any) HookResult {
 	for _, handler := range r.handlers[event] {
 		result := handler(payload)
 		if result.ExitCode != ExitContinue {
-			log.Debug("[hook] handler 返回非零退出码",
+			log.Debug("[hook] Handler returns non-zero exit code",
 				zap.String("event", event),
 				zap.Int("exit_code", result.ExitCode),
 				zap.String("message", result.Message),

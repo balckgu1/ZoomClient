@@ -10,14 +10,14 @@ func TestIsDangerousCommand_Normal(t *testing.T) {
 }
 
 func TestIsDangerousCommand_Dangerous(t *testing.T) {
-	command := "rm -rf /"
+	command := "shutdown"
 	if !isDangerousCommand(command) {
 		t.Errorf("command %s should be dangerous", command)
 	}
 }
 
 func TestIsDangerousCommand_Mixed(t *testing.T) {
-	command := "ls && rm -rf /"
+	command := "echo hello && shutdown /s"
 	if !isDangerousCommand(command) {
 		t.Errorf("command %s should be dangerous", command)
 	}
@@ -91,7 +91,7 @@ func TestRunBashTool_Call_Normal(t *testing.T) {
 	workDir := t.TempDir()
 	tool := RunBashTool{}
 	args := map[string]any{
-		"command": "ls",
+		"command": "echo hello",
 	}
 	if isDangerousCommand(args["command"].(string)) {
 		t.Errorf("tool should not be dangerous")

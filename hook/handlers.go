@@ -102,7 +102,7 @@ func PostToolAuditLog(payload map[string]any) HookResult {
 		summary = summary[:100] + "..."
 	}
 
-	log.Debug("[hook] 工具执行完成",
+	log.Debug("[hook] Tool execution completed",
 		zap.String("tool", toolName),
 		zap.String("output_preview", summary),
 	)

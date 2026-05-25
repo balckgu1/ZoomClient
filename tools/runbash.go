@@ -2,15 +2,37 @@ package tools
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
 type RunBashTool struct{}
 
 func isDangerousCommand(command string) bool {
-	dangerous := []string{"rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"}
+	// 通用危险命令
+	dangerous := []string{"shutdown", "reboot"}
+
+	// 平台特定危险命令
+	if runtime.GOOS == "windows" {
+		dangerous = append(dangerous,
+			"format ",    // 格式化磁盘
+			"del /f",     // 强制删除
+			"rmdir /s",   // 递归删除目录
+			"diskpart",   // 磁盘分区工具
+			"reg delete", // 删除注册表
+		)
+	} else {
+		dangerous = append(dangerous,
+			"rm -rf /", // 递归强制删除根目录
+			"sudo",     // 提权
+			"> /dev/",  // 写入块设备
+			"mkfs.",    // 格式化文件系统
+		)
+	}
+
+	lowered := strings.ToLower(command)
 	for _, d := range dangerous {
-		if strings.Contains(command, d) {
+		if strings.Contains(lowered, d) {
 			return true
 		}
 	}
@@ -22,7 +44,10 @@ func (t RunBashTool) Name() string {
 }
 
 func (t RunBashTool) Description() string {
-	return "Open a bash and execute the given command. "
+	if runtime.GOOS == "windows" {
+		return "Execute a command via cmd.exe. Use Windows-compatible commands (e.g., dir, type). "
+	}
+	return "Execute a command via bash. Use Unix-compatible commands (e.g., ls, cat). "
 }
 
 func (t RunBashTool) Parameters() map[string]any {
@@ -39,6 +64,17 @@ func (t RunBashTool) Parameters() map[string]any {
 	return parameters
 }
 
+// resolveShell 根据当前操作系统构建合适的 shell 执行命令。
+// Windows：chcp 65001 将控制台代码页切换为 UTF-8，避免中文 GBK 乱码。
+// Linux/macOS：直接使用 bash -c。
+func resolveShell(command string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		// chcp 65001 切换代码页为 UTF-8，>nul 2>&1 抑制 chcp 自身输出
+		return exec.Command("cmd", "/C", "chcp 65001 >nul 2>&1 && "+command)
+	}
+	return exec.Command("bash", "-c", command)
+}
+
 func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult {
 	command, ok := args["command"].(string)
 	if command == "" || !ok {
@@ -52,7 +88,8 @@ func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult 
 	if err != nil {
 		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
-	output, err := exec.Command("bash", "-c", command).CombinedOutput()
+	cmd := resolveShell(command)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}

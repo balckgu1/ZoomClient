@@ -1,10 +1,11 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"zoomClient/clients"
 	"zoomClient/compact"
@@ -15,6 +16,7 @@ import (
 	"zoomClient/skills"
 	"zoomClient/subagent"
 	"zoomClient/tools"
+	"zoomClient/ui"
 	"zoomClient/utils"
 
 	"go.uber.org/zap"
@@ -23,16 +25,13 @@ import (
 // agentLoop Agent主循环
 func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
 	systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
-	compactManager *compact.CompactManager, hookRunner *hook.Runner) {
+	compactManager *compact.CompactManager, hookRunner *hook.Runner, view *ui.Renderer) {
 	log := logger.Log
 
 	// 添加系统提示作为第一条消息
 	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
 		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
 	}
-
-	// Hook 时机 1：SessionStart
-	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": model, "system_prompt": systemPrompt})
 
 	// 取出已注册的工具列表（由具体客户端内部负责转换为各自的协议格式）
 	toolList := registry.GetAll()
@@ -47,13 +46,13 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			"temperature": 0.7,
 		})
 		if err != nil {
-			log.Error("调用 LLM 失败", zap.Error(err))
+			log.Error("call llm failed", zap.Error(err))
+			view.PrintError("LLM", err.Error())
 			break
 		}
 
-		// 将助手的响应添加到消息历史
-		// DeepSeek 在 thinking 模式下返回的 reasoning_content 必须原样透传回 API，
-		// 否则下一轮请求会被服务端以 invalid_request_error 拒绝。
+		// 将模型 assistant 的响应内容添加到 []state.Messages
+		// DeepSeek 在 thinking 模式下返回的 reasoning_content 须原样透传回 API
 		state.Messages = append(state.Messages, fsm.Message{
 			Role:             "assistant",
 			Content:          response.Message.Content,
@@ -61,31 +60,51 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			ReasoningContent: response.Message.ReasoningContent,
 		})
 
-		// 检查是否有工具调用
+		// 检查是否有工具调用，若没有工具调用，则将 reasoning + assistant 文本渲染给用户
 		if len(response.Message.ToolCalls) == 0 {
+			// 渲染 reasoning
+			if response.Message.ReasoningContent != "" {
+				view.PrintReasoning(response.Message.ReasoningContent)
+			}
+			// 渲染 assistant
+			view.PrintAssistant(messageContentToString(response.Message.Content))
 			state.TransitionReason = nil
 			break
 		}
 
-		log.Info("模型请求工具调用", zap.Int("工具数量", len(response.Message.ToolCalls)))
+		log.Info("Model requested tool call", zap.Int("tool count", len(response.Message.ToolCalls)))
 
-		// 第一步：按并发安全性将工具调用分批，并打印分批信息（便于观察调度策略）
+		// 若本轮 reasoning 有内容，渲染给用户
+		if response.Message.ReasoningContent != "" {
+			view.PrintReasoning(response.Message.ReasoningContent)
+		}
+
+		// 按并发安全性将工具调用分批，日志打印分批信息
 		toolCalls := response.Message.ToolCalls
 		batches := tools.PartitionToolCalls(toolCalls)
-		log.Info("工具调用分批情况", zap.Int("批次数量", len(batches)))
+		log.Info("Batch calling of tools", zap.Int("Batch number", len(batches)))
 		for batchIndex, batch := range batches {
 			batchToolNames := make([]string, 0, len(batch.Tools))
 			for _, tracked := range batch.Tools {
 				batchToolNames = append(batchToolNames, tracked.Name)
 			}
-			log.Info("批次详情",
-				zap.Int("批次序号", batchIndex),
-				zap.Bool("可并发执行", batch.IsConcurrencySafe),
-				zap.Strings("工具列表", batchToolNames),
+			log.Info("Batch details", zap.Int("Batch number", batchIndex),
+				zap.Bool("Is concurrency safe", batch.IsConcurrencySafe),
+				zap.Strings("tool list", batchToolNames),
 			)
 		}
 
-		// 第二步：检查本轮是否调用了 todo 工具
+		// 渲染本轮所有工具调用
+		for _, tc := range toolCalls {
+			if tc.Function.Name == "sub_task" {
+				prompt, _ := tc.Function.Arguments["prompt"].(string)
+				view.PrintSubAgent(prompt)
+				continue
+			}
+			view.PrintToolCall(tc.Function.Name, formatArgsPreview(tc.Function.Arguments))
+		}
+
+		// 检查本轮是否调用了 todo 工具
 		usedTodo := false
 		for _, tc := range toolCalls {
 			if tc.Function.Name == "todo" {
@@ -111,27 +130,41 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 					Content: preDecisions[i].Message,
 				})
 			}
+			if preDecisions[i].ExitCode == hook.ExitBlock {
+				view.PrintHookBlocked(tc.Function.Name, preDecisions[i].Message)
+			}
 		}
 
-		// 第三步：执行所有批次（被 hook 阻止的工具会跳过执行，由 mergeToolResults 填充阻止结果）
+		// 执行所有批次
 		allowedCalls, allowedIndex := filterAllowedCalls(toolCalls, preDecisions)
 		allowedBatches := tools.PartitionToolCalls(allowedCalls)
 		allowedResults := tools.ExecuteBatches(allowedBatches, registry, toolCtx)
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
-		// 第四步：按原始顺序将结果写回消息历史，而非按完成顺序
+		// 按原始调用顺序将Tool Call结果写回消息历史
 		for resultIndex, result := range results {
-			log.Info("工具执行完成",
-				zap.String("工具名称", toolCalls[resultIndex].Function.Name),
-				zap.String("执行结果", result.Content),
+			log.Info("tool call finished",
+				zap.String("tool name", toolCalls[resultIndex].Function.Name),
+				zap.String("args", formatArgsPreview(toolCalls[resultIndex].Function.Arguments)),
+				zap.String("result", result.Content),
 			)
+
+			// 渲染工具执行结果摘要
+			if preDecisions[resultIndex].ExitCode != hook.ExitBlock {
+				view.PrintToolResult(toolCalls[resultIndex].Function.Name, result.Content, result.IsError)
+			}
+
+			// 如果 todo 工具被调用且成功，渲染最新计划面板给用户
+			if toolCalls[resultIndex].Function.Name == "todo" && result.Ok {
+				view.PrintTodoPanel(todoManager.Render())
+			}
 
 			// 上下文压缩 第 1 层（大输出落盘），单条工具结果太大时，把全文写到磁盘，消息里只保留预览
 			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
 			if persistedContent != result.Content {
 				log.Info("tool result content too large, persisted to disk and replaced with preview",
-					zap.String("工具名称", toolCalls[resultIndex].Function.Name),
-					zap.Int("原始字节数", len(result.Content)),
+					zap.String("tool name", toolCalls[resultIndex].Function.Name),
+					zap.Int("origin bytes", len(result.Content)),
 				)
 			}
 
@@ -144,17 +177,15 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		}
 
 		// === Hook 时机 3：PostToolUse ===
-		// 工具执行后，全部 tool result 已写入消息历史，居此时再注入附加消息才能保证顺序
 		runPostToolUseHooks(hookRunner, toolCalls, results, state)
 
 		// 第五步：维护会话计划状态
-		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时将提醒注入到消息历史，
-		// 使模型在下一轮对话开始时看到提醒并刷新计划
+		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时将提醒注入到[]state.Messages中, 使模型在下一轮对话开始时看到提醒并刷新计划
 		if !usedTodo {
 			todoManager.IncrementRoundsSinceUpdate()
 			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
-				log.Info("计划长时间未更新，注入提醒",
-					zap.Int("连续未更新轮次", todoManager.PlanningState.RoundsSinceUpdate),
+				log.Info("Plan has not been updated for a long time, injecting reminders",
+					zap.Int("Rounds since update", todoManager.PlanningState.RoundsSinceUpdate),
 				)
 				state.Messages = append(state.Messages, fsm.Message{
 					Role:    "user",
@@ -177,21 +208,23 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			beforeSize := compactManager.EstimateSize(state.Messages)
 			newMessages, cerr := compactManager.CompactHistory(state.Messages)
 			if cerr != nil {
-				log.Warn("完整压缩失败，保留原始消息历史继续", zap.Error(cerr))
+				log.Warn("Complete compression failed, keep the original message history to continue", zap.Error(cerr))
 			} else {
 				afterSize := compactManager.EstimateSize(newMessages)
-				log.Info("已完成整体压缩",
-					zap.Int("压缩前字节数", beforeSize),
-					zap.Int("压缩后字节数", afterSize),
-					zap.Int("消息条数", len(newMessages)),
+				log.Info("Complete compression completed",
+					zap.Int("Bytes before compression", beforeSize),
+					zap.Int("Bytes after compression", afterSize),
+					zap.Int("Message count", len(newMessages)),
 				)
+				view.PrintCompact(beforeSize, afterSize)
 				state.Messages = newMessages
 			}
 		}
 
 		// 限制最大轮次，避免无限循环
 		if state.TurnCount >= cfg.AgentLoop.MaxTurns {
-			log.Warn("已达最大轮次限制，停止循环", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
+			log.Warn("Reaching the maximum round, stop the loop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
+			view.PrintInfo(fmt.Sprintf("reached max turns (%d), stop", cfg.AgentLoop.MaxTurns))
 			break
 		}
 	}
@@ -210,8 +243,11 @@ func main() {
 
 	// 解析命令行参数：-m 指定模型后端类型（默认 deepseek）
 	var modelType string
-	flag.StringVar(&modelType, "m", "deepseek", "模型后端类型: ollama 或 deepseek, 默认deepseek")
+	flag.StringVar(&modelType, "m", "deepseek", "Model backend type: ollama | deepseek, default: deepseek")
 	flag.Parse()
+
+	// 初始化前端渲染器
+	view := ui.New()
 
 	// 根据 -m 参数选择对应的 ChatClient 实现与模型名称
 	var (
@@ -225,28 +261,34 @@ func main() {
 			apiKey = os.Getenv("DEEPSEEK_API_KEY")
 		}
 		if apiKey == "" {
-			log.Fatal("使用 deepseek 后端时必须设置API密钥 DEEPSEEK_API_KEY")
+			view.PrintError("config", "Please set the API key")
+			log.Fatal("No API key DEEPSEEK_API_KEY")
 		}
 		client = clients.NewDeepSeekClient("https://api.deepseek.com", apiKey)
 		modelname = "deepseek-v4-flash"
-		log.Info("已选择 DeepSeek 后端", zap.String("model", modelname))
+		log.Info("DeepSeek backend has been selected", zap.String("model", modelname))
 	case "ollama", "":
 		client = clients.NewOllamaClient("http://127.0.0.1:11434")
 		modelname = "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
-		log.Info("已选择 Ollama 后端", zap.String("model", modelname))
+		log.Info("Olama backend has been selected", zap.String("model", modelname))
 	default:
-		log.Fatal("不支持的模型后端类型", zap.String("-m", modelType))
+		view.PrintError("config", "Unsupported model backend types: "+modelType)
+		log.Fatal("Unsupported model backend types", zap.String("-m", modelType))
 	}
 
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
-	var userPrompt string
-	fmt.Println("> 请输入您的问题")
-	// userPrompt = "在./workdir目录下创建hello.py，内容为打印hello字符串。之后运行hello.py"
-	userPrompt, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-	userPrompt = strings.TrimSpace(userPrompt)
 
 	// 系统提示中告知模型使用todotool规划多步骤任务，并保持计划持续更新
-	systemPrompt := "You are a helpful assistant. Use the todo tool to plan multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances. Prefer tools over prose."
+	// 注入宿主 OS 信息，引导模型生成平台兼容的命令
+	systemPrompt := fmt.Sprintf(
+		"You are a helpful assistant running on %s. "+
+			"Use the todo tool to plan multi-step work. "+
+			"Keep exactly one step in_progress when a task has multiple steps. "+
+			"Refresh the plan as work advances. Prefer tools over prose.",
+		runtime.GOOS,
+	)
+
+	// 实例化工具上下文
 	toolCtx := &tools.ToolContext{
 		WorkPath: "./workdir",
 	}
@@ -285,12 +327,9 @@ func main() {
 	// 注册 compact 工具，模型/用户可以主动请求一次完整压缩
 	registry.Register(compact.NewCompactTool(compactManager))
 
-	// 先初始化空 messages，便于后续 parentMessagesProvider 闭包捕获 state 指针
-	// agentLoop 运行时会往 state.Messages 追加消息，provider 每次调用都能拿到最新快照
+	// 初始化会话状态：system 提示作为首条，后续 REPL 每轮 append user/assistant/tool 消息
 	state := &fsm.State{
-		Messages: []fsm.Message{
-			{Role: "user", Content: userPrompt},
-		},
+		Messages:  []fsm.Message{},
 		TurnCount: 0,
 	}
 
@@ -328,52 +367,133 @@ func main() {
 	if subAgent.Registry != nil {
 		subAgent.Registry.SetPermissionDecider(permitMgr.Decide)
 	}
-	log.Info("权限系统已启用",
-		zap.String("模式", string(permitMgr.GetMode())),
-		zap.Int("deny规则数", len(cfg.Permission.DenyRules)),
-		zap.Int("allow规则数", len(cfg.Permission.AllowRules)),
-		zap.Bool("交互式询问", cfg.Permission.Interactive),
+	log.Info("Permission system has been enabled",
+		zap.String("Mode", string(permitMgr.GetMode())),
+		zap.Int("Deny rule count", len(cfg.Permission.DenyRules)),
+		zap.Int("Allow rule count", len(cfg.Permission.AllowRules)),
+		zap.Bool("Interactive inquiry", cfg.Permission.Interactive),
 	)
 
-	log.Info("已注册的工具列表", zap.Any("tools", registry.GetAllNames()))
+	log.Info("Registered tool list", zap.Any("tools", registry.GetAllNames()))
 
 	// 装配 hook 系统：Runner 集中调度所有事件，handler 按事件名注册到 Runner 上
 	hookRunner := buildHookRunner()
-	log.Info("hook 系统已启用",
-		zap.Int("SessionStart handler数", hookRunner.HandlerCount(hook.EventSessionStart)),
-		zap.Int("PreToolUse handler数", hookRunner.HandlerCount(hook.EventPreToolUse)),
-		zap.Int("PostToolUse handler数", hookRunner.HandlerCount(hook.EventPostToolUse)),
+	log.Info("Hook system has been enabled",
+		zap.Int("SessionStart handler count", hookRunner.HandlerCount(hook.EventSessionStart)),
+		zap.Int("PreToolUse handler count", hookRunner.HandlerCount(hook.EventPreToolUse)),
+		zap.Int("PostToolUse handler count", hookRunner.HandlerCount(hook.EventPostToolUse)),
 	)
 
-	// 运行Agent循环
-	log.Info("Agent 循环启动")
-	agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager, hookRunner)
+	// Hook EventSessionStart
+	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "system_prompt": systemPrompt})
 
-	log.Info("Agent 循环结束", zap.Int("total_turns", state.TurnCount))
+	// 渲染会话欢迎横幅
+	view.PrintSessionStart(modelname, logger.LogFilePath)
+	log.Info("Agent REPL start")
+
+	// REPL 主循环：每轮读一行输入 → 处理斜杠命令 或 调用 agentLoop → 渲染分隔
+	for {
+		input, ok := view.PromptUser()
+		if !ok {
+			view.PrintInfo("EOF, exiting...")
+			break
+		}
+		if input == "" {
+			continue
+		}
+
+		// 斜杠命令处理
+		if strings.HasPrefix(input, "/") {
+			if handleSlashCommand(input, state, view, compactManager) {
+				break // /exit
+			}
+			continue
+		}
+
+		// 追加用户消息并运行 agentLoop
+		state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: input})
+		agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager, hookRunner, view)
+		view.PrintTurnSeparator()
+	}
+
+	log.Info("Agent REPL End", zap.Int("total_turns", state.TurnCount))
+	view.PrintSessionEnd(state.TurnCount)
 
 	// 会话结束，触发EventSessionEnd
 	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
-	// // log.Debug("完整消息历史", zap.Any("messages", state.Messages))
-	// for _, msg := range state.Messages {
-	// 	role := msg.Role
-	// 	content := ""
-	// 	toolsname := []string{}
-	// 	for _, tc := range msg.ToolCalls {
-	// 		toolsname = append(toolsname, tc.Function.Name)
-	// 	}
-	// 	switch v := msg.Content.(type) {
-	// 	case string:
-	// 		content = v
-	// 	default:
-	// 		contentBytes, _ := json.Marshal(v)
-	// 		content = string(contentBytes)
-	// 	}
-	// 	log.Debug("消息记录",
-	// 		zap.String("role", role),
-	// 		zap.String("content", content),
-	// 		zap.Strings("tools", toolsname),
-	// 	)
-	// }
+}
+
+// handleSlashCommand 处理 REPL 斜杠命令。返回 true 表示要退出主循环。
+func handleSlashCommand(input string, state *fsm.State, view *ui.Renderer, cm *compact.CompactManager) bool {
+	cmd := strings.TrimSpace(strings.ToLower(input))
+	switch cmd {
+	case "/exit", "/quit":
+		return true
+	case "/clear":
+		// 保留 system 消息，清空其他历史
+		if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
+			state.Messages = state.Messages[:1]
+		} else {
+			state.Messages = state.Messages[:0]
+		}
+		state.TurnCount = 0
+		view.PrintInfo("history cleared (system prompt kept)")
+	case "/compact":
+		if len(state.Messages) <= 1 {
+			view.PrintInfo("no history to compact")
+			return false
+		}
+		before := cm.EstimateSize(state.Messages)
+		newMsgs, cerr := cm.CompactHistory(state.Messages)
+		if cerr != nil {
+			view.PrintError("compact", cerr.Error())
+			return false
+		}
+		state.Messages = newMsgs
+		after := cm.EstimateSize(newMsgs)
+		view.PrintCompact(before, after)
+	case "/help":
+		view.PrintInfo("/exit  - quit")
+		view.PrintInfo("/clear - clear conversation history (system prompt kept)")
+		view.PrintInfo("/compact - manually compact conversation history")
+		view.PrintInfo("/help  - show this message")
+	default:
+		view.PrintInfo("unknown command: " + input + "  (try /help)")
+	}
+	return false
+}
+
+// messageContentToString 将 fsm.Message.Content (interface{}) 安全地转为可读字符串。
+func messageContentToString(content any) string {
+	switch v := content.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(b)
+	}
+}
+
+// formatArgsPreview 将工具调用参数压缩为一行预览，用于前端渲染。
+func formatArgsPreview(args map[string]interface{}) string {
+	if len(args) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Sprintf("%v", args)
+	}
+	s := string(b)
+	const maxLen = 120
+	if len(s) > maxLen {
+		s = s[:maxLen] + "…"
+	}
+	return s
 }
 
 // buildPermissionRules 把配置中的 PermissionRuleConfig 列表转换为 permission.Rule。

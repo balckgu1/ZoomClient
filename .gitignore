@@ -11,6 +11,7 @@ bak/
 *.yaml
 
 doc/
+docs/
 
 *.exe
 

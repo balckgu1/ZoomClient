@@ -243,15 +243,15 @@ func main() {
 	// 读取配置文件
 	utils.InitConfig()
 	cfg := utils.GetConfig()
-	apiKey := cfg.ApiKey.Deepseek
+	apiKey := ""
 
 	// 创建带信号监听的 context，Ctrl+C 时通知所有工具优雅退出
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// 解析命令行参数：-m 指定模型后端类型（默认 deepseek）
+	// 解析命令行参数：-m 指定模型后端类型（默认 openai）
 	var modelType string
-	flag.StringVar(&modelType, "m", "deepseek", "Model backend type: ollama | deepseek, default: deepseek")
+	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
 	flag.Parse()
 
 	// 初始化前端渲染器
@@ -263,22 +263,53 @@ func main() {
 		modelname string
 	)
 	switch strings.ToLower(modelType) {
-	case "deepseek":
+	case "openai":
+		apiKey = cfg.OpenAI.ApiKey
 		if apiKey == "" {
-			// DeepSeek 客户端需要从环境变量读取 API Key，避免密钥硬编码
-			apiKey = os.Getenv("DEEPSEEK_API_KEY")
+			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
 		if apiKey == "" {
 			view.PrintError("config", "Please set the API key")
-			log.Fatal("No API key DEEPSEEK_API_KEY")
+			log.Fatal("No API key OPENAI_API_KEY")
 		}
-		client = clients.NewDeepSeekClient("https://api.deepseek.com", apiKey)
-		modelname = "deepseek-v4-flash"
-		log.Info("DeepSeek backend has been selected", zap.String("model", modelname))
+		baseURL := cfg.OpenAI.BaseURL
+		if baseURL == "" {
+			baseURL = "https://api.openai.com"
+		}
+		modelname = cfg.OpenAI.ModelName
+		if modelname == "" {
+			modelname = "gpt-4o"
+		}
+		client = clients.NewOpenAIClient(baseURL, apiKey)
+		log.Info("OpenAI backend has been selected", zap.String("model", modelname), zap.String("base_url", baseURL))
 	case "ollama", "":
 		client = clients.NewOllamaClient("http://127.0.0.1:11434")
 		modelname = "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
 		log.Info("Olama backend has been selected", zap.String("model", modelname))
+	case "anthropic":
+		apiKey = cfg.ApiKey.Anthropic
+		if apiKey == "" {
+			apiKey = os.Getenv("ANTHROPIC_API_KEY")
+		}
+		if apiKey == "" {
+			view.PrintError("config", "Please set the API key ANTHROPIC_API_KEY")
+			log.Fatal("No API key ANTHROPIC_API_KEY")
+		}
+		client = clients.NewAnthropicClient(apiKey)
+		modelname = "claude-opus-4-5"
+		log.Info("Anthropic backend has been selected", zap.String("model", modelname))
+	case "gemini":
+		apiKey = cfg.ApiKey.Gemini
+		if apiKey == "" {
+			apiKey = os.Getenv("GEMINI_API_KEY")
+		}
+		if apiKey == "" {
+			view.PrintError("config", "Please set the API key GEMINI_API_KEY")
+			log.Fatal("No API key GEMINI_API_KEY")
+		}
+		client = clients.NewGeminiClient(apiKey)
+		modelname = "gemini-2.5-flash"
+		log.Info("Gemini backend has been selected", zap.String("model", modelname))
 	default:
 		view.PrintError("config", "Unsupported model backend types: "+modelType)
 		log.Fatal("Unsupported model backend types", zap.String("-m", modelType))

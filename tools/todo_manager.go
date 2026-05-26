@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // PlanItem 表示计划中的一个步骤
@@ -60,13 +62,13 @@ func (tm *TodoManager) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"items": map[string]interface{}{
 				"type":        "array",
-				"description": "完整的计划条目列表，整体替换当前计划",
+				"description": "Complete list of plan items, replacing the current plan as a whole",
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
 						"content": map[string]interface{}{
 							"type":        "string",
-							"description": "这一步要做什么",
+							"description": "What this step needs to do",
 						},
 						"status": map[string]interface{}{
 							"type": "string",
@@ -90,12 +92,12 @@ func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolR
 	// 提取 items 参数
 	itemsRaw, ok := args["items"]
 	if !ok {
-		return ToolResult{Ok: false, Content: "错误：缺少 items 参数", IsError: true}
+		return ToolResult{Ok: false, Content: "Error: missing items parameter", IsError: true}
 	}
 
 	itemsSlice, ok := itemsRaw.([]interface{})
 	if !ok {
-		return ToolResult{Ok: false, Content: "错误：items 参数必须是数组类型", IsError: true}
+		return ToolResult{Ok: false, Content: "Error: items parameter must be of slice type", IsError: true}
 	}
 
 	// 将 []interface{} 转换为 []PlanItem
@@ -105,7 +107,7 @@ func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolR
 		if !ok {
 			return ToolResult{
 				Ok:      false,
-				Content: fmt.Sprintf("错误：items[%d] 不是有效的对象类型", i),
+				Content: fmt.Sprintf("Error: items [%d] is not a valid object type", i),
 				IsError: true,
 			}
 		}
@@ -120,10 +122,11 @@ func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolR
 			ActivateForm: activateForm,
 		})
 	}
+	ctx.Logger.Info("Updating plan", zap.String("session", ctx.SessionID), zap.Any("planItems", planItems))
 
 	renderedPlan, err := tm.Update(planItems)
 	if err != nil {
-		return ToolResult{Ok: false, Content: fmt.Sprintf("计划更新失败：%v", err), IsError: true}
+		return ToolResult{Ok: false, Content: fmt.Sprintf("Plan update failed: %v", err), IsError: true}
 	}
 
 	return ToolResult{Ok: true, Content: renderedPlan}

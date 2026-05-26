@@ -15,6 +15,7 @@ type Config struct {
 	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
 	Compact    CompactConfig    `mapstructure:"compact"`
 	Permission PermissionConfig `mapstructure:"permission"`
+	Tools      ToolsConfig      `mapstructure:"tools"`
 }
 
 // ApiKeyConfig api_key config
@@ -33,6 +34,10 @@ type SubagentConfig struct {
 
 type SkillsConfig struct {
 	Dir string `mapstructure:"dir"`
+}
+
+type ToolsConfig struct {
+	DefaultBashTimeout int `mapstructure:"defaultBashTimeout"`
 }
 
 type AgentLoopConfig struct {

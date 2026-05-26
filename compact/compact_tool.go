@@ -1,6 +1,10 @@
 package compact
 
-import "zoomClient/tools"
+import (
+	"zoomClient/tools"
+
+	"go.uber.org/zap"
+)
 
 // CompactTool 把"手动触发完整压缩"暴露成一个Tool
 type CompactTool struct {
@@ -36,6 +40,7 @@ func (t *CompactTool) Parameters() map[string]interface{} {
 // Call 标记一次手动压缩请求
 func (t *CompactTool) Call(args map[string]interface{}, ctx *tools.ToolContext) tools.ToolResult {
 	t.manager.RequestManualCompact()
+	ctx.Logger.Info("complete compression", zap.String("session", ctx.SessionID))
 	return tools.ToolResult{
 		Ok: true,
 		Content: "The manual compression request has been marked. " +

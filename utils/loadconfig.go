@@ -10,6 +10,7 @@ import (
 // Config config struct
 type Config struct {
 	ApiKey     ApiKeyConfig     `mapstructure:"api_key"`
+	OpenAI     OpenAIConfig     `mapstructure:"openai"`
 	Subagent   SubagentConfig   `mapstructure:"subagent"`
 	Skills     SkillsConfig     `mapstructure:"skills"`
 	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
@@ -20,9 +21,15 @@ type Config struct {
 
 // ApiKeyConfig api_key config
 type ApiKeyConfig struct {
-	Deepseek string `mapstructure:"deepseek"`
-	Openai   string `mapstructure:"openai"`
-	Qwen     string `mapstructure:"qwen"`
+	Anthropic string `mapstructure:"anthropic"`
+	Gemini    string `mapstructure:"gemini"`
+}
+
+// OpenAIConfig OpenAI 兼容后端配置
+type OpenAIConfig struct {
+	ApiKey    string `mapstructure:"api_key"`
+	BaseURL   string `mapstructure:"base_url"`
+	ModelName string `mapstructure:"model_name"`
 }
 
 // SubagentConfig subagent config

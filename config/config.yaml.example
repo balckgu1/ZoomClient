@@ -1,28 +1,66 @@
 api_key:
-  deepseek: "sk-1aXXX"
-  openai: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  qwen: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  anthropic: "sk-ant-api03-xxx"
+  gemini: "AIzaSyXXX"
 
+# openai client config
+# example
+# # DeepSeek
+# openai:
+#   api_key: "sk-xxx"
+#   base_url: "https://api.deepseek.com"
+#   model_name: "deepseek-v4-flash"
+
+# # Kimi
+# openai:
+#   api_key: "sk-xxx"
+#   base_url: "https://api.moonshot.cn"
+#   model_name: "moonshot-v1-8k"
+
+# # Qwen
+# openai:
+#   api_key: "sk-xxx"
+#   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#   model_name: "qwen-plus"
+
+# # OpenAI
+# openai:
+#   api_key: "sk-xxx"
+#   base_url: "https://api.openai.com"
+#   model_name: "gpt-4o"
+openai:
+  api_key: "sk-xxx"
+  base_url: "https://api.deepseek.com"
+  model_name: "deepseek-v4-flash"
+
+
+# subagent config
 subagent:
-  defaultMaxTurns: 5
+  defaultMaxTurns: 10
   defaultSystemPrompt : "You are a focused subagent running inside an isolated context. Use the provided tools to complete the user's subtask, then return ONE concise summary (a single sentence or short paragraph) as your final answer. Do NOT paste tool call transcripts into the final answer; only return the essential result that the parent agent needs."
   forkSubtaskPromptPrefix: "<subagent-fork> Focus ONLY on the following subtask based on the prior context. Complete it using the provided tools, then return ONE concise summary as your final answer. Subtask: "
 
+# tool config
+tools:
+  defaultBashTimeout: 120  # default timeout in seconds
+
+# skill config
 skills:
-  dir: "./.skills"
+  dir: "./.skills"  # skill directory
 
+# compact system config
 compact:
-  persistThreshold:      4000
-  previewBytes:          1000
-  keepRecentToolResults: 4
-  contextLimit:          60000
-  persistDir:            ".task_outputs/tool-results"
+  persistThreshold:      4000  # persist threshold
+  previewBytes:          1000  # preview bytes
+  keepRecentToolResults: 4     # keep recent tool results
+  contextLimit:          60000 # context limit
+  persistDir:            ".task_outputs/tool-results"  # persist directory
 
+# agentloop config
 agentloop:
   maxTurns: 25 # 默认最大轮数
   todoRoundsThreshold: 9 # 默认待办轮数阈值
   maxTools: 5 # 默认每轮可调用最大工具数
-  sensitiveFiles: [".env", "id_rsa"]
+  sensitiveFiles: [".env", "id_rsa"] # 敏感文件列表
 
 
 # 模式说明：

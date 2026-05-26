@@ -3,6 +3,8 @@ package tools
 import (
 	"fmt"
 	"os"
+
+	"go.uber.org/zap"
 )
 
 type ReadFileTool struct{}
@@ -38,6 +40,7 @@ func (t ReadFileTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult
 	if err != nil {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}
+	ToolCtx.Logger.Info("Reading file", zap.String("session", ToolCtx.SessionID), zap.String("filename", filename), zap.String("workdir", targetPath))
 	content, err := os.ReadFile(targetPath)
 	if err != nil {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}

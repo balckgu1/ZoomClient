@@ -3,6 +3,8 @@ package tools
 import (
 	"fmt"
 	"os"
+
+	"go.uber.org/zap"
 )
 
 type EditFileTool struct{}
@@ -46,6 +48,7 @@ func (t EditFileTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult
 	if err != nil {
 		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
+	ToolCtx.Logger.Info("Editing file", zap.String("session", ToolCtx.SessionID), zap.String("filename", filename), zap.String("workdir", targetPath))
 	file, err := os.OpenFile(targetPath, os.O_RDWR, 0644)
 	if err != nil {
 		if os.IsNotExist(err) {

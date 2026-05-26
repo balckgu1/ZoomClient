@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // isSafePath 验证 filename 解析后的绝对路径是否在 workpath 工作区目录内。
@@ -76,6 +78,7 @@ func (t WriteFileTool) Call(args map[string]any, toolCtx *ToolContext) ToolResul
 	}
 
 	targetPath, err := isSafePath(toolCtx.WorkPath, filename)
+	toolCtx.Logger.Info("Writing file", zap.String("session", toolCtx.SessionID), zap.String("filename", filename), zap.String("workdir", targetPath))
 	if err != nil {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}

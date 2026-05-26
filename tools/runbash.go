@@ -1,10 +1,17 @@
 package tools
 
 import (
+	"context"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"go.uber.org/zap"
 )
+
+// // defaultBashTimeout 命令执行的默认超时时间
+// const defaultBashTimeout = 30 * time.Second
 
 type RunBashTool struct{}
 
@@ -67,12 +74,11 @@ func (t RunBashTool) Parameters() map[string]any {
 // resolveShell 根据当前操作系统构建合适的 shell 执行命令。
 // Windows：chcp 65001 将控制台代码页切换为 UTF-8，避免中文 GBK 乱码。
 // Linux/macOS：直接使用 bash -c。
-func resolveShell(command string) *exec.Cmd {
+func resolveShellWithContext(ctx context.Context, command string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
-		// chcp 65001 切换代码页为 UTF-8，>nul 2>&1 抑制 chcp 自身输出
-		return exec.Command("cmd", "/C", "chcp 65001 >nul 2>&1 && "+command)
+		return exec.CommandContext(ctx, "cmd", "/C", "chcp 65001 >nul 2>&1 && "+command)
 	}
-	return exec.Command("bash", "-c", command)
+	return exec.CommandContext(ctx, "bash", "-c", command)
 }
 
 func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult {
@@ -88,9 +94,33 @@ func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult 
 	if err != nil {
 		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
-	cmd := resolveShell(command)
+
+	// 使用 context 实现超时控制与取消传播
+	execCtx := context.Background()
+	if ToolCtx.Ctx != nil {
+		execCtx = ToolCtx.Ctx
+	}
+	execCtx, cancel := context.WithTimeout(execCtx, ToolCtx.DefaultBashTimeout)
+	defer cancel()
+
+	ToolCtx.Logger.Info("Executing command", zap.String("session", ToolCtx.SessionID), zap.String("workdir", ToolCtx.WorkPath), zap.String("command", command))
+	cmd := resolveShellWithContext(execCtx, command)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if execCtx.Err() == context.DeadlineExceeded {
+			return ToolResult{
+				Ok:      false,
+				Content: fmt.Sprintf("Error: command timed out after %s", ToolCtx.DefaultBashTimeout),
+				IsError: true,
+			}
+		}
+		if execCtx.Err() == context.Canceled {
+			return ToolResult{
+				Ok:      false,
+				Content: "Error: command was cancelled",
+				IsError: true,
+			}
+		}
 		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
 	return ToolResult{Ok: true, Content: string(output), IsError: false, Attachments: nil}

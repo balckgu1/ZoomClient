@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
+	"time"
 	"zoomClient/clients"
 	"zoomClient/compact"
 	"zoomClient/fsm"
@@ -19,6 +22,7 @@ import (
 	"zoomClient/ui"
 	"zoomClient/utils"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -241,6 +245,10 @@ func main() {
 	cfg := utils.GetConfig()
 	apiKey := cfg.ApiKey.Deepseek
 
+	// 创建带信号监听的 context，Ctrl+C 时通知所有工具优雅退出
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	// 解析命令行参数：-m 指定模型后端类型（默认 deepseek）
 	var modelType string
 	flag.StringVar(&modelType, "m", "deepseek", "Model backend type: ollama | deepseek, default: deepseek")
@@ -290,7 +298,12 @@ func main() {
 
 	// 实例化工具上下文
 	toolCtx := &tools.ToolContext{
-		WorkPath: "./workdir",
+		WorkPath:           "./workdir",
+		Ctx:                ctx,
+		DefaultBashTimeout: time.Duration(cfg.Tools.DefaultBashTimeout) * time.Second,
+		Logger:             log.Named("tool"),
+		SessionID:          uuid.NewString(),
+		AppState:           map[string]any{"turn": 0},
 	}
 
 	skillregistry, err := skills.NewRegistry(cfg.Skills.Dir)

@@ -1,6 +1,12 @@
 package tools
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"go.uber.org/zap"
+)
 
 // Tool 定义工具接口
 type Tool interface {
@@ -12,13 +18,16 @@ type Tool interface {
 
 // ToolContext 工具执行上下文
 type ToolContext struct {
-	WorkPath          string         // 当前工作目录
-	Handlers          map[string]any // 额外处理器（预留给 MCP / agent 等能力来源）
-	PermissionContext map[string]any // 权限上下文
-	McpClients        map[string]any // MCP 外部客户端
-	Messages          []any          // 当前消息列表
-	AppState          map[string]any // 应用状态
-	Notifications     []any          // 通知队列
+	WorkPath           string          // 当前工作目录
+	Ctx                context.Context // 超时控制与优雅取消
+	DefaultBashTimeout time.Duration   // 工具执行超时时间
+	Logger             *zap.Logger     // 结构化日志
+	SessionID          string          // 当前会话标识
+	Handlers           map[string]any  // 额外处理器（预留给 MCP / agent 等能力来源）
+	McpClients         map[string]any  // MCP 外部客户端
+	Messages           []any           // 当前消息列表
+	AppState           map[string]any  // 应用状态
+	Notifications      []any           // 通知队列
 }
 
 // ToolResult 工具执行结果

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"zoomClient/tools"
+
+	"go.uber.org/zap"
 )
 
 type SaveMemoryTool struct {
@@ -108,6 +110,8 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	// 生成安全的文件路径
 	safeName := sanitizeFilename(name)
 	filePath := filepath.Join(m.MemoryDir, safeName+".md")
+
+	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path: ", filePath))
 
 	// 写入文件
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {

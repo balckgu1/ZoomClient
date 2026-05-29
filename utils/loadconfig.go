@@ -13,6 +13,7 @@ type Config struct {
 	OpenAI     OpenAIConfig     `mapstructure:"openai"`
 	Subagent   SubagentConfig   `mapstructure:"subagent"`
 	Skills     SkillsConfig     `mapstructure:"skills"`
+	Memory     MemoryConfig     `mapstructure:"memory"`
 	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
 	Compact    CompactConfig    `mapstructure:"compact"`
 	Permission PermissionConfig `mapstructure:"permission"`
@@ -40,6 +41,10 @@ type SubagentConfig struct {
 }
 
 type SkillsConfig struct {
+	Dir string `mapstructure:"dir"`
+}
+
+type MemoryConfig struct {
 	Dir string `mapstructure:"dir"`
 }
 

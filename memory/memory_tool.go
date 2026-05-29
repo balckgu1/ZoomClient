@@ -25,7 +25,7 @@ func (m *SaveMemoryTool) Name() string {
 }
 
 func (m *SaveMemoryTool) Description() string {
-	return "Save memory to file"
+	return "Save a persistent memory that survives across sessions."
 }
 
 func (m *SaveMemoryTool) Parameters() map[string]interface{} {
@@ -34,15 +34,15 @@ func (m *SaveMemoryTool) Parameters() map[string]interface{} {
 		"properties": map[string]any{
 			"name": map[string]any{
 				"type":        "string",
-				"description": "The name of the memory file to save to.",
+				"description": "The name of the memory file to save to. Short identifier (e.g. prefer_tabs, db_schema)",
 			},
 			"description": map[string]any{
 				"type":        "string",
-				"description": "The description of the memory",
+				"description": "One-line summary of what this memory captures",
 			},
 			"type": map[string]any{
 				"type":        "string",
-				"description": "The type of the memory, It is must be one of the following: 'user' | 'feedback' | 'project' | 'reference'",
+				"description": "Memory category. Must be one of: 'user' (preferences), 'feedback' (corrections), 'project' (conventions), or 'reference' (resources).",
 			},
 			"content": map[string]any{
 				"type":        "string",
@@ -80,25 +80,31 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	if !ok || strings.TrimSpace(typ) == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: type parameter must be a non-empty string", IsError: true}
 	}
+
+	// Check typ parameter
+	validTypes := map[string]bool{"user": true, "feedback": true, "project": true, "reference": true}
+	if !validTypes[typ] {
+		return tools.ToolResult{
+			Ok:      false,
+			Content: fmt.Sprintf("Error: type must be one of: user, feedback, project, reference, got: %q", typ),
+			IsError: true,
+		}
+	}
+
 	content, exist := args["content"].(string)
 	if !exist {
 		return tools.ToolResult{Ok: false, Content: "Error: content parameter is required", IsError: true}
 	}
 
-	// 构建 Front Matter + Content
-	fileContent := fmt.Sprintf(`---
-		name: %s
-		description: %s
-		type: %s
-		---
-		%s
-		`, name, description, typ, content)
+	// Front Matter + Content
+	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n", name, description, typ, content)
 
-	// 确保存储目录存在
+	// Check Memory Directory parameter
 	if m.MemoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}
 
+	// Create Memory Directory if not exists
 	if err := os.MkdirAll(m.MemoryDir, 0755); err != nil {
 		return tools.ToolResult{
 			Ok:      false,
@@ -107,13 +113,13 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	// 生成安全的文件路径
+	// Generate a secure file path
 	safeName := sanitizeFilename(name)
 	filePath := filepath.Join(m.MemoryDir, safeName+".md")
 
 	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path: ", filePath))
 
-	// 写入文件
+	// Write file to disk
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
 		return tools.ToolResult{
 			Ok:      false,
@@ -122,6 +128,9 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
+	// rebuild MEMORY.md index
+	rebuildIndex(m.MemoryDir)
+
 	return tools.ToolResult{
 		Ok:      true,
 		Content: fmt.Sprintf("Memory saved successfully to %s", filePath),
@@ -129,9 +138,41 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	}
 }
 
-// sanitizeFilename 清理文件名，移除不安全字符
+// rebuildIndex Rebuild the MEMORY.md index file, listing all valid memory entries in memoryDir.
+// Format: - name: description [type]
+func rebuildIndex(memoryDir string) {
+	entries, err := os.ReadDir(memoryDir)
+	if err != nil {
+		return
+	}
+
+	lines := []string{"# Memory Index\n"}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".md") || name == "MEMORY.md" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(memoryDir, name))
+		if err != nil {
+			continue
+		}
+		doc := ParseFrontMatter(string(data))
+		if doc.FrontMatter.Name != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %s [%s]",
+				doc.FrontMatter.Name, doc.FrontMatter.Description, doc.FrontMatter.Type))
+		}
+	}
+
+	indexPath := filepath.Join(memoryDir, "MEMORY.md")
+	_ = os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
+// sanitizeFilename clean the filename by removing unsafe characters
 func sanitizeFilename(name string) string {
-	// 替换常见的不安全字符
+	// Replace common unsafe characters
 	replacer := strings.NewReplacer(
 		"/", "_",
 		"\\", "_",
@@ -145,7 +186,7 @@ func sanitizeFilename(name string) string {
 		" ", "_",
 	)
 	safe := replacer.Replace(name)
-	// 防止空文件名
+	// Prevent empty file names
 	if safe == "" {
 		safe = "unnamed_memory"
 	}

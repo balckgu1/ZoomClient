@@ -47,6 +47,10 @@ tools:
 skills:
   dir: "./.skills"  # skill directory
 
+# memory config
+memory:
+  dir: "./.memory"  # memory directory
+
 # compact system config
 compact:
   persistThreshold:      4000  # persist threshold

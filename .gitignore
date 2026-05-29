@@ -17,6 +17,8 @@ docs/
 
 .task_outputs/
 
+.memory/
+
 workdir/
 
 logs/

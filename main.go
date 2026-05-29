@@ -15,6 +15,7 @@ import (
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
+	"zoomClient/memory"
 	"zoomClient/permission"
 	"zoomClient/skills"
 	"zoomClient/subagent"
@@ -318,7 +319,6 @@ func main() {
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
 
 	// 系统提示中告知模型使用todotool规划多步骤任务，并保持计划持续更新
-	// 注入宿主 OS 信息，引导模型生成平台兼容的命令
 	systemPrompt := fmt.Sprintf(
 		"You are a helpful assistant running on %s. "+
 			"Use the todo tool to plan multi-step work. "+
@@ -351,24 +351,51 @@ func main() {
 		log.Info("No skills available, skip adding skills to system prompt")
 	}
 
-	// 创建工具注册表并注册所有工具
+	// 加载历史memory, 将上次会话保存的 memory 注入 system prompt
+	if memSection := memory.LoadMemorySection(cfg.Memory.Dir); memSection != "" {
+		systemPrompt += "\n\n" + memSection
+		log.Info("Memory loaded into system prompt", zap.String("dir", cfg.Memory.Dir))
+	} else {
+		log.Info("No memories found, skip loading", zap.String("dir", cfg.Memory.Dir))
+	}
+
+	// memory 保存规则
+	systemPrompt += `
+**Save Memories:**
+- **User Preference:** Explicit likes/dislikes (e.g., "I like tabs", "use pytest"). -> type: user
+- **Feedback:** User corrections or constraints (e.g., "don't do X", "that was wrong"). -> type: feedback
+- **Project Context:** Non-obvious facts not inferable from code (e.g., compliance rules, legacy constraints). -> type: project
+- **References:** Locations of external resources (e.g., ticket boards, dashboards, docs URLs). -> type: reference
+
+**Do NOT Save:**
+- Code-derivable info (signatures, file structure).
+- Temporary state (current branch, open PRs, TODOs).
+- Secrets (API keys, passwords).
+`
+
+	// 创建工具注册表
 	registry := tools.NewRegistry()
+
+	// 注册基础工具
 	registry.Register(tools.WriteFileTool{})
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.RunBashTool{})
 
-	// 将load_skills tool 注册到工具注册表
+	// 将load_skills注册为tool
 	registry.Register(skills.NewLoadSkillTool(skillregistry))
 
-	// 创建会话计划管理器
+	// 注册 memory tool
+	registry.Register(memory.NewSaveMemoryTool(cfg.Memory.Dir))
+
+	// 实例化 todo manager
 	todoManager := tools.NewTodoManager()
-	//将todoManager注册为工具
+	//将todoManager注册为tool
 	registry.Register(todoManager)
 
-	// 创建上下文压缩管理器
+	// 实例化 compact manager
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)
-	// 注册 compact 工具，模型/用户可以主动请求一次完整压缩
+	// 注册 compact 工具
 	registry.Register(compact.NewCompactTool(compactManager))
 
 	// 初始化会话状态：system 提示作为首条，后续 REPL 每轮 append user/assistant/tool 消息

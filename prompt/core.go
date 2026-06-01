@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// buildCore 生成核心身份和行为说明段, 包含宿主 OS 信息和 todo 工具使用指引
+// buildCore 生成核心身份和行为说明段, 包含 todo 工具使用指引
 func (b *SystemPromptBuilder) buildCore() string {
 	return fmt.Sprintf(
 		"You are a helpful assistant." +

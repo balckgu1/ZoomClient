@@ -27,40 +27,37 @@ import (
 	"go.uber.org/zap"
 )
 
-// agentLoop Agent主循环
+// agentLoop
 func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
 	pipeline *prompt.MessagePipeline, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
 	compactManager *compact.CompactManager, hookRunner *hook.Runner, view *ui.Renderer) {
 	log := logger.Log
 
-	// 取出已注册的工具列表。
+	// get tool list
 	toolList := registry.GetAll()
 
-	// 无限循环，直到没有工具调用或达到最大轮次限制
+	// infinite loop until no tool call or max turn count reached
 	for {
-		// 上下文压缩 · 第 2 层（微压缩）: 每次调模型前，把更早的 tool result替换为占位
+		// context compact: 第 2 层（微压缩）：把较早的 tool result替换为占位
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
-		// Pipeline 组装：system prompt + normalize + reminders
+		// Pipeline assemble: system prompt + state.messages + reminders + attachments
 		payload := pipeline.AssemblePayload(state.Messages)
-		// 将 system prompt 作为首条消息，拼接 normalized messages
+		// Add system prompt at the beginning of state.messages
 		fullMessages := append([]fsm.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
 
-		// 调用上游 LLM API。
-		response, err := client.Chat(model, fullMessages, toolList, map[string]interface{}{
-			"temperature": 0.7,
-		})
+		// LLM chat
+		response, err := client.Chat(model, fullMessages, toolList, map[string]interface{}{"temperature": 0.7})
 		if err != nil {
 			log.Error("call llm failed", zap.Error(err))
 			view.PrintError("LLM", err.Error())
 			break
 		}
 
-		// 每轮 LLM 调用后清除 OneShot reminder
+		// Clear OneShot reminder
 		pipeline.ClearOneShotReminders()
 
-		// 将模型 assistant 的响应内容添加到 []state.Messages
-		// DeepSeek 在 thinking 模式下返回的 reasoning_content 须原样透传回 API
+		// Add the assistant's response to state.messages
 		state.Messages = append(state.Messages, fsm.Message{
 			Role:             "assistant",
 			Content:          response.Message.Content,
@@ -68,13 +65,13 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			ReasoningContent: response.Message.ReasoningContent,
 		})
 
-		// 检查是否有工具调用，若没有工具调用，则将 reasoning + assistant 文本渲染给用户
+		// Check if there are any tool calls, if not, render the reasoning+assistant text to user
 		if len(response.Message.ToolCalls) == 0 {
-			// 渲染 reasoning
+			// Render reasoning
 			if response.Message.ReasoningContent != "" {
 				view.PrintReasoning(response.Message.ReasoningContent)
 			}
-			// 渲染 assistant
+			// Render assistant
 			view.PrintAssistant(messageContentToString(response.Message.Content))
 			state.TransitionReason = nil
 			break
@@ -82,12 +79,12 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 
 		log.Info("Model requested tool call", zap.Int("tool count", len(response.Message.ToolCalls)))
 
-		// 若本轮 reasoning 有内容，渲染给用户
+		// If reasoning is not empty, render to user
 		if response.Message.ReasoningContent != "" {
 			view.PrintReasoning(response.Message.ReasoningContent)
 		}
 
-		// 按并发安全性将工具调用分批，日志打印分批信息
+		// Batch tools based on concurrency security
 		toolCalls := response.Message.ToolCalls
 		batches := tools.PartitionToolCalls(toolCalls)
 		log.Info("Batch calling of tools", zap.Int("Batch number", len(batches)))
@@ -102,7 +99,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			)
 		}
 
-		// 渲染本轮所有工具调用
+		// Render all tool calls
 		for _, tc := range toolCalls {
 			if tc.Function.Name == "sub_task" {
 				prompt, _ := tc.Function.Arguments["prompt"].(string)
@@ -112,7 +109,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			view.PrintToolCall(tc.Function.Name, formatArgsPreview(tc.Function.Arguments))
 		}
 
-		// 检查本轮是否调用了 todo 工具
+		// Check if the Todo tool was called in this round
 		usedTodo := false
 		for _, tc := range toolCalls {
 			if tc.Function.Name == "todo" {
@@ -121,7 +118,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			}
 		}
 
-		// Hook 时机2: 在工具执行前，对每个工具触发 EventPreToolUse
+		// Hook: Trigger EventPreToolUse for each tool before tool execution
 		preDecisions := make([]hook.HookResult, len(toolCalls))
 		for i, tc := range toolCalls {
 			preDecisions[i] = hookRunner.Run(hook.EventPreToolUse, map[string]any{
@@ -144,13 +141,13 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			}
 		}
 
-		// 执行所有批次
+		// Execute all batches
 		allowedCalls, allowedIndex := filterAllowedCalls(toolCalls, preDecisions)
 		allowedBatches := tools.PartitionToolCalls(allowedCalls)
 		allowedResults := tools.ExecuteBatches(allowedBatches, registry, toolCtx)
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
-		// 按原始调用顺序将Tool Call结果写回消息历史
+		// Write Tool Result back to state.messages in the order of call
 		for resultIndex, result := range results {
 			log.Info("tool call finished",
 				zap.String("tool name", toolCalls[resultIndex].Function.Name),
@@ -158,17 +155,17 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				zap.String("result", result.Content),
 			)
 
-			// 渲染工具执行结果摘要
+			// Render tool result summary
 			if preDecisions[resultIndex].ExitCode != hook.ExitBlock {
 				view.PrintToolResult(toolCalls[resultIndex].Function.Name, result.Content, result.IsError)
 			}
 
-			// 如果 todo 工具被调用且成功，渲染最新计划面板给用户
+			// If todo tool was called and succeeded, render the latest plan panel to user
 			if toolCalls[resultIndex].Function.Name == "todo" && result.Ok {
 				view.PrintTodoPanel(todoManager.Render())
 			}
 
-			// 上下文压缩 第 1 层（大输出落盘），单条工具结果太大时，把全文写到磁盘，消息里只保留预览
+			// Context compact: 第 1 层（大输出落盘），单条工具结果太大时，把全文写到磁盘，message里只保留预览
 			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
 			if persistedContent != result.Content {
 				log.Info("tool result content too large, persisted to disk and replaced with preview",
@@ -177,7 +174,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				)
 			}
 
-			// ToolCallID 在 OpenAI 协议中必须回填；Ollama 忽略该字段不影响
+			// Add toolCallID to state.messages
 			state.Messages = append(state.Messages, fsm.Message{
 				Role:       "tool",
 				Content:    persistedContent,
@@ -185,11 +182,10 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			})
 		}
 
-		// === Hook 时机 3：PostToolUse ===
+		// Hook：PostToolUse
 		runPostToolUseHooks(hookRunner, toolCalls, results, pipeline)
 
-		// 第五步：维护会话计划状态
-		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时通过 pipeline 注入提醒
+		// If the Todo tool is not used in this round, increase the count and inject a reminder through the pipeline when the threshold is exceeded
 		if !usedTodo {
 			todoManager.IncrementRoundsSinceUpdate()
 			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
@@ -208,8 +204,8 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		reason := "tool_result"
 		state.TransitionReason = &reason
 
-		// === 上下文压缩 · 第 3 层（整体摘要）===
-		// 在本轮所有 tool 结果都已 append 之后再判断是否触发完整压缩。
+		// === Context compact（整体摘要）===
+		// 在本轮所有 tool result 都已 append 进 state.messages 之后再判断是否触发完整压缩。
 		// 触发条件：
 		//   1) 模型/用户调用了 compact 工具，标记了 pendingManualCompact；
 		//   2) 估算的整体上下文体积超过 Config.ContextLimit
@@ -231,7 +227,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			}
 		}
 
-		// 限制最大轮次，避免无限循环
+		// Limit the maximum number of rounds to avoid infinite loops
 		if state.TurnCount >= cfg.AgentLoop.MaxTurns {
 			log.Warn("Reaching the maximum round, stop the loop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
 			view.PrintInfo(fmt.Sprintf("reached max turns (%d), stop", cfg.AgentLoop.MaxTurns))
@@ -241,29 +237,29 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 }
 
 func main() {
-	// 初始化全局日志记录器
+	// Initialize global logger
 	logger.Init()
 	defer logger.Sync()
 	log := logger.Log
 
-	// 读取配置文件
+	// Read configuration file
 	utils.InitConfig()
 	cfg := utils.GetConfig()
 	apiKey := ""
 
-	// 创建带信号监听的 context，Ctrl+C 时通知所有工具优雅退出
+	// Create a context with signal monitoring
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// 解析命令行参数：-m 指定模型后端类型（默认 openai）
+	// Parse command line parameter: - m specifies the backend type of the model (default openai)
 	var modelType string
 	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
 	flag.Parse()
 
-	// 初始化前端渲染器
+	// Initialize front-end renderer
 	view := ui.New()
 
-	// 根据 -m 参数选择对应的 ChatClient 实现与模型名称
+	// Select the corresponding ChatClient and model
 	var (
 		client    clients.ChatClient
 		modelname string
@@ -289,11 +285,17 @@ func main() {
 		client = clients.NewOpenAIClient(baseURL, apiKey)
 		log.Info("OpenAI backend has been selected", zap.String("model", modelname), zap.String("base_url", baseURL))
 	case "ollama", "":
-		client = clients.NewOllamaClient("http://127.0.0.1:11434")
-		modelname = "modelscope.cn/Qwen/Qwen3-8B-GGUF:latest"
+		if cfg.Ollama.BaseURL == "" {
+			log.Fatal("BaseURL is empty", zap.String("base_url", cfg.Ollama.BaseURL))
+		}
+		client = clients.NewOllamaClient(cfg.Ollama.BaseURL)
+		if cfg.Ollama.ModelName == "" {
+			log.Fatal("modelName is empty", zap.String("model_name", cfg.Ollama.ModelName))
+		}
+		modelname = cfg.Ollama.ModelName
 		log.Info("Olama backend has been selected", zap.String("model", modelname))
 	case "anthropic":
-		apiKey = cfg.ApiKey.Anthropic
+		apiKey = cfg.Anthropic.ApiKey
 		if apiKey == "" {
 			apiKey = os.Getenv("ANTHROPIC_API_KEY")
 		}
@@ -302,10 +304,13 @@ func main() {
 			log.Fatal("No API key ANTHROPIC_API_KEY")
 		}
 		client = clients.NewAnthropicClient(apiKey)
-		modelname = "claude-opus-4-5"
+		modelname = cfg.Anthropic.ModelName
+		if modelname == "" {
+			modelname = "claude-opus-4-8"
+		}
 		log.Info("Anthropic backend has been selected", zap.String("model", modelname))
 	case "gemini":
-		apiKey = cfg.ApiKey.Gemini
+		apiKey = cfg.Gemini.ApiKey
 		if apiKey == "" {
 			apiKey = os.Getenv("GEMINI_API_KEY")
 		}
@@ -314,7 +319,10 @@ func main() {
 			log.Fatal("No API key GEMINI_API_KEY")
 		}
 		client = clients.NewGeminiClient(apiKey)
-		modelname = "gemini-2.5-flash"
+		modelname = cfg.Gemini.ModelName
+		if modelname == "" {
+			modelname = "gemini-3.5-flash"
+		}
 		log.Info("Gemini backend has been selected", zap.String("model", modelname))
 	default:
 		view.PrintError("config", "Unsupported model backend types: "+modelType)
@@ -323,7 +331,7 @@ func main() {
 
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
 
-	// 实例化工具上下文
+	// Instantiate tool context
 	toolCtx := &tools.ToolContext{
 		WorkPath:           "./workdir",
 		Ctx:                ctx,
@@ -339,7 +347,7 @@ func main() {
 		skillregistry, _ = skills.NewRegistry("")
 	}
 
-	// 使用 SystemPromptBuilder 按 s10 流水线组装系统提示词
+	// Assemble System Prompt with pipeline
 	promptBuilder := prompt.NewSystemPromptBuilder(skillregistry, cfg.Memory.Dir, modelname, toolCtx.WorkPath)
 	pipeline := prompt.NewPipeline(promptBuilder)
 	log.Info("MessagePipeline initialized")
@@ -561,8 +569,6 @@ func buildAsker(interactive bool) permission.Asker {
 	}
 	return permission.DenyAsker{}
 }
-
-// ===================== Hook 装配与主循环辅助函数 =====================
 
 // buildHookRunner 构造一个 hook runner
 func buildHookRunner() *hook.Runner {

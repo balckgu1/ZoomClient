@@ -8,8 +8,7 @@ type APIPayload struct {
 	Messages     []fsm.Message // normalize + reminders + attachments
 }
 
-// MessagePipeline 模型输入的完整组装管道。
-// 对应 s10a 的四管线：prompt blocks / normalized messages / reminders / attachments。
+// MessagePipeline 模型输入的完整组装管道 ==> prompt blocks / normalized messages / reminders / attachments。
 type MessagePipeline struct {
 	builder     *SystemPromptBuilder
 	reminders   []Reminder

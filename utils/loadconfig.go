@@ -9,8 +9,10 @@ import (
 
 // Config config struct
 type Config struct {
-	ApiKey     ApiKeyConfig     `mapstructure:"api_key"`
 	OpenAI     OpenAIConfig     `mapstructure:"openai"`
+	Ollama     OllamaConfig     `mapstructure:"ollama"`
+	Anthropic  AnthropicConfig  `mapstructure:"anthropic"`
+	Gemini     GeminiConfig     `mapstructure:"gemini"`
 	Subagent   SubagentConfig   `mapstructure:"subagent"`
 	Skills     SkillsConfig     `mapstructure:"skills"`
 	Memory     MemoryConfig     `mapstructure:"memory"`
@@ -20,16 +22,25 @@ type Config struct {
 	Tools      ToolsConfig      `mapstructure:"tools"`
 }
 
-// ApiKeyConfig api_key config
-type ApiKeyConfig struct {
-	Anthropic string `mapstructure:"anthropic"`
-	Gemini    string `mapstructure:"gemini"`
-}
-
 // OpenAIConfig OpenAI 兼容后端配置
 type OpenAIConfig struct {
 	ApiKey    string `mapstructure:"api_key"`
 	BaseURL   string `mapstructure:"base_url"`
+	ModelName string `mapstructure:"model_name"`
+}
+
+type OllamaConfig struct {
+	BaseURL   string `mapstructre:"base_url"`
+	ModelName string `mapstructure:"model_name"`
+}
+
+type AnthropicConfig struct {
+	ApiKey    string `mapstructure:"api_key"`
+	ModelName string `mapstructure:"model_name"`
+}
+
+type GeminiConfig struct {
+	ApiKey    string `mapstructure:"api_key"`
 	ModelName string `mapstructure:"model_name"`
 }
 

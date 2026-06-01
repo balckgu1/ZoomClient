@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"strings"
 	"time"
 	"zoomClient/clients"
@@ -17,6 +16,7 @@ import (
 	"zoomClient/logger"
 	"zoomClient/memory"
 	"zoomClient/permission"
+	"zoomClient/prompt"
 	"zoomClient/skills"
 	"zoomClient/subagent"
 	"zoomClient/tools"
@@ -38,7 +38,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
 	}
 
-	// 取出已注册的工具列表（由具体客户端内部负责转换为各自的协议格式）
+	// 取出已注册的工具列表。
 	toolList := registry.GetAll()
 
 	// 无限循环，直到没有工具调用或达到最大轮次限制
@@ -46,7 +46,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		// 上下文压缩 · 第 2 层（微压缩）: 每次调模型前，把更早的 tool result替换为占位
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
-		// 调用上游 LLM API
+		// 调用上游 LLM API。
 		response, err := client.Chat(model, state.Messages, toolList, map[string]interface{}{
 			"temperature": 0.7,
 		})
@@ -318,15 +318,6 @@ func main() {
 
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
 
-	// 系统提示中告知模型使用todotool规划多步骤任务，并保持计划持续更新
-	systemPrompt := fmt.Sprintf(
-		"You are a helpful assistant running on %s. "+
-			"Use the todo tool to plan multi-step work. "+
-			"Keep exactly one step in_progress when a task has multiple steps. "+
-			"Refresh the plan as work advances. Prefer tools over prose.",
-		runtime.GOOS,
-	)
-
 	// 实例化工具上下文
 	toolCtx := &tools.ToolContext{
 		WorkPath:           "./workdir",
@@ -343,35 +334,10 @@ func main() {
 		skillregistry, _ = skills.NewRegistry("")
 	}
 
-	systemPromptSuffix := skillregistry.DescribeAvailable()
-	if systemPromptSuffix != "" {
-		systemPrompt += "\n\nSkills available (call the load_skill tool to load the full body on demand):\n" + systemPromptSuffix
-		log.Info("Added skills to system prompt", zap.Int("count", skillregistry.Count()), zap.Strings("names", skillregistry.Names()))
-	} else {
-		log.Info("No skills available, skip adding skills to system prompt")
-	}
-
-	// 加载历史memory, 将上次会话保存的 memory 注入 system prompt
-	if memSection := memory.LoadMemorySection(cfg.Memory.Dir); memSection != "" {
-		systemPrompt += "\n\n" + memSection
-		log.Info("Memory loaded into system prompt", zap.String("dir", cfg.Memory.Dir))
-	} else {
-		log.Info("No memories found, skip loading", zap.String("dir", cfg.Memory.Dir))
-	}
-
-	// memory 保存规则
-	systemPrompt += `
-**Save Memories:**
-- **User Preference:** Explicit likes/dislikes (e.g., "I like tabs", "use pytest"). -> type: user
-- **Feedback:** User corrections or constraints (e.g., "don't do X", "that was wrong"). -> type: feedback
-- **Project Context:** Non-obvious facts not inferable from code (e.g., compliance rules, legacy constraints). -> type: project
-- **References:** Locations of external resources (e.g., ticket boards, dashboards, docs URLs). -> type: reference
-
-**Do NOT Save:**
-- Code-derivable info (signatures, file structure).
-- Temporary state (current branch, open PRs, TODOs).
-- Secrets (API keys, passwords).
-`
+	// 使用 SystemPromptBuilder 按 s10 流水线组装系统提示词
+	promptBuilder := prompt.NewSystemPromptBuilder(skillregistry, cfg.Memory.Dir, modelname, toolCtx.WorkPath)
+	systemPrompt := promptBuilder.Build()
+	log.Info("System prompt built by SystemPromptBuilder")
 
 	// 创建工具注册表
 	registry := tools.NewRegistry()

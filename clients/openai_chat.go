@@ -186,7 +186,7 @@ func (c *OpenAIClient) Chat(model string, messages []fsm.Message, toolList []too
 	openaiTools := BuildOpenAITools(toolList)
 	openaiMessages := convertToOpenAIMessages(messages)
 
-	// 2. 构造请求体
+	// 2. 构造请求体。
 	reqData := OpenAIChatRequest{
 		Model:    model,
 		Messages: openaiMessages,

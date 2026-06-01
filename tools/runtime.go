@@ -5,10 +5,14 @@ import (
 	"sync"
 )
 
-// ===================== 常量与类型定义 =====================
-
 // ToolStatus 表示工具执行的当前状态
 type ToolStatus string
+
+// concurrencySafeTools 记录所有可以安全并发执行的工具
+var concurrencySafeTools = map[string]bool{
+	"read_file":   true,
+	"glob_search": true,
+}
 
 const (
 	ToolStatusQueued    ToolStatus = "queued"    // 排队等待执行
@@ -17,11 +21,8 @@ const (
 	ToolStatusYielded   ToolStatus = "yielded"   // 已产出中间进度
 )
 
-// ContextModifier 上下文修改器函数类型。
-// 接收当前 ToolContext 指针，对其进行修改。
+// ContextModifier 上下文修改器函数类型。接收当前 ToolContext 指针，对其进行修改。
 type ContextModifier func(ctx *ToolContext)
-
-// ===================== 核心数据结构 =====================
 
 // TrackedTool 跟踪单个工具调用的完整生命周期。
 // 包含工具的基本信息、执行状态、进度消息、最终结果和上下文修改器。
@@ -37,25 +38,16 @@ type TrackedTool struct {
 }
 
 // ToolExecutionBatch 将多个工具调用按并发安全性分为一批。
-// 同一批次内的工具要么全部可并发，要么全部需串行。
 type ToolExecutionBatch struct {
 	IsConcurrencySafe bool           // 该批次内的工具是否可并发执行
 	Tools             []*TrackedTool // 该批次包含的工具列表
 }
 
-// MessageUpdate 工具执行过程中产出的更新信息。
-// 可以是中间进度消息，也可以是最终结果。
+// MessageUpdate 工具执行过程中产出的更新信息。可以是中间进度消息，也可以是最终结果。
 type MessageUpdate struct {
 	ToolID  string      // 产生该更新的工具 ID
 	Message string      // 进度或结果消息内容
 	Result  *ToolResult // 最终结果（非 nil 时表示工具已完成）
-}
-
-// ===================== 并发安全性判断 =====================
-
-// concurrencySafeTools 记录所有可以安全并发执行的工具名称
-var concurrencySafeTools = map[string]bool{
-	"read_file": true,
 }
 
 // IsConcurrencySafe 判断指定工具是否可以安全地与其他工具并发执行。
@@ -64,8 +56,6 @@ func IsConcurrencySafe(toolName string) bool {
 	_, exists := concurrencySafeTools[toolName]
 	return exists
 }
-
-// ===================== 第一步：分批 =====================
 
 // PartitionToolCalls 将一组工具调用按并发安全性划分为多个批次。
 func PartitionToolCalls(toolCalls []ToolCall) []*ToolExecutionBatch {
@@ -102,8 +92,6 @@ func PartitionToolCalls(toolCalls []ToolCall) []*ToolExecutionBatch {
 
 	return batches
 }
-
-// ===================== 第二步 + 第三步：执行批次 =====================
 
 // ExecuteBatches 按顺序执行所有批次。
 // 并发安全的批次使用 goroutine 并行执行，不安全的批次逐个串行执行。
@@ -179,8 +167,6 @@ func runSerially(trackedTools []*TrackedTool, registry *Registry, toolCtx *ToolC
 	return results
 }
 
-// ===================== 第四步：上下文修改器队列 =====================
-
 // QueuedContextModifiers 暂存各工具产生的上下文修改器。
 // key 为工具 ID，value 为该工具产生的修改器列表。
 // 通过暂存而非立即执行，可以在所有工具完成后按原始顺序统一合并。
@@ -219,15 +205,13 @@ func (queue *QueuedContextModifiers) ApplyInOrder(originalOrder []*TrackedTool, 
 	}
 }
 
-// ===================== 顶层编排入口 =====================
-
 // ExecuteToolCalls 工具执行运行时的顶层入口。
 // 完整流程：分批 → 按批次执行（并发/串行） → 按原始顺序收集结果。
 func ExecuteToolCalls(toolCalls []ToolCall, registry *Registry, toolCtx *ToolContext) []ToolResult {
-	// 第一步：按并发安全性将工具调用分批
+	// 按并发安全性将工具调用分批
 	batches := PartitionToolCalls(toolCalls)
 
-	// 第二步 + 第三步：逐批执行，并发批次并行，独占批次串行
+	// 逐批执行，并发批次并行，独占批次串行
 	results := ExecuteBatches(batches, registry, toolCtx)
 
 	return results

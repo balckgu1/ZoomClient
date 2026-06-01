@@ -199,6 +199,7 @@ func BuildSubAgentRegistry() *tools.Registry {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadFileTool{})
 	reg.Register(tools.RunBashTool{})
+	reg.Register(&tools.GlobSearch{})
 	return reg
 }
 

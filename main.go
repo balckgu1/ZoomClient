@@ -360,6 +360,7 @@ func main() {
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.RunBashTool{})
+	registry.Register(&tools.GlobSearch{})
 
 	// 将load_skills注册为tool
 	registry.Register(skills.NewLoadSkillTool(skillregistry))

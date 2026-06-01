@@ -15,9 +15,9 @@ func TestBuild_EmptyRegistryAndMemoryDir(t *testing.T) {
 
 	result := builder.Build()
 
-	// core 段：应包含 OS 信息
-	if !strings.Contains(result, "helpful assistant running on "+runtime.GOOS) {
-		t.Errorf("Build() should contain core prompt with GOOS, got:\n%s", result)
+	// core 段：应包含核心身份说明
+	if !strings.Contains(result, "helpful assistant") {
+		t.Errorf("Build() should contain core prompt, got:\n%s", result)
 	}
 
 	// dynamic 段：应包含模型名和工作目录

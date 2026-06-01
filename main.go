@@ -29,14 +29,9 @@ import (
 
 // agentLoop Agent主循环
 func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
-	systemPrompt string, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
+	pipeline *prompt.MessagePipeline, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
 	compactManager *compact.CompactManager, hookRunner *hook.Runner, view *ui.Renderer) {
 	log := logger.Log
-
-	// 添加系统提示作为第一条消息
-	if len(state.Messages) == 0 || state.Messages[0].Role != "system" {
-		state.Messages = append([]fsm.Message{{Role: "system", Content: systemPrompt}}, state.Messages...)
-	}
 
 	// 取出已注册的工具列表。
 	toolList := registry.GetAll()
@@ -46,8 +41,13 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		// 上下文压缩 · 第 2 层（微压缩）: 每次调模型前，把更早的 tool result替换为占位
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
+		// Pipeline 组装：system prompt + normalize + reminders
+		payload := pipeline.AssemblePayload(state.Messages)
+		// 将 system prompt 作为首条消息，拼接 normalized messages
+		fullMessages := append([]fsm.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
+
 		// 调用上游 LLM API。
-		response, err := client.Chat(model, state.Messages, toolList, map[string]interface{}{
+		response, err := client.Chat(model, fullMessages, toolList, map[string]interface{}{
 			"temperature": 0.7,
 		})
 		if err != nil {
@@ -55,6 +55,9 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			view.PrintError("LLM", err.Error())
 			break
 		}
+
+		// 每轮 LLM 调用后清除 OneShot reminder
+		pipeline.ClearOneShotReminders()
 
 		// 将模型 assistant 的响应内容添加到 []state.Messages
 		// DeepSeek 在 thinking 模式下返回的 reasoning_content 须原样透传回 API
@@ -130,9 +133,10 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				"sensitive_files": cfg.AgentLoop.SensitiveFiles,
 			})
 			if preDecisions[i].ExitCode == hook.ExitInject && preDecisions[i].Message != "" {
-				state.Messages = append(state.Messages, fsm.Message{
-					Role:    "user",
+				pipeline.AddReminder(prompt.Reminder{
 					Content: preDecisions[i].Message,
+					Source:  "pre_hook",
+					OneShot: true,
 				})
 			}
 			if preDecisions[i].ExitCode == hook.ExitBlock {
@@ -182,19 +186,20 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		}
 
 		// === Hook 时机 3：PostToolUse ===
-		runPostToolUseHooks(hookRunner, toolCalls, results, state)
+		runPostToolUseHooks(hookRunner, toolCalls, results, pipeline)
 
 		// 第五步：维护会话计划状态
-		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时将提醒注入到[]state.Messages中, 使模型在下一轮对话开始时看到提醒并刷新计划
+		// 若本轮未使用 todo 工具，增加未更新计数；超过阈值时通过 pipeline 注入提醒
 		if !usedTodo {
 			todoManager.IncrementRoundsSinceUpdate()
 			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
 				log.Info("Plan has not been updated for a long time, injecting reminders",
 					zap.Int("Rounds since update", todoManager.PlanningState.RoundsSinceUpdate),
 				)
-				state.Messages = append(state.Messages, fsm.Message{
-					Role:    "user",
+				pipeline.AddReminder(prompt.Reminder{
 					Content: reminder,
+					Source:  "todo",
+					OneShot: true,
 				})
 			}
 		}
@@ -336,8 +341,8 @@ func main() {
 
 	// 使用 SystemPromptBuilder 按 s10 流水线组装系统提示词
 	promptBuilder := prompt.NewSystemPromptBuilder(skillregistry, cfg.Memory.Dir, modelname, toolCtx.WorkPath)
-	systemPrompt := promptBuilder.Build()
-	log.Info("System prompt built by SystemPromptBuilder")
+	pipeline := prompt.NewPipeline(promptBuilder)
+	log.Info("MessagePipeline initialized")
 
 	// 创建工具注册表
 	registry := tools.NewRegistry()
@@ -422,7 +427,7 @@ func main() {
 	)
 
 	// Hook EventSessionStart
-	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "system_prompt": systemPrompt})
+	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
 
 	// 渲染会话欢迎横幅
 	view.PrintSessionStart(modelname, logger.LogFilePath)
@@ -449,7 +454,7 @@ func main() {
 
 		// 追加用户消息并运行 agentLoop
 		state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: input})
-		agentLoop(cfg, client, state, modelname, systemPrompt, registry, toolCtx, todoManager, compactManager, hookRunner, view)
+		agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, view)
 		view.PrintTurnSeparator()
 	}
 
@@ -610,8 +615,8 @@ func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 }
 
 // runPostToolUseHooks 对每一个工具结果触发 PostToolUse 事件。
-// exit=2 时把 Message 作为 user 消息注入历史。
-func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, state *fsm.State) {
+// exit=2 时把 Message 作为 OneShot reminder 注入 pipeline。
+func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, pipeline *prompt.MessagePipeline) {
 	for i, tc := range toolCalls {
 		if results[i].IsError {
 			errordecision := runner.Run(hook.EventToolError, map[string]any{
@@ -620,9 +625,10 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 				"output":    results[i].Content,
 			})
 			if errordecision.ExitCode == hook.ExitInject && errordecision.Message != "" {
-				state.Messages = append(state.Messages, fsm.Message{
-					Role:    "user",
+				pipeline.AddReminder(prompt.Reminder{
 					Content: errordecision.Message,
+					Source:  "post_hook",
+					OneShot: true,
 				})
 			}
 		}

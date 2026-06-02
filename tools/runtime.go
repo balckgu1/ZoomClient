@@ -10,8 +10,9 @@ type ToolStatus string
 
 // concurrencySafeTools 记录所有可以安全并发执行的工具
 var concurrencySafeTools = map[string]bool{
-	"read_file":   true,
-	"glob_search": true,
+	"read_file":      true,
+	"list_directory": true,
+	"glob_search":    true,
 }
 
 const (

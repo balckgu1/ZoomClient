@@ -359,6 +359,7 @@ func main() {
 	registry.Register(tools.WriteFileTool{})
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
+	registry.Register(tools.ListDirectory{})
 	registry.Register(tools.RunBashTool{})
 	registry.Register(&tools.GlobSearch{})
 

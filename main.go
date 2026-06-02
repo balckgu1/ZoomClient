@@ -27,18 +27,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// agentLoop
+// agentLoop is the main agent reasoning loop.
 func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
 	pipeline *prompt.MessagePipeline, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
 	compactManager *compact.CompactManager, hookRunner *hook.Runner, view *ui.Renderer) {
 	log := logger.Log
 
-	// get tool list
+	// Get tool list
 	toolList := registry.GetAll()
 
-	// infinite loop until no tool call or max turn count reached
+	// Infinite loop until no tool call or max turn count reached
 	for {
-		// context compact: 第 2 层（微压缩）：把较早的 tool result替换为占位
+		// Context compact: Layer 2 (micro-compact): replace older tool results with placeholders
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
 		// Pipeline assemble: system prompt + state.messages + reminders + attachments
@@ -84,7 +84,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			view.PrintReasoning(response.Message.ReasoningContent)
 		}
 
-		// Batch tools based on concurrency security
+		// Batch tools based on concurrency safety
 		toolCalls := response.Message.ToolCalls
 		batches := tools.PartitionToolCalls(toolCalls)
 		log.Info("Batch calling of tools", zap.Int("Batch number", len(batches)))
@@ -165,7 +165,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				view.PrintTodoPanel(todoManager.Render())
 			}
 
-			// Context compact: 第 1 层（大输出落盘），单条工具结果太大时，把全文写到磁盘，message里只保留预览
+			// Context compact: Layer 1 (large output persistence): when a single tool result is too large, write full content to disk and keep only a preview in the message
 			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
 			if persistedContent != result.Content {
 				log.Info("tool result content too large, persisted to disk and replaced with preview",
@@ -182,7 +182,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			})
 		}
 
-		// Hook：PostToolUse
+		// Hook: PostToolUse
 		runPostToolUseHooks(hookRunner, toolCalls, results, pipeline)
 
 		// If the Todo tool is not used in this round, increase the count and inject a reminder through the pipeline when the threshold is exceeded
@@ -204,12 +204,12 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		reason := "tool_result"
 		state.TransitionReason = &reason
 
-		// === Context compact（整体摘要）===
-		// 在本轮所有 tool result 都已 append 进 state.messages 之后再判断是否触发完整压缩。
-		// 触发条件：
-		//   1) 模型/用户调用了 compact 工具，标记了 pendingManualCompact；
-		//   2) 估算的整体上下文体积超过 Config.ContextLimit
-		// 压缩成功后，state.Messages 会被替换为 system + 一条连续性摘要
+		// Context compact (full summary)
+		// Determine whether to trigger full compression after all tool results have been appended to state.messages
+		// Trigger conditions:
+		//   1) The model/user called the compact tool, marking pendingManualCompact;
+		//   2) The estimated total context size exceeds Config.ContextLimit
+		// After successful compression, state.Messages will be replaced with system + a continuity summary
 		if compactManager.ShouldAutoCompact(state.Messages) {
 			beforeSize := compactManager.EstimateSize(state.Messages)
 			newMessages, cerr := compactManager.CompactHistory(state.Messages)
@@ -251,7 +251,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// Parse command line parameter: - m specifies the backend type of the model (default openai)
+	// Parse command line parameter: -m specifies the backend type of the model (default openai)
 	var modelType string
 	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
 	flag.Parse()
@@ -352,10 +352,10 @@ func main() {
 	pipeline := prompt.NewPipeline(promptBuilder)
 	log.Info("MessagePipeline initialized")
 
-	// 创建工具注册表
+	// Create a tool registry
 	registry := tools.NewRegistry()
 
-	// 注册基础工具
+	// Register basic tools
 	registry.Register(tools.WriteFileTool{})
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
@@ -363,33 +363,33 @@ func main() {
 	registry.Register(tools.RunBashTool{})
 	registry.Register(&tools.GlobSearch{})
 
-	// 将load_skills注册为tool
+	// Register load_skills tool
 	registry.Register(skills.NewLoadSkillTool(skillregistry))
 
-	// 注册 memory tool
+	// Register save_memory tool
 	registry.Register(memory.NewSaveMemoryTool(cfg.Memory.Dir))
 
-	// 实例化 todo manager
+	// Instantiate todo manager
 	todoManager := tools.NewTodoManager()
-	//将todoManager注册为tool
+	// Register todo tool
 	registry.Register(todoManager)
 
-	// 实例化 compact manager
+	// Instantiate compact manager
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)
-	// 注册 compact 工具
+	// Register compact tool
 	registry.Register(compact.NewCompactTool(compactManager))
 
-	// 初始化会话状态：system 提示作为首条，后续 REPL 每轮 append user/assistant/tool 消息
+	// Initialize session state.message
 	state := &fsm.State{
 		Messages:  []fsm.Message{},
 		TurnCount: 0,
 	}
 
-	// 创建 subagent
+	// Create a subagent
 	subAgent := subagent.NewSubAgent(client, modelname, cfg.Subagent.DefaultSystemPrompt, cfg.Subagent.ForkSubtaskPromptPrefix,
 		subagent.BuildSubAgentRegistry(), toolCtx, cfg.Subagent.DefaultMaxTurns)
 
-	// 子智能体统一运行器
+	// Subagent runner function
 	subAgentRunner := func(prompt string, parentMessages []fsm.Message) (string, error) {
 		if parentMessages == nil {
 			return subAgent.Run(prompt)
@@ -397,25 +397,24 @@ func main() {
 		return subAgent.RunWithFork(prompt, parentMessages)
 	}
 
-	// 父消息提供者：fork=true 时由 TaskTool 回调，取最新的 state.Messages 快照
-	// 闭包通过指针引用 state，保证每次调用都读取当时最新的 messages
+	// Called by TaskTool when fork=true, retrieves the latest snapshot of state.Messages
 	parentMessagesProvider := func() []fsm.Message {
 		return state.Messages
 	}
 
-	// 注册 sub_task 工具
+	// Register sub_task tool
 	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))
 
-	// 装配 permission 系统
+	// Permission system
 	permitMgr := permission.NewManager(
 		permission.Mode(cfg.Permission.Mode),
 		buildPermissionRules(cfg.Permission.DenyRules),
 		buildPermissionRules(cfg.Permission.AllowRules),
 		buildAsker(cfg.Permission.Interactive),
 	)
-	// 注入 permission 阀门
+	// Inject permission valve
 	registry.SetPermissionDecider(permitMgr.Decide)
-	// 子智能体使用独立的工具注册表，但应共享同一套权限策略
+	// Subagent uses an independent tool registry but should share the same permission policy
 	if subAgent.Registry != nil {
 		subAgent.Registry.SetPermissionDecider(permitMgr.Decide)
 	}
@@ -428,7 +427,7 @@ func main() {
 
 	log.Info("Registered tool list", zap.Any("tools", registry.GetAllNames()))
 
-	// 装配 hook 系统：Runner 集中调度所有事件，handler 按事件名注册到 Runner 上
+	// Assemble hook system: Runner centrally dispatches all events, handlers are registered by event name
 	hookRunner := buildHookRunner()
 	log.Info("Hook system has been enabled",
 		zap.Int("SessionStart handler count", hookRunner.HandlerCount(hook.EventSessionStart)),
@@ -439,11 +438,11 @@ func main() {
 	// Hook EventSessionStart
 	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
 
-	// 渲染会话欢迎横幅
+	// Render session welcome banner
 	view.PrintSessionStart(modelname, logger.LogFilePath)
 	log.Info("Agent REPL start")
 
-	// REPL 主循环：每轮读一行输入 → 处理斜杠命令 或 调用 agentLoop → 渲染分隔
+	// REPL main loop: read one line per round → process slash command or call agentLoop → render separator
 	for {
 		input, ok := view.PromptUser()
 		if !ok {
@@ -454,7 +453,7 @@ func main() {
 			continue
 		}
 
-		// 斜杠命令处理
+		// Slash command handling
 		if strings.HasPrefix(input, "/") {
 			if handleSlashCommand(input, state, view, compactManager) {
 				break // /exit
@@ -462,7 +461,7 @@ func main() {
 			continue
 		}
 
-		// 追加用户消息并运行 agentLoop
+		// Append user message and run agentLoop
 		state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: input})
 		agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, view)
 		view.PrintTurnSeparator()
@@ -471,18 +470,18 @@ func main() {
 	log.Info("Agent REPL End", zap.Int("total_turns", state.TurnCount))
 	view.PrintSessionEnd(state.TurnCount)
 
-	// 会话结束，触发EventSessionEnd
+	// Session end, trigger EventSessionEnd
 	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
 }
 
-// handleSlashCommand 处理 REPL 斜杠命令。返回 true 表示要退出主循环。
+// handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
 func handleSlashCommand(input string, state *fsm.State, view *ui.Renderer, cm *compact.CompactManager) bool {
 	cmd := strings.TrimSpace(strings.ToLower(input))
 	switch cmd {
 	case "/exit", "/quit":
 		return true
 	case "/clear":
-		// 保留 system 消息，清空其他历史
+		// Keep system message, clear other history
 		if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
 			state.Messages = state.Messages[:1]
 		} else {
@@ -515,7 +514,7 @@ func handleSlashCommand(input string, state *fsm.State, view *ui.Renderer, cm *c
 	return false
 }
 
-// messageContentToString 将 fsm.Message.Content (interface{}) 安全地转为可读字符串。
+// messageContentToString safely converts fsm.Message.Content (interface{}) to a readable string.
 func messageContentToString(content any) string {
 	switch v := content.(type) {
 	case nil:
@@ -531,7 +530,7 @@ func messageContentToString(content any) string {
 	}
 }
 
-// formatArgsPreview 将工具调用参数压缩为一行预览，用于前端渲染。
+// formatArgsPreview compresses tool call arguments into a one-line preview for frontend rendering.
 func formatArgsPreview(args map[string]interface{}) string {
 	if len(args) == 0 {
 		return ""
@@ -548,7 +547,7 @@ func formatArgsPreview(args map[string]interface{}) string {
 	return s
 }
 
-// buildPermissionRules 把配置中的 PermissionRuleConfig 列表转换为 permission.Rule。
+// buildPermissionRules converts the PermissionRuleConfig list in config to permission.Rule.
 func buildPermissionRules(rawRules []utils.PermissionRuleConfig) []permission.Rule {
 	rules := make([]permission.Rule, 0, len(rawRules))
 	for _, raw := range rawRules {
@@ -562,9 +561,9 @@ func buildPermissionRules(rawRules []utils.PermissionRuleConfig) []permission.Ru
 	return rules
 }
 
-// buildAsker 根据配置选择命中 ask 时的交互方式。
-//   - interactive=true  从 stdin 询问用户
-//   - interactive=false 一律拒绝，适合 CI / 后台作业场景的安全默认
+// buildAsker selects the interaction method when ask is triggered based on config.
+//   - interactive=true  ask user from stdin
+//   - interactive=false always deny, suitable as a safe default for CI / background job scenarios
 func buildAsker(interactive bool) permission.Asker {
 	if interactive {
 		return permission.NewStdinAsker()
@@ -572,7 +571,7 @@ func buildAsker(interactive bool) permission.Asker {
 	return permission.DenyAsker{}
 }
 
-// buildHookRunner 构造一个 hook runner
+// buildHookRunner constructs a hook runner
 func buildHookRunner() *hook.Runner {
 	runner := hook.NewRunner() // Build a new hook runner instance
 	runner.Register(hook.EventSessionStart, hook.OnSessionStart)
@@ -588,7 +587,7 @@ func buildHookRunner() *hook.Runner {
 	return runner
 }
 
-// filterAllowedCalls 筛选出未被 hook 阻止的工具调用，并保留它们到原始下标的映射。
+// filterAllowedCalls filters out tool calls not blocked by hook, and preserves their mapping to original indices.
 func filterAllowedCalls(toolCalls []tools.ToolCall, decisions []hook.HookResult) ([]tools.ToolCall, []int) {
 	allowedCalls := make([]tools.ToolCall, 0, len(toolCalls))
 	allowedIndex := make([]int, 0, len(toolCalls))
@@ -602,7 +601,7 @@ func filterAllowedCalls(toolCalls []tools.ToolCall, decisions []hook.HookResult)
 	return allowedCalls, allowedIndex
 }
 
-// mergeToolResults 把执行结果按原始顺序合并回去；被 hook 阻止的位置用阻止结果填充。
+// mergeToolResults merges execution results back in original order; positions blocked by hook are filled with block results.
 func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 	allowedIndex []int, allowedResults []tools.ToolResult) []tools.ToolResult {
 	results := make([]tools.ToolResult, len(toolCalls))
@@ -622,8 +621,8 @@ func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 	return results
 }
 
-// runPostToolUseHooks 对每一个工具结果触发 PostToolUse 事件。
-// exit=2 时把 Message 作为 OneShot reminder 注入 pipeline。
+// runPostToolUseHooks triggers PostToolUse event for each tool result.
+// When exit=2, inject Message as OneShot reminder into pipeline.
 func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, pipeline *prompt.MessagePipeline) {
 	for i, tc := range toolCalls {
 		if results[i].IsError {

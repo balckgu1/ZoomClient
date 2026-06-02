@@ -50,10 +50,12 @@ type Decision struct {
 
 // readOnlyTools 被视作"只读、安全"的工具白名单。
 var readOnlyTools = map[string]bool{
-	"read_file":  true,
-	"load_skill": true,
-	"todo":       true,
-	"compact":    true,
+	"read_file":      true,
+	"list_directory": true,
+	"load_skill":     true,
+	"todo":           true,
+	"compact":        true,
+	"glob_search":    true,
 }
 
 // writeTools 被视作"会写文件 / 会跑命令 / 会跨上下文"的工具。

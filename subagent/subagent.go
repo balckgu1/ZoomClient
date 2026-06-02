@@ -198,7 +198,9 @@ func NewSubAgent(client clients.ChatClient, model string, systemPrompt string, f
 func BuildSubAgentRegistry() *tools.Registry {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadFileTool{})
+	reg.Register(tools.ListDirectory{})
 	reg.Register(tools.RunBashTool{})
+	reg.Register(&tools.GlobSearch{})
 	return reg
 }
 

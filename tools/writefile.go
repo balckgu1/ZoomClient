@@ -10,7 +10,7 @@ import (
 )
 
 // isSafePath 验证 filename 解析后的绝对路径是否在 workpath 工作区目录内。
-// 返回规范化后的目标绝对路径，防止路径穿越（如 ../../ 或绝对路径逃逸）。
+// 返回规范化后的绝对路径
 func isSafePath(workpath string, filename string) (string, error) {
 	// 规范化工作目录为绝对路径
 	cleanWorkpath, err := filepath.Abs(filepath.Clean(workpath))

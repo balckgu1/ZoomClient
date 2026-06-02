@@ -62,20 +62,37 @@
 - 顶层 `ch` 字段做通道路由，区分业务输出、情绪控制和系统事件
 - agent 通道有序流，emotion 通道状态快照，system 通道离散事件
 
-### 2.2 上行协议（Tauri → Go stdin）
+## 2.2 上行协议（Tauri → Go stdin）
 
 ```jsonc
-// 用户发送消息
-{"ch":"cmd", "action":"chat", "payload":{"message":"帮我写个排序算法"}}
+// 用户发送消息（带可选 id 用于 ACK 关联）
+{"ch":"cmd", "id":"msg_01", "action":"chat", "payload":{"message":"帮我写个排序算法"}}
 
 // 配置变更
-{"ch":"cmd", "action":"config", "payload":{"model_type":"anthropic"}}
+{"ch":"cmd", "id":"cfg_01", "action":"config", "payload":{"model_type":"anthropic"}}
 
 // 会话控制
-{"ch":"cmd", "action":"clear"}
-{"ch":"cmd", "action":"compact"}
+{"ch":"cmd", "id":"ctl_01", "action":"clear"}
+{"ch":"cmd", "id":"ctl_02", "action":"compact"}
 {"ch":"cmd", "action":"exit"}
 ```
+
+**请求-响应关联机制：**
+
+- 上行消息可携带可选 `id` 字段（由前端生成，建议格式 `<action>_<序号>`）
+- Go 侧收到带 `id` 的命令后，在开始处理前立即回复 ACK：
+  ```jsonc
+  {"ch":"system", "data":{"event":"ack", "id":"msg_01", "status":"accepted"}}
+  ```
+- 若 JSON 解析失败或参数非法，回复 NACK：
+  ```jsonc
+  {"ch":"system", "data":{"event":"ack", "id":"msg_01", "status":"rejected", "reason":"invalid payload"}}
+  ```
+- 前端发送后启动 **5s ACK 超时**：
+  - 收到 `accepted` → 正常等待 agent 通道输出
+  - 收到 `rejected` → 立即显示错误提示
+  - 超时未收到 → 显示"发送失败，请重试"（无需等心跳 10s 超时）
+- `exit` 命令无需 ACK（进程即将退出）
 
 ### 2.3 下行协议（Go stdout → Tauri）
 
@@ -278,13 +295,37 @@ for scanner.Scan() {
 | 发送消息 | stdin 写入 JSON | 宠物切换 thinking |
 | 收到 done | 消息列表更新完毕 | 宠物 happy → 3s → idle |
 
-### 6.3 窗口大小策略
+### 6.3 鼠标点击穿透管理
+
+透明窗口的可点击区域不能等于窗口矩形，否则会拦截下方桌面应用的点击事件。
+
+**核心原则：** 不使用 CSS `pointer-events: none`（Tauri 透明窗口下不可靠），必须在 Rust 侧通过 `WebviewWindow::set_ignore_cursor_events()` 动态切换。
+
+**实现机制：**
+
+```
+前端 Svelte                          Tauri Rust 侧
+─────────────────                    ────────────────
+on:mouseenter (宠物SVG/气泡容器)  →   set_ignore_cursor_events(false)
+  鼠标进入可见元素边界                    窗口接收点击
+
+on:mouseleave (宠物SVG/气泡容器)  →   set_ignore_cursor_events(true)
+  鼠标离开可见元素边界                    点击穿透到桌面
+```
+
+**关键细节：**
+- 前端监听 `on:mouseenter` / `on:mouseleave` 绑定在宠物 SVG 和气泡容器的**实际可见边界**上，而非整个窗口
+- 窗口默认状态为 `ignore_cursor_events(true)`（穿透），仅当鼠标悬停在可见内容上时切换为可交互
+- 气泡展开/收起时需同步更新监听区域的边界范围
+- 右键菜单弹出期间强制 `ignore_cursor_events(false)` 直到菜单关闭
+
+### 6.4 窗口大小策略
 
 - 气泡收起：200×200px，仅宠物可见
 - 气泡展开：200×480px（气泡在宠物上方弹出）
 - 大小切换（小/中/大）：整体缩放 0.75x / 1.0x / 1.5x
 
-### 6.4 右键菜单选项（MVP）
+### 6.5 右键菜单选项（MVP）
 
 1. 模型切换（OpenAI / Ollama / Anthropic / Gemini）
 2. 宠物大小（小 / 中 / 大）

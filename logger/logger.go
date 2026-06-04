@@ -14,10 +14,6 @@ var Log *zap.Logger
 const LogFilePath = "./logs/backend.log"
 
 // Init 初始化全局日志记录器。
-//
-// 设计：日志只写到 ./logs/backend.log，避免污染 CLI 前端的标准输出；
-// 但 ERROR / FATAL 级别同时镜像到 stderr，保证程序异常时用户也能看到。
-// 这样实现了"日志在后端文件，前端只显示用户可见信息"的分流。
 func Init() {
 	if err := os.MkdirAll("./logs", 0o755); err != nil {
 		panic("failed to create logs dir: " + err.Error())

@@ -1,4 +1,3 @@
-/* 全局样式 — 确保 Tauri 透明窗口正常显示 */
 :root {
   --pet-scale: 1;
   --pet-opacity: 1;

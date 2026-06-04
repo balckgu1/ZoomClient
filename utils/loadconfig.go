@@ -87,10 +87,10 @@ type PermissionConfig struct {
 }
 
 // PermissionRuleConfig 单条权限规则的 yaml 表达。
-//   - Tool    ：针对哪个工具（"" 或 "*" 表示任意工具）
+//   - Tool    ：针对哪个工具, "" 或 "*" 表示任意工具
 //   - Behavior：allow / deny / ask
-//   - Path    ：可选，匹配 filename / path / file 参数（"re:" 前缀视为正则）
-//   - Content ：可选，匹配 command / content / prompt 参数（"re:" 前缀视为正则）
+//   - Path    ：可选，匹配 filename / path / file 参数
+//   - Content ：可选，匹配 command / content / prompt 参数
 type PermissionRuleConfig struct {
 	Tool     string `mapstructure:"tool"`
 	Behavior string `mapstructure:"behavior"`
@@ -104,13 +104,12 @@ var (
 	configOnce   sync.Once
 )
 
-// InitConfig 初始化配置文件（使用默认路径 ./config）
+// InitConfig 初始化配置文件，默认路径 ./config
 func InitConfig() {
 	InitConfigWithDir("")
 }
 
 // InitConfigWithDir 初始化配置文件，可指定配置目录路径。
-// 当 configDir 为空时，使用默认路径 ./config。
 func InitConfigWithDir(configDir string) {
 	configOnce.Do(func() {
 		// Config file name

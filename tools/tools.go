@@ -44,8 +44,6 @@ func (r ToolResult) String() string {
 }
 
 // ToolCall 表示模型返回的工具调用
-// ID 字段为 OpenAI 兼容协议（如 DeepSeek）所必需，用于关联 tool 角色消息；
-// 在 Ollama 协议中该字段可能为空，序列化时会被自动忽略。
 type ToolCall struct {
 	ID       string           `json:"id,omitempty"`
 	Function ToolCallFunction `json:"function"`
@@ -58,8 +56,6 @@ type ToolCallFunction struct {
 }
 
 // PermissionDecider 在工具真正执行前的权限闸门函数。
-//
-// 返回 allow=false 时，RunTool 直接以错误结果返回，不会调用工具本体。
 type PermissionDecider func(toolName string, args map[string]interface{}) (allow bool, reason string)
 
 // Registry 工具注册表，管理所有可用工具

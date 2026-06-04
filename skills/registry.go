@@ -49,28 +49,28 @@ func (r *SkillRegistry) loadAll() error {
 
 // walkFunc 是 filepath.WalkDir 的回调函数，处理单个路径节点。
 func (r *SkillRegistry) walkFunc(path string, d os.DirEntry, err error) error {
-	// 1. 处理系统错误或权限问题
+	// 处理系统错误或权限问题
 	if err != nil {
 		return err
 	}
 
-	// 2. 过滤：跳过目录
+	// 过滤：跳过目录
 	if d.IsDir() {
 		return nil
 	}
 
-	// 3. 过滤：只处理名为 "SKILL.md" 的文件（忽略大小写）
+	// 过滤：只处理名为 "SKILL.md" 的文件（忽略大小写）
 	if !strings.EqualFold(d.Name(), "SKILL.md") {
 		return nil
 	}
 
-	// 4. 加载并解析技能文件
+	// 加载并解析技能文件
 	skillDoc, parseErr := r.parseSkillFile(path)
 	if parseErr != nil {
 		return parseErr
 	}
 
-	// 5. 注册到内存 Map 中
+	// 注册到内存 Map 中
 	r.skills[skillDoc.Manifest.Name] = skillDoc
 	return nil
 }

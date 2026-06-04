@@ -1,5 +1,4 @@
 <!-- desktop/src/lib/PetView.svelte -->
-<!-- 宠物主体：SVG 猫 + 6 种 CSS 动画，class 绑定情绪状态 -->
 <script lang="ts">
   import { emotionState, sidecarAlive } from "./SidecarBridge";
 

@@ -1,5 +1,4 @@
 <!-- desktop/src/App.svelte -->
-<!-- 主应用：集成宠物、对话气泡、右键菜单 -->
 <script lang="ts">
   import PetView from "./lib/PetView.svelte";
   import ChatBubble from "./lib/ChatBubble.svelte";

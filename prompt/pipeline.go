@@ -4,7 +4,7 @@ import "zoomClient/fsm"
 
 // APIPayload 最终组装的模型输入载荷。
 type APIPayload struct {
-	SystemPrompt string        // 来自 SystemPromptBuilder.Build()
+	SystemPrompt string
 	Messages     []fsm.Message // normalize + reminders + attachments
 }
 

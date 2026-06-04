@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"time"
 	"zoomClient/clients"
 	"zoomClient/compact"
+	"zoomClient/emitter"
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
@@ -30,7 +32,7 @@ import (
 // agentLoop is the main agent reasoning loop.
 func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
 	pipeline *prompt.MessagePipeline, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
-	compactManager *compact.CompactManager, hookRunner *hook.Runner, view *ui.Renderer) {
+	compactManager *compact.CompactManager, hookRunner *hook.Runner, em emitter.Emitter) {
 	log := logger.Log
 
 	// Get tool list
@@ -50,7 +52,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		response, err := client.Chat(model, fullMessages, toolList, map[string]interface{}{"temperature": 0.7})
 		if err != nil {
 			log.Error("call llm failed", zap.Error(err))
-			view.PrintError("LLM", err.Error())
+			em.EmitError("LLM", err.Error())
 			break
 		}
 
@@ -69,10 +71,11 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		if len(response.Message.ToolCalls) == 0 {
 			// Render reasoning
 			if response.Message.ReasoningContent != "" {
-				view.PrintReasoning(response.Message.ReasoningContent)
+				em.EmitReasoning(response.Message.ReasoningContent)
 			}
 			// Render assistant
-			view.PrintAssistant(messageContentToString(response.Message.Content))
+			em.EmitAssistant(messageContentToString(response.Message.Content))
+			em.EmitDone()
 			state.TransitionReason = nil
 			break
 		}
@@ -81,7 +84,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 
 		// If reasoning is not empty, render to user
 		if response.Message.ReasoningContent != "" {
-			view.PrintReasoning(response.Message.ReasoningContent)
+			em.EmitReasoning(response.Message.ReasoningContent)
 		}
 
 		// Batch tools based on concurrency safety
@@ -103,10 +106,10 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		for _, tc := range toolCalls {
 			if tc.Function.Name == "sub_task" {
 				prompt, _ := tc.Function.Arguments["prompt"].(string)
-				view.PrintSubAgent(prompt)
+				em.EmitSubAgent(prompt)
 				continue
 			}
-			view.PrintToolCall(tc.Function.Name, formatArgsPreview(tc.Function.Arguments))
+			em.EmitToolCall(tc.Function.Name, formatArgsPreview(tc.Function.Arguments))
 		}
 
 		// Check if the Todo tool was called in this round
@@ -137,7 +140,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 				})
 			}
 			if preDecisions[i].ExitCode == hook.ExitBlock {
-				view.PrintHookBlocked(tc.Function.Name, preDecisions[i].Message)
+				em.EmitHookBlocked(tc.Function.Name, preDecisions[i].Message)
 			}
 		}
 
@@ -157,12 +160,12 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 
 			// Render tool result summary
 			if preDecisions[resultIndex].ExitCode != hook.ExitBlock {
-				view.PrintToolResult(toolCalls[resultIndex].Function.Name, result.Content, result.IsError)
+				em.EmitToolResult(toolCalls[resultIndex].Function.Name, result.Content, result.IsError)
 			}
 
 			// If todo tool was called and succeeded, render the latest plan panel to user
 			if toolCalls[resultIndex].Function.Name == "todo" && result.Ok {
-				view.PrintTodoPanel(todoManager.Render())
+				em.EmitTodoPanel(todoManager.Render())
 			}
 
 			// Context compact: Layer 1 (large output persistence): when a single tool result is too large, write full content to disk and keep only a preview in the message
@@ -222,7 +225,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 					zap.Int("Bytes after compression", afterSize),
 					zap.Int("Message count", len(newMessages)),
 				)
-				view.PrintCompact(beforeSize, afterSize)
+				em.EmitCompact(beforeSize, afterSize)
 				state.Messages = newMessages
 			}
 		}
@@ -230,7 +233,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		// Limit the maximum number of rounds to avoid infinite loops
 		if state.TurnCount >= cfg.AgentLoop.MaxTurns {
 			log.Warn("Reaching the maximum round, stop the loop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
-			view.PrintInfo(fmt.Sprintf("reached max turns (%d), stop", cfg.AgentLoop.MaxTurns))
+			em.EmitInfo(fmt.Sprintf("reached max turns (%d), stop", cfg.AgentLoop.MaxTurns))
 			break
 		}
 	}
@@ -242,8 +245,17 @@ func main() {
 	defer logger.Sync()
 	log := logger.Log
 
+	// Parse command line parameter: -m specifies the backend type of the model (default openai)
+	var modelType string
+	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
+	var outputMode string
+	flag.StringVar(&outputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar)")
+	var configDir string
+	flag.StringVar(&configDir, "config-dir", "", "Config directory path (default: ./config)")
+	flag.Parse()
+
 	// Read configuration file
-	utils.InitConfig()
+	utils.InitConfigWithDir(configDir)
 	cfg := utils.GetConfig()
 	apiKey := ""
 
@@ -251,13 +263,18 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	// Parse command line parameter: -m specifies the backend type of the model (default openai)
-	var modelType string
-	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
-	flag.Parse()
-
-	// Initialize front-end renderer
-	view := ui.New()
+	// Initialize front-end emitter based on mode
+	var em emitter.Emitter
+	var view *ui.Renderer // nil in API mode, used for CLI input only
+	switch strings.ToLower(outputMode) {
+	case "api":
+		em = emitter.NewApiEmitter(os.Stdout)
+	case "cli", "":
+		view = ui.New()
+		em = view
+	default:
+		log.Fatal("Unsupported output mode", zap.String("--mode", outputMode))
+	}
 
 	// Select the corresponding ChatClient and model
 	var (
@@ -271,7 +288,7 @@ func main() {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
 		if apiKey == "" {
-			view.PrintError("config", "Please set the API key")
+			em.EmitError("config", "Please set the API key")
 			log.Fatal("No API key OPENAI_API_KEY")
 		}
 		baseURL := cfg.OpenAI.BaseURL
@@ -300,7 +317,7 @@ func main() {
 			apiKey = os.Getenv("ANTHROPIC_API_KEY")
 		}
 		if apiKey == "" {
-			view.PrintError("config", "Please set the API key ANTHROPIC_API_KEY")
+			em.EmitError("config", "Please set the API key ANTHROPIC_API_KEY")
 			log.Fatal("No API key ANTHROPIC_API_KEY")
 		}
 		client = clients.NewAnthropicClient(apiKey)
@@ -315,7 +332,7 @@ func main() {
 			apiKey = os.Getenv("GEMINI_API_KEY")
 		}
 		if apiKey == "" {
-			view.PrintError("config", "Please set the API key GEMINI_API_KEY")
+			em.EmitError("config", "Please set the API key GEMINI_API_KEY")
 			log.Fatal("No API key GEMINI_API_KEY")
 		}
 		client = clients.NewGeminiClient(apiKey)
@@ -325,7 +342,7 @@ func main() {
 		}
 		log.Info("Gemini backend has been selected", zap.String("model", modelname))
 	default:
-		view.PrintError("config", "Unsupported model backend types: "+modelType)
+		em.EmitError("config", "Unsupported model backend types: "+modelType)
 		log.Fatal("Unsupported model backend types", zap.String("-m", modelType))
 	}
 
@@ -406,12 +423,24 @@ func main() {
 	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))
 
 	// Permission system
-	permitMgr := permission.NewManager(
-		permission.Mode(cfg.Permission.Mode),
-		buildPermissionRules(cfg.Permission.DenyRules),
-		buildPermissionRules(cfg.Permission.AllowRules),
-		buildAsker(cfg.Permission.Interactive),
-	)
+	var permitMgr *permission.Manager
+	var apiAsker *permission.ApiAsker
+	if outputMode == "api" {
+		apiAsker = permission.NewApiAsker(os.Stdout)
+		permitMgr = permission.NewManager(
+			permission.Mode(cfg.Permission.Mode),
+			buildPermissionRules(cfg.Permission.DenyRules),
+			buildPermissionRules(cfg.Permission.AllowRules),
+			apiAsker,
+		)
+	} else {
+		permitMgr = permission.NewManager(
+			permission.Mode(cfg.Permission.Mode),
+			buildPermissionRules(cfg.Permission.DenyRules),
+			buildPermissionRules(cfg.Permission.AllowRules),
+			buildAsker(cfg.Permission.Interactive, false, nil),
+		)
+	}
 	// Inject permission valve
 	registry.SetPermissionDecider(permitMgr.Decide)
 	// Subagent uses an independent tool registry but should share the same permission policy
@@ -439,43 +468,117 @@ func main() {
 	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
 
 	// Render session welcome banner
-	view.PrintSessionStart(modelname, logger.LogFilePath)
+	em.EmitSessionStart(modelname, logger.LogFilePath)
 	log.Info("Agent REPL start")
 
-	// REPL main loop: read one line per round → process slash command or call agentLoop → render separator
-	for {
-		input, ok := view.PromptUser()
-		if !ok {
-			view.PrintInfo("EOF, exiting...")
-			break
-		}
-		if input == "" {
-			continue
-		}
-
-		// Slash command handling
-		if strings.HasPrefix(input, "/") {
-			if handleSlashCommand(input, state, view, compactManager) {
-				break // /exit
-			}
-			continue
-		}
-
-		// Append user message and run agentLoop
-		state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: input})
-		agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, view)
-		view.PrintTurnSeparator()
+	// API mode: start heartbeat goroutine + concurrent reader
+	var concurrentReader *emitter.ConcurrentReader
+	if outputMode == "api" {
+		concurrentReader = emitter.NewConcurrentReader(os.Stdin, apiAsker)
+		defer concurrentReader.Stop()
+		go startHeartbeat(ctx, em)
 	}
 
+	if outputMode == "api" {
+		// ─── API Mode REPL: read NDJSON commands from ConcurrentReader ───
+		for {
+			cmd := concurrentReader.Next()
+			if cmd == nil {
+				log.Info("API mode stdin closed")
+				break
+			}
+			// Validate payload before ACK
+			var ackStatus string
+			if cmd.Action == "chat" {
+				payload, perr := emitter.ParseChatPayload(cmd)
+				if perr != nil || payload.Message == "" {
+					ackStatus = "rejected"
+					if cmd.ID != "" {
+						em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "rejected", "reason": "invalid or empty message"})
+					}
+					continue
+				}
+			}
+			// Send ACK
+			if cmd.ID != "" && ackStatus == "" {
+				em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "accepted"})
+			}
+			switch cmd.Action {
+			case "chat":
+				payload, _ := emitter.ParseChatPayload(cmd) // already validated above
+				// Emit thinking emotion
+				em.EmitEmotion("thinking", nil)
+				state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: payload.Message})
+				agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, em)
+			case "config":
+				cfgPayload, _ := emitter.ParseConfigPayload(cmd)
+				if cfgPayload.ModelType != "" {
+					em.EmitInfo("model_type change not supported at runtime, restart required")
+				}
+			case "clear":
+				if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
+					state.Messages = state.Messages[:1]
+				} else {
+					state.Messages = state.Messages[:0]
+				}
+				state.TurnCount = 0
+				em.EmitInfo("history cleared")
+			case "compact":
+				if len(state.Messages) <= 1 {
+					em.EmitInfo("no history to compact")
+					continue
+				}
+				before := compactManager.EstimateSize(state.Messages)
+				newMsgs, cerr := compactManager.CompactHistory(state.Messages)
+				if cerr != nil {
+					em.EmitError("compact", cerr.Error())
+					continue
+				}
+				state.Messages = newMsgs
+				after := compactManager.EstimateSize(newMsgs)
+				em.EmitCompact(before, after)
+			case "exit":
+				goto sessionEnd
+			default:
+				em.EmitInfo("unknown action: " + cmd.Action)
+			}
+		}
+	} else {
+		// ─── CLI Mode REPL: read line from stdin ───
+		for {
+			input, ok := view.PromptUser()
+			if !ok {
+				em.EmitInfo("EOF, exiting...")
+				break
+			}
+			if input == "" {
+				continue
+			}
+			// Slash command handling
+			if strings.HasPrefix(input, "/") {
+				if handleSlashCommand(input, state, em, compactManager) {
+					break // /exit
+				}
+				continue
+			}
+			// Append user message and run agentLoop
+			state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: input})
+			agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, em)
+			em.EmitTurnSeparator()
+		}
+	}
+
+sessionEnd:
+
 	log.Info("Agent REPL End", zap.Int("total_turns", state.TurnCount))
-	view.PrintSessionEnd(state.TurnCount)
+	em.EmitSessionEnd(state.TurnCount)
 
 	// Session end, trigger EventSessionEnd
 	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
 }
 
 // handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
-func handleSlashCommand(input string, state *fsm.State, view *ui.Renderer, cm *compact.CompactManager) bool {
+func handleSlashCommand(input string, state *fsm.State, em emitter.Emitter, cm *compact.CompactManager) bool {
 	cmd := strings.TrimSpace(strings.ToLower(input))
 	switch cmd {
 	case "/exit", "/quit":
@@ -488,30 +591,47 @@ func handleSlashCommand(input string, state *fsm.State, view *ui.Renderer, cm *c
 			state.Messages = state.Messages[:0]
 		}
 		state.TurnCount = 0
-		view.PrintInfo("history cleared (system prompt kept)")
+		em.EmitInfo("history cleared (system prompt kept)")
 	case "/compact":
 		if len(state.Messages) <= 1 {
-			view.PrintInfo("no history to compact")
+			em.EmitInfo("no history to compact")
 			return false
 		}
 		before := cm.EstimateSize(state.Messages)
 		newMsgs, cerr := cm.CompactHistory(state.Messages)
 		if cerr != nil {
-			view.PrintError("compact", cerr.Error())
+			em.EmitError("compact", cerr.Error())
 			return false
 		}
 		state.Messages = newMsgs
 		after := cm.EstimateSize(newMsgs)
-		view.PrintCompact(before, after)
+		em.EmitCompact(before, after)
 	case "/help":
-		view.PrintInfo("/exit  - quit")
-		view.PrintInfo("/clear - clear conversation history (system prompt kept)")
-		view.PrintInfo("/compact - manually compact conversation history")
-		view.PrintInfo("/help  - show this message")
+		em.EmitInfo("/exit  - quit")
+		em.EmitInfo("/clear - clear conversation history (system prompt kept)")
+		em.EmitInfo("/compact - manually compact conversation history")
+		em.EmitInfo("/help  - show this message")
 	default:
-		view.PrintInfo("unknown command: " + input + "  (try /help)")
+		em.EmitInfo("unknown command: " + input + "  (try /help)")
 	}
 	return false
+}
+
+// startHeartbeat 周期性地输出心跳事件，用于前端检测 sidecar 存活状态。
+// 该 goroutine 独立于 agentLoop，即使 LLM 调用阻塞也不会中断心跳。
+func startHeartbeat(ctx context.Context, em emitter.Emitter) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			em.EmitSystem("heartbeat", map[string]string{
+				"ts": fmt.Sprintf("%d", time.Now().Unix()),
+			})
+		}
+	}
 }
 
 // messageContentToString safely converts fsm.Message.Content (interface{}) to a readable string.
@@ -562,13 +682,17 @@ func buildPermissionRules(rawRules []utils.PermissionRuleConfig) []permission.Ru
 }
 
 // buildAsker selects the interaction method when ask is triggered based on config.
-//   - interactive=true  ask user from stdin
-//   - interactive=false always deny, suitable as a safe default for CI / background job scenarios
-func buildAsker(interactive bool) permission.Asker {
-	if interactive {
-		return permission.NewStdinAsker()
+//   - interactive=true + API mode   → ApiAsker（通过 NDJSON 协议与前端交互）
+//   - interactive=true + CLI mode   → StdinAsker（终端文本交互）
+//   - interactive=false             → DenyAsker（安全默认值）
+func buildAsker(interactive bool, apiMode bool, w io.Writer) permission.Asker {
+	if !interactive {
+		return permission.DenyAsker{}
 	}
-	return permission.DenyAsker{}
+	if apiMode {
+		return permission.NewApiAsker(w)
+	}
+	return permission.NewStdinAsker()
 }
 
 // buildHookRunner constructs a hook runner

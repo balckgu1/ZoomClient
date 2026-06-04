@@ -193,3 +193,26 @@ func (r *Renderer) PrintError(scope, msg string) {
 func (r *Renderer) PrintInfo(msg string) {
 	r.println(styleSeparator.Render("· " + msg))
 }
+
+// ===================== Emitter 接口实现 =====================
+// 以下方法使 Renderer 满足 emitter.Emitter 接口，
+// 内部委托给现有的 PrintXxx 方法，保持 CLI 行为不变。
+
+func (r *Renderer) EmitSessionStart(model, logPath string) { r.PrintSessionStart(model, logPath) }
+func (r *Renderer) EmitSessionEnd(totalTurns int)          { r.PrintSessionEnd(totalTurns) }
+func (r *Renderer) EmitTurnSeparator()                     { r.PrintTurnSeparator() }
+func (r *Renderer) EmitAssistant(text string)              { r.PrintAssistant(text) }
+func (r *Renderer) EmitReasoning(text string)              { r.PrintReasoning(text) }
+func (r *Renderer) EmitDone()                              {} // CLI 模式不需要显式 done 信号
+func (r *Renderer) EmitToolCall(name, argsPreview string)  { r.PrintToolCall(name, argsPreview) }
+func (r *Renderer) EmitToolResult(name, content string, isError bool) {
+	r.PrintToolResult(name, content, isError)
+}
+func (r *Renderer) EmitSubAgent(promptPreview string)                { r.PrintSubAgent(promptPreview) }
+func (r *Renderer) EmitHookBlocked(toolName, reason string)          { r.PrintHookBlocked(toolName, reason) }
+func (r *Renderer) EmitTodoPanel(rendered string)                    { r.PrintTodoPanel(rendered) }
+func (r *Renderer) EmitCompact(beforeBytes, afterBytes int)          { r.PrintCompact(beforeBytes, afterBytes) }
+func (r *Renderer) EmitError(scope, msg string)                      { r.PrintError(scope, msg) }
+func (r *Renderer) EmitInfo(msg string)                              { r.PrintInfo(msg) }
+func (r *Renderer) EmitEmotion(state string, meta map[string]string) {} // CLI 模式无宠物情绪
+func (r *Renderer) EmitSystem(event string, data map[string]string)  {} // CLI 模式无系统事件流

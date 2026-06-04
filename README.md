@@ -1,6 +1,6 @@
 # 🤖 ZoomClient
 
-**[中文文档](README.md) | English**
+**[中文文档](README_ZH.md) | English**
 
 ZoomClient is a Go-based AI Agent framework that implements an autonomous task execution system with Tool-Use capabilities.
 The project adopts a modular architecture, covering multi-backend model clients, tool control plane, concurrent execution runtime, subagents, on-demand skill loading, session plan management, context compaction, hook system, permission system, interactive CLI, and other core subsystems.

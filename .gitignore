@@ -22,3 +22,19 @@ docs/
 workdir/
 
 logs/
+
+desktop/node_modules/
+
+desktop/package-lock.json
+
+desktop/dist/
+
+desktop/src-tauri/target/
+
+desktop/src-tauri/gen/
+
+desktop/src-tauri/binaries/
+
+desktop/src-tauri/logs/
+
+desktop/FRONTEND_ARCHITECTURE.md

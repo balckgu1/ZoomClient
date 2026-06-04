@@ -104,15 +104,25 @@ var (
 	configOnce   sync.Once
 )
 
-// InitConfig 初始化配置文件
+// InitConfig 初始化配置文件（使用默认路径 ./config）
 func InitConfig() {
+	InitConfigWithDir("")
+}
+
+// InitConfigWithDir 初始化配置文件，可指定配置目录路径。
+// 当 configDir 为空时，使用默认路径 ./config。
+func InitConfigWithDir(configDir string) {
 	configOnce.Do(func() {
 		// Config file name
 		viper.SetConfigName("config")
 		// Config file type
 		viper.SetConfigType("yaml")
 		// config file path
-		viper.AddConfigPath("./config")
+		if configDir != "" {
+			viper.AddConfigPath(configDir)
+		} else {
+			viper.AddConfigPath("./config")
+		}
 		// find config file and read it
 		err := viper.ReadInConfig()
 		if err != nil {

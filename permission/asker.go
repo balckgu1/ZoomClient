@@ -2,10 +2,13 @@ package permission
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -68,6 +71,68 @@ func (a *StdinAsker) Ask(toolName string, args map[string]any, reason string) (b
 		return true, ""
 	default:
 		return false, "denied by user"
+	}
+}
+
+// ─── API 模式：通过 NDJSON 协议向前端请求权限确认 ───
+
+// ApiAsker 通过 NDJSON stdout/stdin 协议与 Tauri 前端交互完成权限确认。
+//
+// 工作流程：
+//  1. Ask() 生成唯一 requestID，写入 NDJSON 行到 w（ch="permission"）；
+//  2. Ask() 阻塞等待内部 channel；
+//  3. ConcurrentReader 在后台持续读 stdin，收到 permission_reply 后调用 Resolve()；
+//  4. Resolve() 向 channel 写入结果，Ask() 解除阻塞并返回。
+type ApiAsker struct {
+	w       io.Writer
+	mu      sync.Mutex // 保护并发写入
+	pending sync.Map   // requestID -> chan permissionResponse
+	idSeq   atomic.Int64
+}
+
+type permissionResponse struct {
+	ok     bool
+	reason string
+}
+
+// NewApiAsker 创建一个 API 模式专用的 Asker，输出到指定 Writer（通常是 os.Stdout）。
+func NewApiAsker(w io.Writer) *ApiAsker {
+	return &ApiAsker{w: w}
+}
+
+// Ask 实现 Asker 接口。发送权限请求 NDJSON 事件并阻塞等待前端回复。
+func (a *ApiAsker) Ask(toolName string, args map[string]any, reason string) (bool, string) {
+	id := fmt.Sprintf("perm_%d", a.idSeq.Add(1))
+	ch := make(chan permissionResponse, 1)
+	a.pending.Store(id, ch)
+	defer a.pending.Delete(id)
+
+	argsJSON, _ := json.Marshal(args)
+	msg := map[string]any{
+		"ch": "permission",
+		"data": map[string]string{
+			"id":     id,
+			"tool":   toolName,
+			"reason": reason,
+			"args":   string(argsJSON),
+		},
+	}
+	b, _ := json.Marshal(msg)
+	a.mu.Lock()
+	fmt.Fprintf(a.w, "%s\n", b)
+	a.mu.Unlock()
+
+	resp, ok := <-ch
+	if !ok {
+		return false, "permission channel closed"
+	}
+	return resp.ok, resp.reason
+}
+
+// Resolve 由 ConcurrentReader 调用，将前端的权限回复路由到等待中的 Ask()。
+func (a *ApiAsker) Resolve(id string, ok bool, reason string) {
+	if v, loaded := a.pending.Load(id); loaded {
+		v.(chan permissionResponse) <- permissionResponse{ok: ok, reason: reason}
 	}
 }
 

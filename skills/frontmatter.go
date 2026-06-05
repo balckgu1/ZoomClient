@@ -1,62 +1,51 @@
 package skills
 
 import (
-	"bufio"
+	"fmt"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // parseFrontmatter 解析 SKILL.md 文本
-// 支持的格式：
+// 支持格式：
 //
-//	---
-//	name: code-review
-//	description: Checklist for reviewing code changes
-//	---
-//	# 正文
-//	...
+//		---
+//		name: code-review
+//		description: Checklist for reviewing code changes
+//	    version: "v1.0"
+//		author: your-name
+//		compatibility: Python 3.10+
+//		---
+//		# content
+//		...
 //
-// 若不存在 frontmatter，返回空 map，body 返回原文
-func parseFrontmatter(raw string) (map[string]string, string) {
-	meta := make(map[string]string, 0)
+// 若不存在 frontmatter，返回零值 manifest 和原文 body
+func parseFrontmatter(raw string) (SkillManifest, string, error) {
+	var manifest SkillManifest
 
+	// 统一换行符
 	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 
+	// 严格校验 frontmatter 边界
 	if !strings.HasPrefix(raw, "---\n") {
-		return nil, raw
+		return manifest, raw, nil
 	}
 
-	// 去掉首个 --- 行后，寻找下一个 --- 作为 frontmatter 结束
 	rest := strings.TrimPrefix(raw, "---\n")
 	endIdx := strings.Index(rest, "\n---")
 	if endIdx < 0 {
-		// 找不到闭合分隔符则视为无 frontmatter，保持正文原样返回
-		return nil, raw
+		// 找不到闭合分隔符，视为无有效 frontmatter
+		return manifest, raw, nil
 	}
 
-	header := rest[:endIdx]
-	// 跳过闭合的 "\n---" 以及其后的换行
-	afterHeader := rest[endIdx+len("\n---"):]
-	afterHeader = strings.TrimPrefix(afterHeader, "\n")
+	yamlContent := rest[:endIdx]
+	body := strings.TrimLeft(rest[endIdx+len("\n---"):], "\n")
 
-	// 解析 key: value 形式，忽略空行与注释
-	scanner := bufio.NewScanner(strings.NewReader(header))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		colonIdx := strings.Index(line, ":")
-		if colonIdx <= 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
-		// 支持双引号包裹
-		value = strings.Trim(value, `"'`)
-		if key != "" {
-			meta[key] = value
-		}
+	// 使用标准库解析
+	if err := yaml.Unmarshal([]byte(yamlContent), &manifest); err != nil {
+		return manifest, "", fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
 
-	return meta, afterHeader
+	return manifest, body, nil
 }

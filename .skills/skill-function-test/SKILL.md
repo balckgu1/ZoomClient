@@ -1,6 +1,8 @@
 ---
 name: skill-function-test
 description: Used to test whether the skill function is normal
+author: balckgu1
+version: v1.0
 ---
 
 # Test Playbook

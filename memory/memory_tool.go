@@ -11,12 +11,12 @@ import (
 )
 
 type SaveMemoryTool struct {
-	MemoryDir string
+	memoryDir string
 }
 
 func NewSaveMemoryTool(memorypath string) *SaveMemoryTool {
 	return &SaveMemoryTool{
-		MemoryDir: memorypath,
+		memoryDir: memorypath,
 	}
 }
 
@@ -100,12 +100,12 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n", name, description, typ, content)
 
 	// Check Memory Directory parameter
-	if m.MemoryDir == "" {
+	if m.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}
 
 	// Create Memory Directory if not exists
-	if err := os.MkdirAll(m.MemoryDir, 0755); err != nil {
+	if err := os.MkdirAll(m.memoryDir, 0755); err != nil {
 		return tools.ToolResult{
 			Ok:      false,
 			Content: fmt.Sprintf("Error: failed to create memory directory: %v", err),
@@ -115,7 +115,7 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 
 	// Generate a secure file path
 	safeName := sanitizeFilename(name)
-	filePath := filepath.Join(m.MemoryDir, safeName+".md")
+	filePath := filepath.Join(m.memoryDir, safeName+".md")
 
 	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path: ", filePath))
 
@@ -129,7 +129,7 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	}
 
 	// rebuild MEMORY.md index
-	rebuildIndex(m.MemoryDir)
+	rebuildIndex(m.memoryDir)
 
 	return tools.ToolResult{
 		Ok:      true,

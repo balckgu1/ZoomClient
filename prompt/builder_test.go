@@ -10,7 +10,7 @@ import (
 // TestBuild_EmptyRegistryAndMemoryDir 测试空 registry + 空 memoryDir 场景。
 // 预期：core + memory(save rules only) + dynamic 三段非空，tools 和 CLAUDE.md 为空。
 func TestBuild_EmptyRegistryAndMemoryDir(t *testing.T) {
-	reg, _ := skills.NewRegistry("")
+	reg, _ := skills.NewSkillRegistry("")
 	builder := NewSystemPromptBuilder(reg, "", "test-model", "./workdir")
 
 	result := builder.Build()

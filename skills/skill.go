@@ -1,14 +1,17 @@
 package skills
 
-// SkillManifest skill 的轻量元信息(目录层只展示它), 用于让模型知道: 有这份 skill 存在，大概是干什么用的。
+// SkillManifest skill 的 frontmatter
 type SkillManifest struct {
-	Name        string // skill 名称
-	Description string // skill 描述
+	Name          string `yaml:"name"`
+	Description   string `yaml:"description"`
+	Version       string `yaml:"version"`
+	Author        string `yaml:"author"`
+	Compatibility string `yaml:"compatibility"`
 }
 
-// SkillDocument 是 skill 的完整内容（按需加载时才会进入上下文）。
+// SkillDocument skill 包含frontmatter的所有完整内容
 type SkillDocument struct {
 	Manifest SkillManifest // 元信息
 	Body     string        // SKILL.md 去掉 frontmatter 后的正文
-	Path     string        // 源文件路径，便于调试与日志
+	Path     string        // 源文件路径
 }

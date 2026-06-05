@@ -1,11 +1,15 @@
 package skills
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"zoomClient/logger"
+
+	"go.uber.org/zap"
 )
 
 type SkillRegistry struct {
@@ -13,9 +17,8 @@ type SkillRegistry struct {
 	skills    map[string]*SkillDocument
 }
 
-// NewRegistry 扫描 skillsDir 下所有 SKILL.md 并构建SkillRegistry注册表。
-// 目录不存在或为空时不会报错，而是返回一个空注册表。
-func NewRegistry(skillsDir string) (*SkillRegistry, error) {
+// NewRegistry 扫描 skillsDir 下所有 SKILL.md 并构建 SkillRegistry
+func NewSkillRegistry(skillsDir string) (*SkillRegistry, error) {
 	reg := &SkillRegistry{
 		skillsDir: skillsDir,
 		skills:    make(map[string]*SkillDocument),
@@ -26,7 +29,6 @@ func NewRegistry(skillsDir string) (*SkillRegistry, error) {
 	info, err := os.Stat(skillsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// 目录不存在视为无可用 skill，保持空注册表
 			return reg, nil
 		}
 		return nil, fmt.Errorf("stat skills dir %q failed: %w", skillsDir, err)
@@ -42,40 +44,51 @@ func NewRegistry(skillsDir string) (*SkillRegistry, error) {
 	return reg, nil
 }
 
-// loadAll 遍历 skillsDir 目录，递归加载所有 SKILL.md 文件到注册表中。
+// loadAll 遍历 skillsDir 目录，递归加载所有 SKILL.md 文件到 SkillRegistry
 func (r *SkillRegistry) loadAll() error {
 	return filepath.WalkDir(r.skillsDir, r.walkFunc)
 }
 
-// walkFunc 是 filepath.WalkDir 的回调函数，处理单个路径节点。
+// walkFunc 处理单个路径节点
 func (r *SkillRegistry) walkFunc(path string, d os.DirEntry, err error) error {
 	// 处理系统错误或权限问题
 	if err != nil {
 		return err
 	}
 
-	// 过滤：跳过目录
+	// 跳过目录
 	if d.IsDir() {
 		return nil
 	}
 
-	// 过滤：只处理名为 "SKILL.md" 的文件（忽略大小写）
+	// 处理 SKILL.md
 	if !strings.EqualFold(d.Name(), "SKILL.md") {
 		return nil
 	}
 
-	// 加载并解析技能文件
+	// 加载并解析 skill.md
 	skillDoc, parseErr := r.parseSkillFile(path)
+	// 跳过无法解析的 skill.md
 	if parseErr != nil {
-		return parseErr
+		log := logger.Log
+		log.Warn("The skill.md format is incorrect or corrupted", zap.String("skill_file", d.Name()), zap.Error(parseErr))
+		return nil
 	}
 
-	// 注册到内存 Map 中
+	// 注册到 Map 中
+	existing, _ := r.skills[skillDoc.Manifest.Name]
+	// 有冲突的skill，覆写并记录日志
+	if existing != nil {
+		log := logger.Log
+		log.Warn("Skill name conflict, overwriting", zap.String("skill_name", skillDoc.Manifest.Name),
+			zap.String("existing_path", existing.Path),
+			zap.String("new_path", path))
+	}
 	r.skills[skillDoc.Manifest.Name] = skillDoc
 	return nil
 }
 
-// parseSkillFile 负责读取文件、解析 Frontmatter 并构建 SkillDocument 对象。
+// parseSkillFile 负责读取文件, 解析 Frontmatter 并构建 SkillDocument 对象
 func (r *SkillRegistry) parseSkillFile(path string) (*SkillDocument, error) {
 	// 读取文件内容
 	raw, err := os.ReadFile(path)
@@ -83,11 +96,14 @@ func (r *SkillRegistry) parseSkillFile(path string) (*SkillDocument, error) {
 		return nil, fmt.Errorf("read skill %q failed: %w", path, err)
 	}
 
-	// 解析元数据和正文
-	meta, body := parseFrontmatter(string(raw))
+	// 解析 frontmatter 和正文
+	skillMeta, body, err := parseFrontmatter(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse frontmatter in %q: %w", path, err)
+	}
 
 	// 确定技能名称：优先使用 frontmatter 中的 name，否则回退到目录名
-	name := meta["name"]
+	name := skillMeta.Name
 	if name == "" {
 		name = filepath.Base(filepath.Dir(path))
 	}
@@ -95,15 +111,18 @@ func (r *SkillRegistry) parseSkillFile(path string) (*SkillDocument, error) {
 	// 构建并返回文档对象
 	return &SkillDocument{
 		Manifest: SkillManifest{
-			Name:        name,
-			Description: meta["description"],
+			Name:          name,
+			Description:   skillMeta.Description,
+			Version:       skillMeta.Version,
+			Author:        skillMeta.Author,
+			Compatibility: skillMeta.Compatibility,
 		},
 		Body: body,
 		Path: path,
 	}, nil
 }
 
-// Names 返回所有已加载 skill 的名称（按字典序，便于展示稳定）
+// Names 返回所有已加载 skill 的名称
 func (r *SkillRegistry) Names() []string {
 	names := make([]string, 0, len(r.skills))
 	for name := range r.skills {
@@ -113,8 +132,7 @@ func (r *SkillRegistry) Names() []string {
 	return names
 }
 
-// DescribeAvailable 生成适合塞入 system prompt 的目录文本。
-// 只包含名称与一句描述，保持轻量；若没有任何 skill，返回空字符串。
+// DescribeAvailable 生成适合塞入 system prompt 的目录文本
 func (r *SkillRegistry) DescribeAvailable() string {
 	if len(r.skills) == 0 {
 		return ""
@@ -131,18 +149,44 @@ func (r *SkillRegistry) DescribeAvailable() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// LoadFullText 返回某个 skill 的完整正文，用工具结果的典型包裹形式。
-// 调用方（如 LoadSkillTool）可以把它直接作为 tool_result 返回。
+// LoadFullText 返回某个 skill 的完整正文
+//
+// 输出格式：<skill name="xxx" basedir="/absolute/path/to/skill/dir">
+//
+//	... body ...
+//	</skill>
 func (r *SkillRegistry) LoadFullText(name string) (string, error) {
 	doc, ok := r.skills[name]
 	if !ok {
 		return "", fmt.Errorf("skill %q not found", name)
 	}
-	// 按文档示例用 <skill> 标签包裹，便于模型感知正文边界
-	return fmt.Sprintf("<skill name=%q>\n%s\n</skill>", doc.Manifest.Name, doc.Body), nil
+
+	// 计算 SKILL.md 所在目录
+	basedir := filepath.Dir(doc.Path)
+
+	// 用 <skill> 包裹
+	type skillWrapper struct {
+		XMLName xml.Name `xml:"skill"`
+		Name    string   `xml:"name,attr"`
+		BaseDir string   `xml:"basedir,attr"`
+		Body    string   `xml:",chardata"`
+	}
+
+	wrapper := skillWrapper{
+		Name:    doc.Manifest.Name,
+		BaseDir: basedir,
+		Body:    doc.Body,
+	}
+
+	output, err := xml.Marshal(wrapper)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal skill %q: %w", name, err)
+	}
+
+	return string(output), nil
 }
 
-// Count 当前加载了多少 skill，主要给日志/诊断用
+// Count 当前加载 skill 数量
 func (r *SkillRegistry) Count() int {
 	return len(r.skills)
 }

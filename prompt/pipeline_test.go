@@ -9,7 +9,7 @@ import (
 )
 
 func newTestPipeline() *MessagePipeline {
-	reg, _ := skills.NewRegistry("")
+	reg, _ := skills.NewSkillRegistry("")
 	builder := NewSystemPromptBuilder(reg, "", "test-model", "./workdir")
 	return NewPipeline(builder)
 }

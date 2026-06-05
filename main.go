@@ -348,9 +348,13 @@ func main() {
 
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
 
+	workDir, err := os.Getwd()
+	if err != nil {
+		log.Fatal("Failed to get working directory", zap.Error(err))
+	}
 	// Instantiate tool context
 	toolCtx := &tools.ToolContext{
-		WorkPath:           "./workdir",
+		WorkPath:           workDir,
 		Ctx:                ctx,
 		DefaultBashTimeout: time.Duration(cfg.Tools.DefaultBashTimeout) * time.Second,
 		Logger:             log.Named("tool"),
@@ -358,10 +362,11 @@ func main() {
 		AppState:           map[string]any{"turn": 0},
 	}
 
-	skillregistry, err := skills.NewRegistry(cfg.Skills.Dir)
+	// create a skill registry
+	skillregistry, err := skills.NewSkillRegistry(cfg.Skills.Dir)
 	if err != nil {
 		log.Warn("Load skills failed, continue with empty registry", zap.Error(err))
-		skillregistry, _ = skills.NewRegistry("")
+		skillregistry, _ = skills.NewSkillRegistry("")
 	}
 
 	// Assemble System Prompt with pipeline
@@ -378,7 +383,7 @@ func main() {
 	registry.Register(tools.ReadFileTool{})
 	registry.Register(tools.ListDirectory{})
 	registry.Register(tools.RunBashTool{})
-	registry.Register(&tools.GlobSearch{})
+	registry.Register(tools.GlobSearch{})
 
 	// Register load_skills tool
 	registry.Register(skills.NewLoadSkillTool(skillregistry))

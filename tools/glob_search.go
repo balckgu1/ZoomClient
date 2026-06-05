@@ -12,15 +12,15 @@ import (
 
 type GlobSearch struct{}
 
-func (g *GlobSearch) Name() string { return "glob_search" }
+func (g GlobSearch) Name() string { return "glob_search" }
 
-func (g *GlobSearch) Description() string {
+func (g GlobSearch) Description() string {
 	return "Search for files by glob pattern. Supports ** for recursive directory matching, " +
 		"* for single-segment wildcard, ? for single character, and [...] for character classes. " +
 		"Examples: **/*.go, src/**/*.py, *.txt, test_*.py"
 }
 
-func (g *GlobSearch) Parameters() map[string]any {
+func (g GlobSearch) Parameters() map[string]any {
 	parameters := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -42,7 +42,7 @@ func (g *GlobSearch) Parameters() map[string]any {
 	return parameters
 }
 
-func (g *GlobSearch) Call(args map[string]any, toolCtx *ToolContext) ToolResult {
+func (g GlobSearch) Call(args map[string]any, toolCtx *ToolContext) ToolResult {
 	pattern, ok := args["pattern"].(string)
 	if !ok || pattern == "" {
 		return ToolResult{Ok: false, Content: "Error: missing pattern parameter or pattern parameter is not a string", IsError: true}

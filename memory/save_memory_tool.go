@@ -91,8 +91,8 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	content, exist := args["content"].(string)
-	if !exist {
+	content, ok := args["content"].(string)
+	if !ok {
 		return tools.ToolResult{Ok: false, Content: "Error: content parameter is required", IsError: true}
 	}
 
@@ -117,7 +117,7 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	safeName := sanitizeFilename(name)
 	filePath := filepath.Join(m.memoryDir, safeName+".md")
 
-	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path: ", filePath))
+	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path", filePath))
 
 	// Write file to disk
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {

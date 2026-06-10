@@ -124,10 +124,11 @@ func (s *SearchMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 			formatted += fmt.Sprintf("_%s_\n", doc.FrontMatter.Description)
 		}
 		if doc.Body != "" {
-			// 截取 body 前 200 字符
+			// 截取 body 前 200 个字符
 			body := doc.Body
-			if len(body) > 200 {
-				body = body[:200] + "..."
+			runes := []rune(body)
+			if len(runes) > 200 {
+				body = string(runes[:200]) + "..."
 			}
 			formatted += fmt.Sprintf("\n%s\n", body)
 		}

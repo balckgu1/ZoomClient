@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// yamlUnquote 解析 YAML 值中的引号包裹，如果值被双引号包裹，则去除引号并还原转义字符。
+func yamlUnquote(val string) string {
+	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+		inner := val[1 : len(val)-1]
+		inner = strings.ReplaceAll(inner, `\"`, `"`)
+		inner = strings.ReplaceAll(inner, `\n`, "\n")
+		inner = strings.ReplaceAll(inner, `\\`, `\`)
+		return inner
+	}
+	return val
+}
+
 // ParseFrontMatter 解析 memory markdown 文件中的 YAML frontmatter。
 // 文件格式:
 //
@@ -37,7 +49,7 @@ func ParseFrontMatter(content string) MemoryDocument {
 			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
-				val := strings.TrimSpace(parts[1])
+				val := yamlUnquote(strings.TrimSpace(parts[1]))
 				switch key {
 				case "name":
 					fm.Name = val

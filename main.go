@@ -396,6 +396,8 @@ func main() {
 	registry.Register(memory.NewUpdateMemoryTool(cfg.Memory.Dir))
 	// Register list_memory_tool
 	registry.Register(memory.NewListMemoryTool(cfg.Memory.Dir))
+	// Register delete_memory_tool
+	registry.Register(memory.NewDeleteMemoryTool(cfg.Memory.Dir))
 
 	// Instantiate todo manager
 	todoManager := tools.NewTodoManager()

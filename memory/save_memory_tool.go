@@ -28,7 +28,7 @@ func (m *SaveMemoryTool) Description() string {
 	return "Save a persistent memory that survives across sessions."
 }
 
-func (m *SaveMemoryTool) Parameters() map[string]interface{} {
+func (m *SaveMemoryTool) Parameters() map[string]any {
 	parameters := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -97,11 +97,23 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	}
 
 	// Front Matter + Content
-	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n", name, description, typ, content)
+	// 对 name 和 description 进行 YAML 安全引用，防止含冒号、特殊字符时解析错误
+	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n",
+		yamlQuote(name), yamlQuote(description), typ, content)
 
 	// Check Memory Directory parameter
 	if m.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
+	}
+
+	// Check if a memory with the same name already exists
+	indexPath := filepath.Join(m.memoryDir, "MEMORY.md")
+	if exists, _ := MemoryExists(indexPath, name); exists {
+		return tools.ToolResult{
+			Ok:      false,
+			Content: fmt.Sprintf("Error: memory %q already exists. Please use update_memory to modify it.", name),
+			IsError: true,
+		}
 	}
 
 	// Create Memory Directory if not exists
@@ -129,7 +141,14 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	}
 
 	// rebuild MEMORY.md index
-	rebuildIndex(m.memoryDir)
+	err := rebuildIndex(m.memoryDir)
+	if err != nil {
+		return tools.ToolResult{
+			Ok:      false,
+			Content: fmt.Sprintf("Error: failed to rebuild memory index: %v", err),
+			IsError: true,
+		}
+	}
 
 	return tools.ToolResult{
 		Ok:      true,
@@ -140,10 +159,10 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 
 // rebuildIndex Rebuild the MEMORY.md index file, listing all valid memory entries in memoryDir.
 // Format: - name: description [type]
-func rebuildIndex(memoryDir string) {
+func rebuildIndex(memoryDir string) error {
 	entries, err := os.ReadDir(memoryDir)
 	if err != nil {
-		return
+		return err
 	}
 
 	lines := []string{"# Memory Index\n"}
@@ -167,12 +186,36 @@ func rebuildIndex(memoryDir string) {
 	}
 
 	indexPath := filepath.Join(memoryDir, "MEMORY.md")
-	_ = os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	err = os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-// sanitizeFilename clean the filename by removing unsafe characters
+// yamlQuote 对 frontmatter value 做安全引用。
+func yamlQuote(val string) string {
+	const specialChars = `:#{}[],&*!|>'"%@` + "`"
+	needsQuote := strings.ContainsAny(val, specialChars) ||
+		strings.Contains(val, "\n") ||
+		strings.HasPrefix(val, " ") ||
+		strings.HasSuffix(val, " ")
+	if !needsQuote {
+		return val
+	}
+	// 转义内部的反斜杠和双引号
+	escaped := strings.ReplaceAll(val, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+	return `"` + escaped + `"`
+}
+
+// sanitizeFilename 清理文件名，移除不安全字符并防止路径遍历攻击。
 func sanitizeFilename(name string) string {
-	// Replace common unsafe characters
+	// 取 base name，防止路径遍历（如 "../../etc/passwd"）
+	name = filepath.Base(name)
+
+	// 替换常见不安全字符
 	replacer := strings.NewReplacer(
 		"/", "_",
 		"\\", "_",
@@ -184,9 +227,35 @@ func sanitizeFilename(name string) string {
 		">", "_",
 		"|", "_",
 		" ", "_",
+		".", "_",
 	)
 	safe := replacer.Replace(name)
-	// Prevent empty file names
+
+	// 移除连续下划线
+	for strings.Contains(safe, "__") {
+		safe = strings.ReplaceAll(safe, "__", "_")
+	}
+	safe = strings.Trim(safe, "_")
+
+	// 检测 Windows 保留文件名
+	reserved := map[string]bool{
+		"CON": true, "PRN": true, "AUX": true, "NUL": true,
+		"COM1": true, "COM2": true, "COM3": true, "COM4": true,
+		"COM5": true, "COM6": true, "COM7": true, "COM8": true, "COM9": true,
+		"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true,
+		"LPT5": true, "LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
+	}
+	if reserved[strings.ToUpper(safe)] {
+		safe = "_" + safe
+	}
+
+	// 限制文件名最大长度
+	const maxLen = 130
+	if len(safe) > maxLen {
+		safe = safe[:maxLen]
+	}
+
+	// 防止空文件名
 	if safe == "" {
 		safe = "unnamed_memory"
 	}

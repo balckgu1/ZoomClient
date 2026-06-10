@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"zoomClient/tools"
+
+	"go.uber.org/zap"
 )
 
 type ListMemoryTool struct {
@@ -15,7 +17,7 @@ func NewListMemoryTool(memoryDir string) *ListMemoryTool {
 }
 
 func (l *ListMemoryTool) Name() string {
-	return "list_memoey"
+	return "list_memory"
 }
 
 func (l *ListMemoryTool) Description() string {
@@ -36,6 +38,7 @@ func (l *ListMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext) t
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}
 
+	toolCtx.Logger.Info("List memory", zap.String("session", toolCtx.SessionID), zap.String("memory_dir", l.memoryDir))
 	// read MEMORY.md
 	indexPath := filepath.Join(l.memoryDir, "MEMORY.md")
 	data, err := os.ReadFile(indexPath)

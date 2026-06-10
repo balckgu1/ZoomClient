@@ -62,7 +62,7 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		return tools.ToolResult{Ok: false, Content: "Error: name parameter must be a non-empty string", IsError: true}
 	}
 
-	// 提取可选参数，声明在外部作用域以便后续使用
+	// 提取可选参数
 	var content, desc, typ string
 
 	if contentRaw, exists := args["content"]; exists {
@@ -146,7 +146,14 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 	}
 
 	// rebuild MEMORY.md index
-	rebuildIndex(u.memoryDir)
+	err = rebuildIndex(u.memoryDir)
+	if err != nil {
+		return tools.ToolResult{
+			Ok:      false,
+			Content: fmt.Sprintf("Error: failed to rebuild memory index: %v", err),
+			IsError: true,
+		}
+	}
 
 	return tools.ToolResult{
 		Ok:      true,

@@ -210,27 +210,57 @@ func TestLoadMemorySection(t *testing.T) {
 		if !strings.Contains(result, "## Memories from previous sessions") {
 			t.Error("expected section header")
 		}
+		if !strings.Contains(result, "search_memory") {
+			t.Error("expected search_memory tool hint")
+		}
 		if !strings.Contains(result, "prefer_tabs") {
 			t.Error("expected prefer_tabs in output")
 		}
 		if !strings.Contains(result, "no_secrets") {
 			t.Error("expected no_secrets in output")
 		}
+		// body 不应出现在输出中（仅索引摘要）
+		if strings.Contains(result, "Always use tabs") {
+			t.Error("body content should NOT be in output, only index summary")
+		}
+		if strings.Contains(result, "Never commit API keys") {
+			t.Error("body content should NOT be in output, only index summary")
+		}
 	})
 
-	t.Run("skips MEMORY.md", func(t *testing.T) {
+	t.Run("priority ordering", func(t *testing.T) {
 		dir := createTempMemoryDir(t)
-		writeMemoryFileRaw(t, dir, "MEMORY.md", "# Memory Index\n- test: desc [user]\n")
-		writeMemoryFile(t, dir, "real_memory", "real_memory", "A real memory", "user", "Content")
+		writeMemoryFile(t, dir, "user_pref", "user_pref", "A preference", "user", "body")
+		writeMemoryFile(t, dir, "correction", "correction", "A correction", "feedback", "body")
+		writeMemoryFile(t, dir, "ref_link", "ref_link", "A link", "reference", "body")
+		buildIndex(t, dir)
 
 		result := LoadMemorySection(dir)
-		if !strings.Contains(result, "real_memory") {
-			t.Error("expected real_memory in output")
+		// feedback 应该排在 user 前面
+		feedbackIdx := strings.Index(result, "correction")
+		userIdx := strings.Index(result, "user_pref")
+		refIdx := strings.Index(result, "ref_link")
+		if feedbackIdx > userIdx {
+			t.Error("expected feedback entries before user entries")
 		}
-		// MEMORY.md 中的 "test" 条目不应出现在 LoadMemorySection 中
-		count := strings.Count(result, "### [")
-		if count != 1 {
-			t.Errorf("expected exactly 1 memory entry, got %d", count)
+		if userIdx > refIdx {
+			t.Error("expected user entries before reference entries")
+		}
+	})
+
+	t.Run("skips entries not in index", func(t *testing.T) {
+		dir := createTempMemoryDir(t)
+		writeMemoryFile(t, dir, "test", "test", "desc", "user", "test content")
+		writeMemoryFile(t, dir, "real_memory", "real_memory", "A real memory", "user", "Content")
+		// 索引仅包含 test
+		writeMemoryFileRaw(t, dir, "MEMORY.md", "# Memory Index\n- test: desc [user]\n")
+
+		result := LoadMemorySection(dir)
+		if !strings.Contains(result, "test") {
+			t.Error("expected test in output")
+		}
+		if strings.Contains(result, "real_memory") {
+			t.Error("real_memory not in index, should not appear")
 		}
 	})
 }

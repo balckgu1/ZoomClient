@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,51 +69,43 @@ func ParseFrontMatter(content string) MemoryDocument {
 	return MemoryDocument{FrontMatter: fm, Body: body}
 }
 
-// LoadMemorySection 扫描 memoryDir 中的所有 memory 文件，
-// 返回格式化好的 memory section 字符串，可直接追加到 system prompt。
+// LoadMemorySection 索引驱动，仅加载 memory 摘要到 system prompt
 func LoadMemorySection(memoryDir string) string {
 	if memoryDir == "" {
 		return ""
 	}
-	entries, err := os.ReadDir(memoryDir)
+
+	// 读索引文件（单次轻量 IO）
+	indexPath := filepath.Join(memoryDir, "MEMORY.md")
+	indexData, err := os.ReadFile(indexPath)
 	if err != nil {
 		return ""
 	}
 
-	var docs []MemoryDocument
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".md") || name == "MEMORY.md" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(memoryDir, name))
-		if err != nil {
-			continue
-		}
-		doc := ParseFrontMatter(string(data))
-		if doc.FrontMatter.Name != "" {
-			docs = append(docs, doc)
-		}
-	}
-
-	if len(docs) == 0 {
+	// 解析索引，获取条目列表
+	entries := parseIndex(string(indexData))
+	if len(entries) == 0 {
 		return ""
 	}
 
+	// 按优先级排序
+	sortByPriority(entries)
+
+	// 输出摘要列表 name + description + type
 	var sb strings.Builder
-	sb.WriteString("## Memories from previous sessions\n\n")
-	for _, doc := range docs {
-		sb.WriteString(fmt.Sprintf("### [%s] %s\n", doc.FrontMatter.Type, doc.FrontMatter.Name))
-		if doc.FrontMatter.Description != "" {
-			sb.WriteString(fmt.Sprintf("_%s_\n\n", doc.FrontMatter.Description))
+	sb.WriteString("## Memories from previous sessions\n")
+	sb.WriteString("Use `search_memory` tool to retrieve full content when needed.\n\n")
+
+	for _, entry := range entries {
+		sb.WriteString("- **[")
+		sb.WriteString(entry.Type)
+		sb.WriteString("]** ")
+		sb.WriteString(entry.Name)
+		if entry.Description != "" {
+			sb.WriteString(": ")
+			sb.WriteString(entry.Description)
 		}
-		if doc.Body != "" {
-			sb.WriteString(doc.Body)
-			sb.WriteString("\n\n")
-		}
+		sb.WriteString("\n")
 	}
 
 	return strings.TrimRight(sb.String(), "\n")

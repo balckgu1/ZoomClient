@@ -15,6 +15,10 @@ type UpdateMemoryTool struct {
 	memoryDir string
 }
 
+func NewUpdateMemoryTool(memoryDir string) *UpdateMemoryTool {
+	return &UpdateMemoryTool{memoryDir: memoryDir}
+}
+
 func (u *UpdateMemoryTool) Name() string {
 	return "update_memory"
 }
@@ -146,7 +150,7 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 
 	return tools.ToolResult{
 		Ok:      true,
-		Content: fmt.Sprintf("Memory saved successfully to %s", filePath),
+		Content: fmt.Sprintf("Memory updated successfully to %s", filePath),
 		IsError: false,
 	}
 }

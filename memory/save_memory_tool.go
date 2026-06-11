@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func (m *SaveMemoryTool) Description() string {
 	return "Save a persistent memory that survives across sessions."
 }
 
-func (m *SaveMemoryTool) Parameters() map[string]interface{} {
+func (m *SaveMemoryTool) Parameters() map[string]any {
 	parameters := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -91,17 +92,35 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	content, exist := args["content"].(string)
-	if !exist {
+	content, ok := args["content"].(string)
+	if !ok {
 		return tools.ToolResult{Ok: false, Content: "Error: content parameter is required", IsError: true}
 	}
 
 	// Front Matter + Content
-	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n", name, description, typ, content)
+	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n",
+		yamlQuote(name), yamlQuote(description), typ, content)
 
 	// Check Memory Directory parameter
 	if m.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
+	}
+
+	// Check if a memory with the same name already exists
+	indexPath := filepath.Join(m.memoryDir, "MEMORY.md")
+	exists, memErr := MemoryExists(indexPath, name)
+	if memErr != nil {
+		// 非首次保存
+		if !errors.Is(memErr, os.ErrNotExist) {
+			return tools.ToolResult{Ok: false, Content: "Error: " + memErr.Error(), IsError: true}
+		}
+		// 索引不存在，说明 memory 一定不存在，可继续保存
+	} else if exists {
+		return tools.ToolResult{
+			Ok:      false,
+			Content: fmt.Sprintf("Error: memory %q already exists. Please use update_memory to modify it.", name),
+			IsError: true,
+		}
 	}
 
 	// Create Memory Directory if not exists
@@ -117,7 +136,7 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	safeName := sanitizeFilename(name)
 	filePath := filepath.Join(m.memoryDir, safeName+".md")
 
-	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path: ", filePath))
+	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path", filePath))
 
 	// Write file to disk
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
@@ -128,8 +147,15 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	// rebuild MEMORY.md index
-	rebuildIndex(m.memoryDir)
+	// 增量更新 MEMORY.md 索引
+	err := upsertIndex(m.memoryDir, name, description, typ)
+	if err != nil {
+		return tools.ToolResult{
+			Ok:      false,
+			Content: fmt.Sprintf("Error: failed to update memory index: %v", err),
+			IsError: true,
+		}
+	}
 
 	return tools.ToolResult{
 		Ok:      true,
@@ -138,41 +164,29 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	}
 }
 
-// rebuildIndex Rebuild the MEMORY.md index file, listing all valid memory entries in memoryDir.
-// Format: - name: description [type]
-func rebuildIndex(memoryDir string) {
-	entries, err := os.ReadDir(memoryDir)
-	if err != nil {
-		return
+// yamlQuote 对 frontmatter value 做安全引用。
+func yamlQuote(val string) string {
+	const specialChars = `:#{}[],&*!|>'"%@` + "`"
+	needsQuote := strings.ContainsAny(val, specialChars) ||
+		strings.Contains(val, "\n") ||
+		strings.HasPrefix(val, " ") ||
+		strings.HasSuffix(val, " ")
+	if !needsQuote {
+		return val
 	}
-
-	lines := []string{"# Memory Index\n"}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".md") || name == "MEMORY.md" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(memoryDir, name))
-		if err != nil {
-			continue
-		}
-		doc := ParseFrontMatter(string(data))
-		if doc.FrontMatter.Name != "" {
-			lines = append(lines, fmt.Sprintf("- %s: %s [%s]",
-				doc.FrontMatter.Name, doc.FrontMatter.Description, doc.FrontMatter.Type))
-		}
-	}
-
-	indexPath := filepath.Join(memoryDir, "MEMORY.md")
-	_ = os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	// 转义内部的反斜杠和双引号
+	escaped := strings.ReplaceAll(val, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+	return `"` + escaped + `"`
 }
 
-// sanitizeFilename clean the filename by removing unsafe characters
+// sanitizeFilename 清理文件名，移除不安全字符并防止路径遍历攻击。
 func sanitizeFilename(name string) string {
-	// Replace common unsafe characters
+	// 取 base name，防止路径遍历（如 "../../etc/passwd"）
+	name = filepath.Base(name)
+
+	// 替换常见不安全字符
 	replacer := strings.NewReplacer(
 		"/", "_",
 		"\\", "_",
@@ -184,9 +198,35 @@ func sanitizeFilename(name string) string {
 		">", "_",
 		"|", "_",
 		" ", "_",
+		".", "_",
 	)
 	safe := replacer.Replace(name)
-	// Prevent empty file names
+
+	// 移除连续下划线
+	for strings.Contains(safe, "__") {
+		safe = strings.ReplaceAll(safe, "__", "_")
+	}
+	safe = strings.Trim(safe, "_")
+
+	// 检测 Windows 保留文件名
+	reserved := map[string]bool{
+		"CON": true, "PRN": true, "AUX": true, "NUL": true,
+		"COM1": true, "COM2": true, "COM3": true, "COM4": true,
+		"COM5": true, "COM6": true, "COM7": true, "COM8": true, "COM9": true,
+		"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true,
+		"LPT5": true, "LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
+	}
+	if reserved[strings.ToUpper(safe)] {
+		safe = "_" + safe
+	}
+
+	// 限制文件名最大长度
+	const maxLen = 130
+	if len(safe) > maxLen {
+		safe = safe[:maxLen]
+	}
+
+	// 防止空文件名
 	if safe == "" {
 		safe = "unnamed_memory"
 	}

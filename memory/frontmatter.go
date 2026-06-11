@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// yamlUnquote 解析 YAML 值中的引号包裹，如果值被双引号包裹，则去除引号并还原转义字符。
+func yamlUnquote(val string) string {
+	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+		inner := val[1 : len(val)-1]
+		inner = strings.ReplaceAll(inner, `\"`, `"`)
+		inner = strings.ReplaceAll(inner, `\n`, "\n")
+		inner = strings.ReplaceAll(inner, `\\`, `\`)
+		return inner
+	}
+	return val
+}
+
 // ParseFrontMatter 解析 memory markdown 文件中的 YAML frontmatter。
 // 文件格式:
 //
@@ -37,7 +49,7 @@ func ParseFrontMatter(content string) MemoryDocument {
 			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
-				val := strings.TrimSpace(parts[1])
+				val := yamlUnquote(strings.TrimSpace(parts[1]))
 				switch key {
 				case "name":
 					fm.Name = val
@@ -58,51 +70,55 @@ func ParseFrontMatter(content string) MemoryDocument {
 	return MemoryDocument{FrontMatter: fm, Body: body}
 }
 
-// LoadMemorySection 扫描 memoryDir 中的所有 memory 文件，
-// 返回格式化好的 memory section 字符串，可直接追加到 system prompt。
+// LoadMemorySection 索引驱动，仅加载 memory 摘要到 system prompt
 func LoadMemorySection(memoryDir string) string {
 	if memoryDir == "" {
 		return ""
 	}
-	entries, err := os.ReadDir(memoryDir)
+
+	// 读索引文件（单次轻量 IO）
+	indexPath := filepath.Join(memoryDir, "MEMORY.md")
+	indexData, err := os.ReadFile(indexPath)
 	if err != nil {
 		return ""
 	}
 
-	var docs []MemoryDocument
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".md") || name == "MEMORY.md" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(memoryDir, name))
-		if err != nil {
-			continue
-		}
-		doc := ParseFrontMatter(string(data))
-		if doc.FrontMatter.Name != "" {
-			docs = append(docs, doc)
-		}
-	}
-
-	if len(docs) == 0 {
+	// 解析索引，获取条目列表
+	entries := parseIndex(string(indexData))
+	if len(entries) == 0 {
 		return ""
 	}
 
+	// 按优先级排序
+	sortByPriority(entries)
+
+	// 输出摘要列表 name + description + type（限制条目数）
 	var sb strings.Builder
-	sb.WriteString("## Memories from previous sessions\n\n")
-	for _, doc := range docs {
-		sb.WriteString(fmt.Sprintf("### [%s] %s\n", doc.FrontMatter.Type, doc.FrontMatter.Name))
-		if doc.FrontMatter.Description != "" {
-			sb.WriteString(fmt.Sprintf("_%s_\n\n", doc.FrontMatter.Description))
+	sb.WriteString("## Memories from previous sessions\n")
+	sb.WriteString("Use `search_memory` tool to retrieve full content when needed.\n\n")
+
+	displayCount := len(entries)
+	truncated := false
+	if displayCount > MaxMemoryEntries {
+		displayCount = MaxMemoryEntries
+		truncated = true
+	}
+
+	for _, entry := range entries[:displayCount] {
+		sb.WriteString("- **[")
+		sb.WriteString(entry.Type)
+		sb.WriteString("]** ")
+		sb.WriteString(entry.Name)
+		if entry.Description != "" {
+			sb.WriteString(": ")
+			sb.WriteString(entry.Description)
 		}
-		if doc.Body != "" {
-			sb.WriteString(doc.Body)
-			sb.WriteString("\n\n")
-		}
+		sb.WriteString("\n")
+	}
+
+	if truncated {
+		remaining := len(entries) - displayCount
+		sb.WriteString(fmt.Sprintf("\n_...and %d more entries. Use `search_memory` to find specific ones._\n", remaining))
 	}
 
 	return strings.TrimRight(sb.String(), "\n")

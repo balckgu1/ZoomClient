@@ -43,19 +43,14 @@ func NewTodoManager() *TodoManager {
 	}
 }
 
-// ===================== Tool 接口实现 =====================
-
-// Name 返回工具名称，用于工具注册表和模型调用
 func (tm *TodoManager) Name() string {
 	return "todo"
 }
 
-// Description 返回工具的功能描述，模型据此判断何时使用该工具
 func (tm *TodoManager) Description() string {
 	return "Rewrite the current session plan for multi-step work. Keep exactly one step in_progress when a task has multiple steps. Refresh the plan as work advances."
 }
 
-// Parameters 返回工具的参数定义，遵循 JSON Schema 格式
 func (tm *TodoManager) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
@@ -87,11 +82,9 @@ func (tm *TodoManager) Parameters() map[string]interface{} {
 	}
 }
 
-// Call 实现 Tool 接口，解析模型传来的 args 并调用 Update
 func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolResult {
-	// 提取 items 参数
-	itemsRaw, ok := args["items"]
-	if !ok {
+	itemsRaw, exist := args["items"]
+	if !exist {
 		return ToolResult{Ok: false, Content: "Error: missing items parameter", IsError: true}
 	}
 
@@ -131,8 +124,6 @@ func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolR
 
 	return ToolResult{Ok: true, Content: renderedPlan}
 }
-
-// ===================== 核心计划管理方法 =====================
 
 // Update 允许模型整体更新当前计划
 // 接收模型传来的新计划条目列表，校验合法性后原子覆盖旧计划，返回渲染后的计划文本

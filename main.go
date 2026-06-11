@@ -390,11 +390,17 @@ func main() {
 
 	// Register save_memory tool
 	registry.Register(memory.NewSaveMemoryTool(cfg.Memory.Dir))
+	// Register search_memory tool
+	registry.Register(memory.NewSearchMemoryTool(cfg.Memory.Dir))
+	// Register update_memory_tool
+	registry.Register(memory.NewUpdateMemoryTool(cfg.Memory.Dir))
+	// Register delete_memory_tool
+	registry.Register(memory.NewDeleteMemoryTool(cfg.Memory.Dir))
 
 	// Instantiate todo manager
 	todoManager := tools.NewTodoManager()
 	// Register todo tool
-	registry.Register(todoManager)
+	registry.Register(tools.NewTodoManager())
 
 	// Instantiate compact manager
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)

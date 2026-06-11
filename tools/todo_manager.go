@@ -31,6 +31,14 @@ type PlanItem struct {
 	ProgressLabel string `json:"progressLabel"` // 处于进行中时的自然语言描述（如"正在读取测试文件"）
 }
 
+// planItemPatch 表示一次工具调用中传入的单个条目补丁
+type planItemPatch struct {
+	ID            string  // id 必填，因此用值类型
+	Content       *string // nil 表示未提供
+	Status        *string // nil 表示未提供
+	ProgressLabel *string // nil 表示未提供
+}
+
 // TodoManager 会话内计划管理器，同时实现 Tool 接口以便注册到工具注册表
 type TodoManager struct {
 	mu                sync.RWMutex
@@ -51,7 +59,9 @@ func (tm *TodoManager) Name() string {
 }
 
 func (tm *TodoManager) Description() string {
-	return "Manage the current session plan for multi-step work. Supports full replacement or merge-by-id. Keep exactly one step in_progress when a task has multiple steps."
+	return "Manage the current session plan for multi-step work. " +
+		"Use merge=false to replace the entire plan, or merge=true to partially update existing items by id. " +
+		"Keep exactly one step in_progress when a task has multiple steps."
 }
 
 func (tm *TodoManager) Parameters() map[string]interface{} {
@@ -59,18 +69,21 @@ func (tm *TodoManager) Parameters() map[string]interface{} {
 		"type": "object",
 		"properties": map[string]interface{}{
 			"merge": map[string]interface{}{
-				"type":        "boolean",
-				"description": "If true, merge items by id into existing plan; if false, replace the entire plan. Default false.",
+				"type": "boolean",
+				"description": "If true, partially update existing items by id (only the fields you provide are changed) and append items with new ids. " +
+					"If false, replace the entire plan (every item must include content and status). Default false.",
 			},
 			"items": map[string]interface{}{
-				"type":        "array",
-				"description": "Plan items. When merge=false, replaces the entire plan; when merge=true, updates existing items by id and appends new ones.",
+				"type": "array",
+				"description": "Plan items. When merge=false, this replaces the entire plan and each item MUST include content and status. " +
+					"When merge=true, each item only needs id plus the fields you want to change; existing fields you omit are kept unchanged. " +
+					"A brand-new id under merge=true is treated as a new item and MUST include content and status.",
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
 						"id": map[string]interface{}{
 							"type":        "string",
-							"description": "Unique identifier for this plan item",
+							"description": "Unique identifier for this plan item.",
 						},
 						"content": map[string]interface{}{
 							"type":        "string",
@@ -86,7 +99,7 @@ func (tm *TodoManager) Parameters() map[string]interface{} {
 							"description": "Optional present-continuous label shown when step is in_progress.",
 						},
 					},
-					"required": []string{"id", "content", "status"},
+					"required": []string{"id"},
 				},
 			},
 		},
@@ -106,10 +119,10 @@ func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolR
 	}
 
 	// 解析 merge 参数，默认 false
-	merge, _ := args["merge"].(bool)
+	merge := parseBool(args["merge"])
 
-	// 将 []interface{} 转换为 []PlanItem
-	planItems := make([]PlanItem, 0, len(itemsSlice))
+	// 将 []interface{} 解析为 []planItemPatch（保留字段是否提供的信息）
+	patches := make([]planItemPatch, 0, len(itemsSlice))
 	for i, itemRaw := range itemsSlice {
 		itemMap, ok := itemRaw.(map[string]interface{})
 		if !ok {
@@ -121,143 +134,206 @@ func (tm *TodoManager) Call(args map[string]interface{}, ctx *ToolContext) ToolR
 		}
 
 		id, _ := itemMap["id"].(string)
-		content, _ := itemMap["content"].(string)
-		status, _ := itemMap["status"].(string)
-		progressLabel, _ := itemMap["progressLabel"].(string)
-
-		planItems = append(planItems, PlanItem{
+		patches = append(patches, planItemPatch{
 			ID:            id,
-			Content:       content,
-			Status:        status,
-			ProgressLabel: progressLabel,
+			Content:       strPtr(itemMap, "content"),
+			Status:        strPtr(itemMap, "status"),
+			ProgressLabel: strPtr(itemMap, "progressLabel"),
 		})
 	}
 
 	if ctx != nil && ctx.Logger != nil {
-		ctx.Logger.Info("Updating plan", zap.String("session", ctx.SessionID), zap.Bool("merge", merge), zap.Any("planItems", planItems))
+		ctx.Logger.Info("Updating plan", zap.String("session", ctx.SessionID), zap.Bool("merge", merge), zap.Int("itemCount", len(patches)))
 	}
 
 	var renderedPlan string
 	var err error
 	if merge {
-		renderedPlan, err = tm.Merge(planItems)
+		renderedPlan, err = tm.Merge(patches)
 	} else {
-		renderedPlan, err = tm.Update(planItems)
+		renderedPlan, err = tm.Update(patches)
 	}
 	if err != nil {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Plan update failed: %v", err), IsError: true}
 	}
 
-	return ToolResult{Ok: true, Content: renderedPlan}
+	return ToolResult{Ok: true, Content: renderedPlan, IsError: false}
 }
 
-// validateItems 校验计划条目列表的合法性，返回校验后的条目列表
-// 校验规则：
-//   - id 不能为空，不能重复
-//   - content 不能为空
-//   - status 必须是 pending / in_progress / completed 之一，空值默认为 pending
-//   - 同一时间最多只能有一个 in_progress
-func validateItems(items []PlanItem) ([]PlanItem, error) {
-	validated := make([]PlanItem, 0, len(items))
-	inProgressCount := 0
-	seenIDs := make(map[string]bool, len(items))
+// strPtr 从 itemMap 中取出字符串字段；若 key 不存在则返回 nil
+func strPtr(itemMap map[string]interface{}, key string) *string {
+	raw, ok := itemMap[key]
+	if !ok {
+		return nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return nil
+	}
+	return &s
+}
 
-	for index, item := range items {
-		if item.ID == "" {
-			return nil, fmt.Errorf("the %d item's id is empty", index+1)
-		}
-		if seenIDs[item.ID] {
-			return nil, fmt.Errorf("duplicate id %q at item %d", item.ID, index+1)
-		}
-		seenIDs[item.ID] = true
+func parseBool(v interface{}) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		b, _ := strconv.ParseBool(x)
+		return b
+	}
+	return false
+}
 
-		if item.Content == "" {
-			return nil, fmt.Errorf("the %d item's content is empty", index+1)
-		}
+// normalizeStatus 校验 status 并返回规范化后的值
+func normalizeStatus(status string, idx int) (string, error) {
+	if status == "" {
+		return "", fmt.Errorf("items[%d]: status is empty", idx)
+	}
+	if !validStatus[status] {
+		return "", fmt.Errorf("items[%d]: status is illegal: %q", idx, status)
+	}
+	return status, nil
+}
 
-		status := item.Status
-		if status == "" {
-			return nil, fmt.Errorf("the %d item's status is empty", index+1)
+// checkSingleInProgress 校验整份计划中最多只有一个 in_progress 条目
+func checkSingleInProgress(items []PlanItem) error {
+	count := 0
+	for _, item := range items {
+		if item.Status == StatusInProgress {
+			count++
 		}
-		if !validStatus[status] {
-			return nil, fmt.Errorf("the %d item's status is illegal: %q", index+1, status)
-		}
-		if status == StatusInProgress {
-			inProgressCount++
-		}
+	}
+	if count > 1 {
+		return fmt.Errorf("there can be at most 1 item in progress")
+	}
+	return nil
+}
 
-		validated = append(validated, PlanItem{
-			ID:            item.ID,
-			Content:       item.Content,
+// buildFullItems 用于 replace 模式：要求每个 patch 都包含 content 与 status，构造完整条目列表
+func buildFullItems(patches []planItemPatch) ([]PlanItem, error) {
+	result := make([]PlanItem, 0, len(patches))
+	seenIDs := make(map[string]bool, len(patches))
+	for i, p := range patches {
+		if p.ID == "" {
+			return nil, fmt.Errorf("items[%d]: id is empty", i)
+		}
+		if seenIDs[p.ID] {
+			return nil, fmt.Errorf("items[%d]: duplicate id %q", i, p.ID)
+		}
+		seenIDs[p.ID] = true
+		if p.Content == nil || *p.Content == "" {
+			return nil, fmt.Errorf("items[%d]: content is required when merge=false", i)
+		}
+		if p.Status == nil {
+			return nil, fmt.Errorf("items[%d]: status is required when merge=false", i)
+		}
+		status, err := normalizeStatus(*p.Status, i)
+		if err != nil {
+			return nil, err
+		}
+		progressLabel := ""
+		if p.ProgressLabel != nil {
+			progressLabel = *p.ProgressLabel
+		}
+		result = append(result, PlanItem{
+			ID:            p.ID,
+			Content:       *p.Content,
 			Status:        status,
-			ProgressLabel: item.ProgressLabel,
+			ProgressLabel: progressLabel,
 		})
 	}
-
-	if inProgressCount > 1 {
-		return nil, fmt.Errorf("there can be at most 1 item in progress")
+	if err := checkSingleInProgress(result); err != nil {
+		return nil, err
 	}
-
-	return validated, nil
+	return result, nil
 }
 
-// Update 整体替换当前计划
-func (tm *TodoManager) Update(items []PlanItem) (string, error) {
-	validated, err := validateItems(items)
+// Update 整体替换当前计划（replace 模式）
+func (tm *TodoManager) Update(patches []planItemPatch) (string, error) {
+	items, err := buildFullItems(patches)
 	if err != nil {
 		return "", err
 	}
-
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	tm.planItems = validated
+	tm.planItems = items
 	tm.roundsSinceUpdate = 0
-
 	return tm.renderLocked(), nil
 }
 
-// Merge 按 ID 合并更新计划条目
-func (tm *TodoManager) Merge(items []PlanItem) (string, error) {
-	validated, err := validateItems(items)
-	if err != nil {
-		return "", err
+// Merge 按 id 进行字段级合并：
+//   - 已存在 id：只覆盖本次提供的字段，未提供的字段保持不变
+//   - 新 id：当作新建条目，必须提供 content 与 status
+func (tm *TodoManager) Merge(patches []planItemPatch) (string, error) {
+	// 先做与现有状态无关的基础校验（id 非空 / 批次内不重复 / status 合法）
+	seenIDs := make(map[string]bool, len(patches))
+	for i, p := range patches {
+		if p.ID == "" {
+			return "", fmt.Errorf("items[%d]: id is empty", i)
+		}
+		if seenIDs[p.ID] {
+			return "", fmt.Errorf("items[%d]: duplicate id %q", i, p.ID)
+		}
+		seenIDs[p.ID] = true
+		if p.Status != nil {
+			if _, err := normalizeStatus(*p.Status, i); err != nil {
+				return "", err
+			}
+		}
 	}
-
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-
-	// 在副本上操作
+	// 在副本上操作，校验通过后再原子替换
 	merged := make([]PlanItem, len(tm.planItems))
 	copy(merged, tm.planItems)
-
 	idxMap := make(map[string]int, len(merged))
 	for i, existing := range merged {
 		idxMap[existing.ID] = i
 	}
-
-	for _, item := range validated {
-		if idx, exists := idxMap[item.ID]; exists {
-			merged[idx] = item
+	for i, p := range patches {
+		if idx, exists := idxMap[p.ID]; exists {
+			// 已存在：字段级合并
+			cur := merged[idx]
+			if p.Content != nil {
+				if *p.Content == "" {
+					return "", fmt.Errorf("items[%d]: content cannot be set to empty", i)
+				}
+				cur.Content = *p.Content
+			}
+			if p.Status != nil {
+				cur.Status = *p.Status // 已在前面校验过合法性
+			}
+			if p.ProgressLabel != nil {
+				cur.ProgressLabel = *p.ProgressLabel
+			}
+			merged[idx] = cur
 		} else {
-			merged = append(merged, item)
-			idxMap[item.ID] = len(merged) - 1
+			// 新增：必须提供 content 与 status
+			if p.Content == nil || *p.Content == "" {
+				return "", fmt.Errorf("items[%d]: content is required for new item %q", i, p.ID)
+			}
+			if p.Status == nil {
+				return "", fmt.Errorf("items[%d]: status is required for new item %q", i, p.ID)
+			}
+			progressLabel := ""
+			if p.ProgressLabel != nil {
+				progressLabel = *p.ProgressLabel
+			}
+			newItem := PlanItem{
+				ID:            p.ID,
+				Content:       *p.Content,
+				Status:        *p.Status,
+				ProgressLabel: progressLabel,
+			}
+			merged = append(merged, newItem)
+			idxMap[p.ID] = len(merged) - 1
 		}
 	}
-
-	// 校验通过前不修改真实状态
-	inProgressCount := 0
-	for _, item := range merged {
-		if item.Status == StatusInProgress {
-			inProgressCount++
-		}
+	if err := checkSingleInProgress(merged); err != nil {
+		return "", fmt.Errorf("%w (after merge)", err)
 	}
-	if inProgressCount > 1 {
-		return "", fmt.Errorf("there can be at most 1 item in progress after merge")
-	}
-
 	tm.planItems = merged
 	tm.roundsSinceUpdate = 0
-
 	return tm.renderLocked(), nil
 }
 
@@ -292,7 +368,7 @@ func (tm *TodoManager) renderLocked() string {
 			marker = "[ ]"
 		}
 
-		line := fmt.Sprintf("%s %s", marker, item.Content)
+		line := fmt.Sprintf("%s [%s] %s", marker, item.ID, item.Content)
 		if item.Status == StatusInProgress && item.ProgressLabel != "" {
 			line += fmt.Sprintf(" (%s)", item.ProgressLabel)
 		}
@@ -320,12 +396,12 @@ func (tm *TodoManager) IncrementRoundsSinceUpdate() {
 }
 
 // Reminder 返回提醒文本
-//   - 当连续 TodoRoundsThreshold 轮未更新计划时触发，返回提醒文本以注入到下一轮对话；否则返回空字符串
+//   - 当连续 todoRoundsThreshold 轮未更新计划时触发，返回提醒文本以注入到下一轮对话；否则返回空字符串
 func (tm *TodoManager) Reminder(todoRoundsThreshold int) string {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 	if tm.roundsSinceUpdate >= todoRoundsThreshold {
-		return "<reminder>Your plan has not been updated for " + strconv.Itoa(todoRoundsThreshold) + " rounds. Refresh your current plan before continuing.</reminder>"
+		return "<reminder>Your plan has not been updated for " + strconv.Itoa(tm.roundsSinceUpdate) + " rounds. Refresh your current plan before continuing.</reminder>"
 	}
 	return ""
 }

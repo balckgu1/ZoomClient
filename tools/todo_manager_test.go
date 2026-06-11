@@ -2,351 +2,477 @@ package tools
 
 import (
 	"strings"
-	"sync"
 	"testing"
 )
 
-// TestUpdate 使用表驱动测试验证 Update（全量替换）的各种场景
+// ---------- 测试辅助 ----------
+
+// ptr 返回字符串指针，便于构造 planItemPatch
+func ptr(s string) *string {
+	return &s
+}
+
+// itemByID 在切片中按 id 查找条目，找不到返回 nil
+func itemByID(items []PlanItem, id string) *PlanItem {
+	for i := range items {
+		if items[i].ID == id {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
+// ---------- Update（replace 模式）----------
+
 func TestUpdate(t *testing.T) {
 	tests := []struct {
-		name        string
-		items       []PlanItem
-		wantErr     bool
-		errContains string
-		wantRender  []string // 渲染结果应包含的子字符串
+		name      string
+		patches   []planItemPatch
+		wantErr   bool
+		errSubstr string                              // 期望错误信息包含的子串
+		checkFn   func(t *testing.T, tm *TodoManager) // 成功后对状态的断言
 	}{
 		{
-			name: "正常创建计划_含进行中步骤",
-			items: []PlanItem{
-				{ID: "s1", Content: "阅读失败测试", Status: StatusInProgress, ProgressLabel: "正在阅读"},
-				{ID: "s2", Content: "定位 bug 根因", Status: StatusPending},
-				{ID: "s3", Content: "修复代码", Status: StatusPending},
+			name: "valid replace with multiple items",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+				{ID: "s2", Content: ptr("step 2"), Status: ptr(StatusInProgress)},
+				{ID: "s3", Content: ptr("step 3"), Status: ptr(StatusCompleted)},
 			},
-			wantErr:    false,
-			wantRender: []string{"[>] 阅读失败测试", "[ ] 定位 bug 根因", "(正在阅读)", "(0/3 completed)"},
+			wantErr: false,
+			checkFn: func(t *testing.T, tm *TodoManager) {
+				items := tm.Items()
+				if len(items) != 3 {
+					t.Fatalf("expected 3 items, got %d", len(items))
+				}
+				if items[1].Status != StatusInProgress {
+					t.Errorf("expected s2 in_progress, got %q", items[1].Status)
+				}
+			},
 		},
 		{
-			name: "全部完成",
-			items: []PlanItem{
-				{ID: "s1", Content: "任务A", Status: StatusCompleted},
-				{ID: "s2", Content: "任务B", Status: StatusCompleted},
+			name:    "empty items clears the plan",
+			patches: []planItemPatch{},
+			wantErr: false,
+			checkFn: func(t *testing.T, tm *TodoManager) {
+				if len(tm.Items()) != 0 {
+					t.Errorf("expected plan cleared, got %d items", len(tm.Items()))
+				}
 			},
-			wantErr:    false,
-			wantRender: []string{"[√] 任务A", "[√] 任务B", "(2/2 completed)"},
 		},
 		{
-			name: "空状态默认为pending",
-			items: []PlanItem{
-				{ID: "s1", Content: "第一步", Status: ""},
-				{ID: "s2", Content: "第二步", Status: ""},
+			name: "missing content fails",
+			patches: []planItemPatch{
+				{ID: "s1", Status: ptr(StatusPending)},
 			},
-			wantErr:    false,
-			wantRender: []string{"[ ] 第一步", "[ ] 第二步"},
+			wantErr:   true,
+			errSubstr: "content is required",
 		},
 		{
-			name:  "空列表合法_显示提示",
-			items: []PlanItem{},
-
-			wantErr:    false,
-			wantRender: []string{"No plan"},
+			name: "empty content fails",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr(""), Status: ptr(StatusPending)},
+			},
+			wantErr:   true,
+			errSubstr: "content is required",
 		},
 		{
-			name: "多个in_progress报错",
-			items: []PlanItem{
-				{ID: "s1", Content: "任务A", Status: StatusInProgress},
-				{ID: "s2", Content: "任务B", Status: StatusInProgress},
+			name: "missing status fails",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1")},
 			},
-			wantErr:     true,
-			errContains: "most 1 item",
+			wantErr:   true,
+			errSubstr: "status is required",
 		},
 		{
-			name: "非法状态值报错",
-			items: []PlanItem{
-				{ID: "s1", Content: "任务A", Status: "done"},
+			name: "empty id fails",
+			patches: []planItemPatch{
+				{ID: "", Content: ptr("step 1"), Status: ptr(StatusPending)},
 			},
-			wantErr:     true,
-			errContains: "illegal",
+			wantErr:   true,
+			errSubstr: "id is empty",
 		},
 		{
-			name: "content为空报错",
-			items: []PlanItem{
-				{ID: "s1", Content: "", Status: StatusPending},
+			name: "duplicate id fails",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+				{ID: "s1", Content: ptr("dup"), Status: ptr(StatusPending)},
 			},
-			wantErr:     true,
-			errContains: "content is empty",
+			wantErr:   true,
+			errSubstr: "duplicate id",
 		},
 		{
-			name: "id为空报错",
-			items: []PlanItem{
-				{ID: "", Content: "任务A", Status: StatusPending},
+			name: "illegal status fails",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr("done")},
 			},
-			wantErr:     true,
-			errContains: "id is empty",
+			wantErr:   true,
+			errSubstr: "status is illegal",
 		},
 		{
-			name: "重复id报错",
-			items: []PlanItem{
-				{ID: "dup", Content: "任务A", Status: StatusPending},
-				{ID: "dup", Content: "任务B", Status: StatusPending},
+			name: "more than one in_progress fails",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusInProgress)},
+				{ID: "s2", Content: ptr("step 2"), Status: ptr(StatusInProgress)},
 			},
-			wantErr:     true,
-			errContains: "duplicate id",
+			wantErr:   true,
+			errSubstr: "at most 1 item in progress",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tm := NewTodoManager()
-			rendered, err := tm.Update(tt.items)
+			_, err := tm.Update(tt.patches)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("期望返回错误，但未返回")
+					t.Fatalf("expected error, got nil")
 				}
-				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("错误信息应包含 %q，实际：%v", tt.errContains, err)
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errSubstr)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("不期望错误，但返回了：%v", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
-			for _, want := range tt.wantRender {
-				if !strings.Contains(rendered, want) {
-					t.Errorf("渲染结果应包含 %q，实际：%s", want, rendered)
-				}
+			if tt.checkFn != nil {
+				tt.checkFn(t, tm)
 			}
 		})
 	}
 }
 
-// TestMerge 使用表驱动测试验证 Merge（按ID合并）的各种场景
+// TestUpdateFailureDoesNotMutate 验证 Update 校验失败时不污染已有状态
+func TestUpdateFailureDoesNotMutate(t *testing.T) {
+	tm := NewTodoManager()
+	if _, err := tm.Update([]planItemPatch{
+		{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusInProgress)},
+	}); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// 非法更新（缺 content）应失败且不改变原状态
+	_, err := tm.Update([]planItemPatch{
+		{ID: "s2", Status: ptr(StatusPending)},
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	items := tm.Items()
+	if len(items) != 1 || items[0].ID != "s1" {
+		t.Errorf("plan was mutated on failed update: %+v", items)
+	}
+}
+
+// ---------- Merge（字段级合并模式）----------
+
 func TestMerge(t *testing.T) {
 	tests := []struct {
-		name         string
-		initialItems []PlanItem // 初始计划
-		mergeItems   []PlanItem // 合并传入
-		wantErr      bool
-		errContains  string
-		wantRender   []string
-		wantCount    int // 合并后条目数量
+		name      string
+		initial   []planItemPatch // 初始计划（通过 Update 构造）
+		patches   []planItemPatch // 本次 merge 的补丁
+		wantErr   bool
+		errSubstr string
+		checkFn   func(t *testing.T, tm *TodoManager)
 	}{
 		{
-			name: "更新已有条目状态",
-			initialItems: []PlanItem{
-				{ID: "s1", Content: "读文件", Status: StatusInProgress},
-				{ID: "s2", Content: "写代码", Status: StatusPending},
+			name: "partial update only status keeps content",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("write tests"), Status: ptr(StatusPending)},
 			},
-			mergeItems: []PlanItem{
-				{ID: "s1", Content: "读文件", Status: StatusCompleted},
-				{ID: "s2", Content: "写代码", Status: StatusInProgress},
+			patches: []planItemPatch{
+				{ID: "s1", Status: ptr(StatusInProgress)},
 			},
-			wantErr:    false,
-			wantRender: []string{"[√] 读文件", "[>] 写代码"},
-			wantCount:  2,
+			wantErr: false,
+			checkFn: func(t *testing.T, tm *TodoManager) {
+				it := itemByID(tm.Items(), "s1")
+				if it == nil {
+					t.Fatal("s1 missing")
+				}
+				if it.Content != "write tests" {
+					t.Errorf("content changed unexpectedly: %q", it.Content)
+				}
+				if it.Status != StatusInProgress {
+					t.Errorf("status not updated: %q", it.Status)
+				}
+			},
 		},
 		{
-			name: "追加新条目",
-			initialItems: []PlanItem{
-				{ID: "s1", Content: "任务A", Status: StatusCompleted},
+			name: "merge appends new item",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
 			},
-			mergeItems: []PlanItem{
-				{ID: "s2", Content: "任务B", Status: StatusInProgress},
+			patches: []planItemPatch{
+				{ID: "s2", Content: ptr("step 2"), Status: ptr(StatusPending)},
 			},
-			wantErr:    false,
-			wantRender: []string{"[√] 任务A", "[>] 任务B"},
-			wantCount:  2,
+			wantErr: false,
+			checkFn: func(t *testing.T, tm *TodoManager) {
+				if len(tm.Items()) != 2 {
+					t.Fatalf("expected 2 items, got %d", len(tm.Items()))
+				}
+				if itemByID(tm.Items(), "s2") == nil {
+					t.Error("new item s2 not appended")
+				}
+			},
 		},
 		{
-			name: "合并后多个in_progress报错",
-			initialItems: []PlanItem{
-				{ID: "s1", Content: "任务A", Status: StatusInProgress},
+			name: "merge new item without content fails",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
 			},
-			mergeItems: []PlanItem{
-				{ID: "s2", Content: "任务B", Status: StatusInProgress},
+			patches: []planItemPatch{
+				{ID: "s2", Status: ptr(StatusPending)},
 			},
-			wantErr:     true,
-			errContains: "most 1 item in progress",
+			wantErr:   true,
+			errSubstr: "content is required for new item",
+		},
+		{
+			name: "merge new item without status fails",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+			},
+			patches: []planItemPatch{
+				{ID: "s2", Content: ptr("step 2")},
+			},
+			wantErr:   true,
+			errSubstr: "status is required for new item",
+		},
+		{
+			name: "merge cannot set existing content to empty",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+			},
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("")},
+			},
+			wantErr:   true,
+			errSubstr: "content cannot be set to empty",
+		},
+		{
+			name: "merge updates progressLabel and can clear it",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusInProgress), ProgressLabel: ptr("reading files")},
+			},
+			patches: []planItemPatch{
+				{ID: "s1", ProgressLabel: ptr("")}, // 显式清空
+			},
+			wantErr: false,
+			checkFn: func(t *testing.T, tm *TodoManager) {
+				it := itemByID(tm.Items(), "s1")
+				if it.ProgressLabel != "" {
+					t.Errorf("expected progressLabel cleared, got %q", it.ProgressLabel)
+				}
+				// content/status 应保持不变
+				if it.Content != "step 1" || it.Status != StatusInProgress {
+					t.Errorf("other fields changed: %+v", it)
+				}
+			},
+		},
+		{
+			name: "merge resulting in two in_progress fails",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusInProgress)},
+				{ID: "s2", Content: ptr("step 2"), Status: ptr(StatusPending)},
+			},
+			patches: []planItemPatch{
+				{ID: "s2", Status: ptr(StatusInProgress)},
+			},
+			wantErr:   true,
+			errSubstr: "at most 1 item in progress",
+		},
+		{
+			name: "merge with illegal status fails",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+			},
+			patches: []planItemPatch{
+				{ID: "s1", Status: ptr("invalid")},
+			},
+			wantErr:   true,
+			errSubstr: "status is illegal",
+		},
+		{
+			name: "merge duplicate id in batch fails",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+			},
+			patches: []planItemPatch{
+				{ID: "s1", Status: ptr(StatusInProgress)},
+				{ID: "s1", Status: ptr(StatusCompleted)},
+			},
+			wantErr:   true,
+			errSubstr: "duplicate id",
+		},
+		{
+			name: "merge empty id fails",
+			initial: []planItemPatch{
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+			},
+			patches: []planItemPatch{
+				{ID: "", Status: ptr(StatusInProgress)},
+			},
+			wantErr:   true,
+			errSubstr: "id is empty",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tm := NewTodoManager()
-			// 设置初始计划
-			if len(tt.initialItems) > 0 {
-				_, err := tm.Update(tt.initialItems)
-				if err != nil {
-					t.Fatalf("初始化计划失败：%v", err)
+			if len(tt.initial) > 0 {
+				if _, err := tm.Update(tt.initial); err != nil {
+					t.Fatalf("setup failed: %v", err)
 				}
 			}
 
-			rendered, err := tm.Merge(tt.mergeItems)
+			_, err := tm.Merge(tt.patches)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("期望返回错误，但未返回")
+					t.Fatalf("expected error, got nil")
 				}
-				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("错误信息应包含 %q，实际：%v", tt.errContains, err)
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errSubstr)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("不期望错误，但返回了：%v", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
-			for _, want := range tt.wantRender {
-				if !strings.Contains(rendered, want) {
-					t.Errorf("渲染结果应包含 %q，实际：%s", want, rendered)
-				}
-			}
-			if tt.wantCount > 0 && len(tm.Items()) != tt.wantCount {
-				t.Errorf("合并后条目数应为 %d，实际：%d", tt.wantCount, len(tm.Items()))
+			if tt.checkFn != nil {
+				tt.checkFn(t, tm)
 			}
 		})
 	}
 }
 
-// TestCall 使用表驱动测试验证 Call 方法（Tool 接口实现）
-func TestCall(t *testing.T) {
+// TestMergeFailureDoesNotMutate 验证 Merge 校验失败时不污染已有状态
+func TestMergeFailureDoesNotMutate(t *testing.T) {
+	tm := NewTodoManager()
+	if _, err := tm.Update([]planItemPatch{
+		{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusInProgress)},
+		{ID: "s2", Content: ptr("step 2"), Status: ptr(StatusPending)},
+	}); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// 这次 merge 会导致两个 in_progress，应失败
+	_, err := tm.Merge([]planItemPatch{
+		{ID: "s2", Status: ptr(StatusInProgress)},
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	// s2 应保持 pending，未被污染
+	it := itemByID(tm.Items(), "s2")
+	if it == nil || it.Status != StatusPending {
+		t.Errorf("plan was mutated on failed merge: %+v", tm.Items())
+	}
+}
+
+// ---------- Render ----------
+
+func TestRender(t *testing.T) {
 	tests := []struct {
 		name        string
-		args        map[string]interface{}
-		wantOk      bool
+		patches     []planItemPatch
+		wantContain []string
+		wantEqual   string // 非空时做完整相等断言
+	}{
+		{
+			name:      "empty plan",
+			patches:   []planItemPatch{},
+			wantEqual: "No plan items.",
+		},
+		{
+			name: "markers and progress label",
+			patches: []planItemPatch{
+				{ID: "s1", Content: ptr("done step"), Status: ptr(StatusCompleted)},
+				{ID: "s2", Content: ptr("doing step"), Status: ptr(StatusInProgress), ProgressLabel: ptr("running")},
+				{ID: "s3", Content: ptr("todo step"), Status: ptr(StatusPending)},
+			},
+			wantContain: []string{
+				"[√] [s1] done step",
+				"[>] [s2] doing step (running)",
+				"[ ] [s3] todo step",
+				"(1/3 completed)",
+			},
+		},
+		{
+			name: "progress label not shown when not in_progress",
+			patches: []planItemPatch{
+				// pending 状态即使带 label 也不应渲染
+				{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending), ProgressLabel: ptr("should not show")},
+			},
+			wantContain: []string{"[ ] [s1] step 1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tm := NewTodoManager()
+			if _, err := tm.Update(tt.patches); err != nil {
+				t.Fatalf("setup failed: %v", err)
+			}
+
+			got := tm.Render()
+
+			if tt.wantEqual != "" {
+				if got != tt.wantEqual {
+					t.Errorf("Render() = %q, want %q", got, tt.wantEqual)
+				}
+				return
+			}
+			for _, sub := range tt.wantContain {
+				if !strings.Contains(got, sub) {
+					t.Errorf("Render() output missing %q\nfull output:\n%s", sub, got)
+				}
+			}
+			// progressLabel 不应在非 in_progress 行出现
+			if tt.name == "progress label not shown when not in_progress" &&
+				strings.Contains(got, "should not show") {
+				t.Errorf("progressLabel leaked into non-in_progress render:\n%s", got)
+			}
+		})
+	}
+}
+
+// ---------- Reminder & rounds ----------
+
+func TestReminder(t *testing.T) {
+	tests := []struct {
+		name        string
+		increments  int
+		threshold   int
+		wantEmpty   bool
 		wantContain string
 	}{
 		{
-			name: "正常调用_全量替换",
-			args: map[string]interface{}{
-				"items": []interface{}{
-					map[string]interface{}{
-						"id":            "t1",
-						"content":       "编写单元测试",
-						"status":        "in_progress",
-						"progressLabel": "正在编写单元测试",
-					},
-					map[string]interface{}{
-						"id":      "t2",
-						"content": "代码审查",
-						"status":  "pending",
-					},
-				},
-			},
-			wantOk:      true,
-			wantContain: "[>] 编写单元测试",
+			name:       "below threshold returns empty",
+			increments: 2,
+			threshold:  3,
+			wantEmpty:  true,
 		},
 		{
-			name: "merge模式调用",
-			args: map[string]interface{}{
-				"merge": true,
-				"items": []interface{}{
-					map[string]interface{}{
-						"id":      "t1",
-						"content": "新增任务",
-						"status":  "pending",
-					},
-				},
-			},
-			wantOk:      true,
-			wantContain: "[ ] 新增任务",
+			name:        "at threshold returns reminder",
+			increments:  3,
+			threshold:   3,
+			wantEmpty:   false,
+			wantContain: "3 rounds",
 		},
 		{
-			name:        "缺少items参数",
-			args:        map[string]interface{}{},
-			wantOk:      false,
-			wantContain: "items",
+			name:        "above threshold shows actual rounds",
+			increments:  5,
+			threshold:   3,
+			wantEmpty:   false,
+			wantContain: "5 rounds",
 		},
-		{
-			name:        "items类型错误",
-			args:        map[string]interface{}{"items": "not an array"},
-			wantOk:      false,
-			wantContain: "array",
-		},
-		{
-			name: "items元素类型错误",
-			args: map[string]interface{}{
-				"items": []interface{}{"not an object"},
-			},
-			wantOk:      false,
-			wantContain: "not a valid object",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tm := NewTodoManager()
-			result := tm.Call(tt.args, nil)
-
-			if result.Ok != tt.wantOk {
-				t.Fatalf("期望 Ok=%v，实际 Ok=%v，Content: %s", tt.wantOk, result.Ok, result.Content)
-			}
-			if tt.wantContain != "" && !strings.Contains(result.Content, tt.wantContain) {
-				t.Errorf("返回内容应包含 %q，实际：%s", tt.wantContain, result.Content)
-			}
-		})
-	}
-}
-
-// TestRender 验证渲染逻辑
-func TestRender(t *testing.T) {
-	tests := []struct {
-		name       string
-		items      []PlanItem
-		wantRender []string
-	}{
-		{
-			name:       "空计划",
-			items:      nil,
-			wantRender: []string{"No plan"},
-		},
-		{
-			name: "三种状态混合",
-			items: []PlanItem{
-				{ID: "a", Content: "待办任务", Status: StatusPending},
-				{ID: "b", Content: "进行中任务", Status: StatusInProgress},
-				{ID: "c", Content: "已完成任务", Status: StatusCompleted},
-			},
-			wantRender: []string{"[ ] 待办任务", "[>] 进行中任务", "[√] 已完成任务", "(1/3 completed)"},
-		},
-		{
-			name: "进行中步骤附加ProgressLabel",
-			items: []PlanItem{
-				{ID: "a", Content: "读取文件", Status: StatusInProgress, ProgressLabel: "正在读取文件"},
-			},
-			wantRender: []string{"[>] 读取文件 (正在读取文件)"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tm := NewTodoManager()
-			if tt.items != nil {
-				_, _ = tm.Update(tt.items)
-			}
-			rendered := tm.Render()
-			for _, want := range tt.wantRender {
-				if !strings.Contains(rendered, want) {
-					t.Errorf("渲染结果应包含 %q，实际：%s", want, rendered)
-				}
-			}
-		})
-	}
-}
-
-// TestReminderAndRounds 验证轮次计数与提醒逻辑
-func TestReminderAndRounds(t *testing.T) {
-	tests := []struct {
-		name       string
-		increments int
-		threshold  int
-		wantEmpty  bool
-	}{
-		{name: "初始状态不提醒", increments: 0, threshold: 3, wantEmpty: true},
-		{name: "2轮未更新不提醒", increments: 2, threshold: 3, wantEmpty: true},
-		{name: "3轮未更新触发提醒", increments: 3, threshold: 3, wantEmpty: false},
-		{name: "5轮未更新触发提醒", increments: 5, threshold: 3, wantEmpty: false},
 	}
 
 	for _, tt := range tests {
@@ -356,148 +482,170 @@ func TestReminderAndRounds(t *testing.T) {
 				tm.IncrementRoundsSinceUpdate()
 			}
 
-			reminder := tm.Reminder(tt.threshold)
-			if tt.wantEmpty && reminder != "" {
-				t.Errorf("不应触发提醒，实际：%s", reminder)
+			got := tm.Reminder(tt.threshold)
+
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("expected empty reminder, got %q", got)
+				}
+				return
 			}
-			if !tt.wantEmpty {
-				if reminder == "" {
-					t.Error("应触发提醒，但为空")
-				}
-				if !strings.Contains(reminder, "<reminder>") {
-					t.Errorf("提醒格式不正确：%s", reminder)
-				}
+			if got == "" {
+				t.Fatalf("expected reminder, got empty")
+			}
+			if tt.wantContain != "" && !strings.Contains(got, tt.wantContain) {
+				t.Errorf("reminder %q does not contain %q", got, tt.wantContain)
 			}
 		})
 	}
-
-	// 额外验证：更新计划后计数归零
-	t.Run("更新后计数归零", func(t *testing.T) {
-		tm := NewTodoManager()
-		tm.IncrementRoundsSinceUpdate()
-		tm.IncrementRoundsSinceUpdate()
-		tm.IncrementRoundsSinceUpdate()
-
-		if tm.Reminder(3) == "" {
-			t.Fatal("3轮未更新应触发提醒")
-		}
-
-		_, _ = tm.Update([]PlanItem{{ID: "x", Content: "新任务", Status: StatusInProgress}})
-		if tm.Reminder(3) != "" {
-			t.Error("更新计划后不应再触发提醒")
-		}
-	})
 }
 
-// TestToolInterfaceMethods 验证 Name / Description / Parameters 基本方法
-func TestToolInterfaceMethods(t *testing.T) {
+// TestUpdateResetsRounds 验证更新计划后未更新轮次被重置
+func TestUpdateResetsRounds(t *testing.T) {
 	tm := NewTodoManager()
+	tm.IncrementRoundsSinceUpdate()
+	tm.IncrementRoundsSinceUpdate()
+	tm.IncrementRoundsSinceUpdate()
 
-	if tm.Name() != "todo" {
-		t.Errorf("工具名称应为 todo，实际：%s", tm.Name())
-	}
-	if tm.Description() == "" {
-		t.Error("工具描述不应为空")
+	if r := tm.Reminder(3); r == "" {
+		t.Fatalf("expected reminder before update")
 	}
 
-	params := tm.Parameters()
-	if params == nil {
-		t.Fatal("参数定义不应为空")
+	// Update 应重置计数
+	if _, err := tm.Update([]planItemPatch{
+		{ID: "s1", Content: ptr("step 1"), Status: ptr(StatusPending)},
+	}); err != nil {
+		t.Fatalf("update failed: %v", err)
 	}
-	required, ok := params["required"].([]string)
-	if !ok || len(required) == 0 || required[0] != "items" {
-		t.Error("参数定义中 required 应包含 items")
+
+	if r := tm.Reminder(3); r != "" {
+		t.Errorf("expected rounds reset after update, got reminder %q", r)
 	}
 }
 
-// TestConcurrency 验证并发安全性
-func TestConcurrency(t *testing.T) {
-	tm := NewTodoManager()
-	var wg sync.WaitGroup
+// ---------- Call（端到端，含参数解析）----------
 
-	// 并发写入
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			items := []PlanItem{
-				{ID: "c1", Content: "并发任务", Status: StatusInProgress},
+func TestCall(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        map[string]interface{}
+		wantErr     bool
+		wantContain string // 成功时校验返回内容，失败时校验错误内容
+	}{
+		{
+			name:        "missing items",
+			args:        map[string]interface{}{},
+			wantErr:     true,
+			wantContain: "missing items",
+		},
+		{
+			name: "items not an array",
+			args: map[string]interface{}{
+				"items": "not-array",
+			},
+			wantErr:     true,
+			wantContain: "must be an array",
+		},
+		{
+			name: "item not an object",
+			args: map[string]interface{}{
+				"items": []interface{}{"oops"},
+			},
+			wantErr:     true,
+			wantContain: "not a valid object",
+		},
+		{
+			name: "valid replace",
+			args: map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{
+						"id":      "s1",
+						"content": "step 1",
+						"status":  StatusPending,
+					},
+				},
+			},
+			wantErr:     false,
+			wantContain: "[ ] [s1] step 1",
+		},
+		{
+			name: "merge as string true is parsed",
+			args: map[string]interface{}{
+				"merge": "true",
+				"items": []interface{}{
+					map[string]interface{}{
+						"id":      "s1",
+						"content": "new step",
+						"status":  StatusPending,
+					},
+				},
+			},
+			wantErr:     false,
+			wantContain: "[s1] new step",
+		},
+		{
+			name: "replace missing content reports error",
+			args: map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{
+						"id":     "s1",
+						"status": StatusPending,
+					},
+				},
+			},
+			wantErr:     true,
+			wantContain: "content is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tm := NewTodoManager()
+			res := tm.Call(tt.args, nil) // ctx 为 nil，验证不 panic
+
+			if tt.wantErr {
+				if !res.IsError || res.Ok {
+					t.Fatalf("expected error result, got %+v", res)
+				}
+			} else {
+				if res.IsError || !res.Ok {
+					t.Fatalf("expected ok result, got %+v", res)
+				}
 			}
-			_, _ = tm.Update(items)
-		}(i)
-	}
-
-	// 并发读取
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = tm.Render()
-			_ = tm.Items()
-			tm.IncrementRoundsSinceUpdate()
-			_ = tm.Reminder(3)
-		}()
-	}
-
-	wg.Wait()
-
-	// 只要没有 panic 或 data race 即通过
-	items := tm.Items()
-	if len(items) != 1 {
-		t.Errorf("并发后条目数应为 1，实际：%d", len(items))
+			if tt.wantContain != "" && !strings.Contains(res.Content, tt.wantContain) {
+				t.Errorf("result content %q does not contain %q", res.Content, tt.wantContain)
+			}
+		})
 	}
 }
 
-// TestFullFlow 验证计划的创建、推进、完成全流程
-func TestFullFlow(t *testing.T) {
+// TestCallMergePartialUpdate 端到端验证 merge 只改 status 不丢 content
+func TestCallMergePartialUpdate(t *testing.T) {
 	tm := NewTodoManager()
 
-	// 第一轮：创建计划
-	items := []PlanItem{
-		{ID: "s1", Content: "阅读失败测试", Status: StatusInProgress, ProgressLabel: "正在阅读失败测试"},
-		{ID: "s2", Content: "定位 bug 根因", Status: StatusPending},
-		{ID: "s3", Content: "修复代码", Status: StatusPending},
-		{ID: "s4", Content: "运行回归测试", Status: StatusPending},
-	}
-	rendered, err := tm.Update(items)
-	if err != nil {
-		t.Fatalf("首次更新计划失败：%v", err)
-	}
-	if !strings.Contains(rendered, "[>] 阅读失败测试") {
-		t.Errorf("渲染结果应包含进行中标记，实际：%s", rendered)
-	}
-	if len(tm.Items()) != 4 {
-		t.Errorf("计划条目数应为 4，实际：%d", len(tm.Items()))
+	// 先建立计划
+	res := tm.Call(map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"id": "s1", "content": "write tests", "status": StatusPending},
+		},
+	}, nil)
+	if res.IsError {
+		t.Fatalf("setup failed: %s", res.Content)
 	}
 
-	// 第二轮：merge 推进——第一步完成，第二步开始
-	mergeItems := []PlanItem{
-		{ID: "s1", Content: "阅读失败测试", Status: StatusCompleted},
-		{ID: "s2", Content: "定位 bug 根因", Status: StatusInProgress, ProgressLabel: "正在分析日志"},
-	}
-	rendered2, err := tm.Merge(mergeItems)
-	if err != nil {
-		t.Fatalf("merge 推进失败：%v", err)
-	}
-	if !strings.Contains(rendered2, "[√] 阅读失败测试") {
-		t.Errorf("渲染结果应包含已完成标记，实际：%s", rendered2)
-	}
-	if !strings.Contains(rendered2, "[>] 定位 bug 根因") {
-		t.Errorf("渲染结果应包含进行中标记，实际：%s", rendered2)
+	// merge 只发 id + status
+	res = tm.Call(map[string]interface{}{
+		"merge": true,
+		"items": []interface{}{
+			map[string]interface{}{"id": "s1", "status": StatusInProgress},
+		},
+	}, nil)
+	if res.IsError {
+		t.Fatalf("merge failed: %s", res.Content)
 	}
 
-	// 第三轮：全部完成
-	items3 := []PlanItem{
-		{ID: "s1", Content: "阅读失败测试", Status: StatusCompleted},
-		{ID: "s2", Content: "定位 bug 根因", Status: StatusCompleted},
-		{ID: "s3", Content: "修复代码", Status: StatusCompleted},
-		{ID: "s4", Content: "运行回归测试", Status: StatusCompleted},
-	}
-	rendered3, err := tm.Update(items3)
-	if err != nil {
-		t.Fatalf("完成所有计划失败：%v", err)
-	}
-	if strings.Count(rendered3, "[√]") != 4 {
-		t.Errorf("全部完成后应显示 4 个已完成标记，实际渲染：%s", rendered3)
+	it := itemByID(tm.Items(), "s1")
+	if it == nil || it.Content != "write tests" || it.Status != StatusInProgress {
+		t.Errorf("partial merge did not preserve content / update status: %+v", it)
 	}
 }

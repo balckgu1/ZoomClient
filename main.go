@@ -193,7 +193,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 			todoManager.IncrementRoundsSinceUpdate()
 			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
 				log.Info("Plan has not been updated for a long time, injecting reminders",
-					zap.Int("Rounds since update", todoManager.PlanningState.RoundsSinceUpdate),
+					zap.Int("Rounds since update", cfg.AgentLoop.TodoRoundsThreshold),
 				)
 				pipeline.AddReminder(prompt.Reminder{
 					Content: reminder,
@@ -400,7 +400,7 @@ func main() {
 	// Instantiate todo manager
 	todoManager := tools.NewTodoManager()
 	// Register todo tool
-	registry.Register(tools.NewTodoManager())
+	registry.Register(todoManager)
 
 	// Instantiate compact manager
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)

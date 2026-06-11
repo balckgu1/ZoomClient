@@ -14,6 +14,7 @@ doc/
 docs/
 
 *.exe
+TODO.md
 
 .task_outputs/
 

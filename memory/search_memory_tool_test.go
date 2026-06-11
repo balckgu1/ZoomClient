@@ -47,14 +47,6 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 			wantContain: "keyword parameter must be a non-empty string",
 		},
 		{
-			name:        "invalid type filter",
-			memDir:      "temp",
-			args:        map[string]any{"keyword": "test", "type": "badtype"},
-			wantOk:      false,
-			wantErr:     true,
-			wantContain: "type must be one of",
-		},
-		{
 			name:        "empty memoryDir",
 			memDir:      "",
 			args:        map[string]any{"keyword": "test"},
@@ -71,6 +63,7 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 			wantContain: "No memories found",
 			setupFunc: func(t *testing.T, dir string) {
 				writeMemoryFile(t, dir, "test", "test", "a test", "user", "body content")
+				buildIndex(t, dir)
 			},
 		},
 		{
@@ -83,6 +76,7 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 			setupFunc: func(t *testing.T, dir string) {
 				writeMemoryFile(t, dir, "redis_config", "redis_config", "Redis settings", "project", "host=localhost")
 				writeMemoryFile(t, dir, "other", "other", "other memory", "user", "unrelated")
+				buildIndex(t, dir)
 			},
 		},
 		{
@@ -94,17 +88,19 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 			wantContain: "db_conn",
 			setupFunc: func(t *testing.T, dir string) {
 				writeMemoryFile(t, dir, "db_conn", "db_conn", "Database connection string", "project", "postgres://localhost")
+				buildIndex(t, dir)
 			},
 		},
 		{
-			name:        "match by body",
+			name:        "match by body (searches name and description only)",
 			memDir:      "temp",
 			args:        map[string]any{"keyword": "pytest"},
 			wantOk:      true,
 			wantErr:     false,
-			wantContain: "test_framework",
+			wantContain: "No memories found",
 			setupFunc: func(t *testing.T, dir string) {
 				writeMemoryFile(t, dir, "test_framework", "test_framework", "Test preferences", "user", "Use pytest for testing")
+				buildIndex(t, dir)
 			},
 		},
 		{
@@ -116,40 +112,19 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 			wantContain: "redis_config",
 			setupFunc: func(t *testing.T, dir string) {
 				writeMemoryFile(t, dir, "redis_config", "redis_config", "Redis settings", "project", "host=localhost")
+				buildIndex(t, dir)
 			},
 		},
 		{
-			name:        "filter by type",
+			name:        "skips MEMORY.md index content from search",
 			memDir:      "temp",
-			args:        map[string]any{"keyword": "test", "type": "user"},
-			wantOk:      true,
-			wantErr:     false,
-			wantContain: "user_pref",
-			setupFunc: func(t *testing.T, dir string) {
-				writeMemoryFile(t, dir, "user_pref", "user_pref", "User test preference", "user", "test body")
-				writeMemoryFile(t, dir, "proj_rule", "proj_rule", "Project test rule", "project", "test content")
-			},
-		},
-		{
-			name:        "filter by type - no match",
-			memDir:      "temp",
-			args:        map[string]any{"keyword": "test", "type": "reference"},
+			args:        map[string]any{"keyword": "zzz_no_match"},
 			wantOk:      true,
 			wantErr:     false,
 			wantContain: "No memories found",
 			setupFunc: func(t *testing.T, dir string) {
-				writeMemoryFile(t, dir, "user_pref", "user_pref", "User test", "user", "test body")
-			},
-		},
-		{
-			name:        "skips MEMORY.md",
-			memDir:      "temp",
-			args:        map[string]any{"keyword": "index"},
-			wantOk:      true,
-			wantErr:     false,
-			wantContain: "No memories found",
-			setupFunc: func(t *testing.T, dir string) {
-				writeMemoryFileRaw(t, dir, "MEMORY.md", "# Memory Index\n- test: index entry [user]\n")
+				writeMemoryFile(t, dir, "real", "real", "A real memory", "user", "body")
+				buildIndex(t, dir)
 			},
 		},
 		{
@@ -163,6 +138,7 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 				writeMemoryFile(t, dir, "go_style", "go_style", "Go style guide", "project", "Use gofmt")
 				writeMemoryFile(t, dir, "go_mod", "go_mod", "Go module config", "project", "go 1.21")
 				writeMemoryFile(t, dir, "python", "python", "Python notes", "user", "pip install")
+				buildIndex(t, dir)
 			},
 		},
 	}

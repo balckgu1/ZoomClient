@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,8 +39,11 @@ func (u *UpdateMemoryTool) Parameters() map[string]any {
 				"description": "the new body content, if not provided the original content is retained.",
 			},
 			"description": map[string]any{
-				"type":        "string",
-				"description": "the new description, if not provided the original description is retained.",
+				"type": "string",
+				"description": "A concise summary of the content. " +
+					"Description must always stay consistent with content. " +
+					"Whenever you change 'content', you MUST also provide an updated 'description' that accurately summarizes the new content. " +
+					"If 'content' is unchanged, this may be omitted to keep the original.",
 			},
 			"type": map[string]any{
 				"type":        "string",
@@ -134,8 +136,9 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 	if typ != "" {
 		doc.FrontMatter.Type = typ
 	}
-	// Front Matter + Content
-	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n", name, doc.FrontMatter.Description, doc.FrontMatter.Type, doc.Body)
+	// Front Matter + Content（使用 yamlQuote 防止特殊字符破坏 frontmatter 解析）
+	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n",
+		yamlQuote(name), yamlQuote(doc.FrontMatter.Description), doc.FrontMatter.Type, doc.Body)
 	// Write file to disk
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
 		return tools.ToolResult{
@@ -145,12 +148,12 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		}
 	}
 
-	// rebuild MEMORY.md index
-	err = rebuildIndex(u.memoryDir)
+	// 增量更新 MEMORY.md 索引
+	err = upsertIndex(u.memoryDir, name, doc.FrontMatter.Description, doc.FrontMatter.Type)
 	if err != nil {
 		return tools.ToolResult{
 			Ok:      false,
-			Content: fmt.Sprintf("Error: failed to rebuild memory index: %v", err),
+			Content: fmt.Sprintf("Error: failed to update memory index: %v", err),
 			IsError: true,
 		}
 	}
@@ -162,28 +165,20 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 	}
 }
 
+// MemoryExists 精确匹配索引中是否存在指定 name 的条目
+// 索引格式为: - name: description [type]
+// 使用 parseIndex 解析后精确比较 name 字段，避免前缀误匹配
 func MemoryExists(filePath string, name string) (bool, error) {
-	f, err := os.Open(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return false, fmt.Errorf("failed to open MEMORY.md file: %w", err)
-	}
-	defer f.Close()
-
-	// build prefix
-	prefix := "- " + name + ":"
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, prefix) {
-			return true, nil
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
 		return false, fmt.Errorf("failed to read MEMORY.md file: %w", err)
 	}
 
+	entries := parseIndex(string(data))
+	for _, entry := range entries {
+		if entry.Name == name {
+			return true, nil
+		}
+	}
 	return false, nil
-
 }

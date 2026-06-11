@@ -79,12 +79,12 @@ func (d *DeleteMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		}
 	}
 
-	// 重建 MEMORY.md 索引
-	err = rebuildIndex(d.memoryDir)
+	// 从 MEMORY.md 索引中移除该条目
+	err = removeFromIndex(d.memoryDir, name)
 	if err != nil {
 		return tools.ToolResult{
 			Ok:      false,
-			Content: fmt.Sprintf("Error: failed to rebuild memory index: %v", err),
+			Content: fmt.Sprintf("Error: failed to update memory index: %v", err),
 			IsError: true,
 		}
 	}

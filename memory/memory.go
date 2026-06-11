@@ -1,9 +1,8 @@
 package memory
 
 const (
-	MaxMemoryTokenBudget = 2048
-	AvgCharsPerToken     = 4
-	MaxBodyPreviewChars  = 300
+	MaxBodyPreviewChars = 500
+	MaxMemoryEntries    = 50 // system prompt 中最多显示的 memory 条目数
 )
 
 const (

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -97,7 +98,6 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 	}
 
 	// Front Matter + Content
-	// 对 name 和 description 进行 YAML 安全引用，防止含冒号、特殊字符时解析错误
 	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n",
 		yamlQuote(name), yamlQuote(description), typ, content)
 
@@ -108,7 +108,14 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 
 	// Check if a memory with the same name already exists
 	indexPath := filepath.Join(m.memoryDir, "MEMORY.md")
-	if exists, _ := MemoryExists(indexPath, name); exists {
+	exists, memErr := MemoryExists(indexPath, name)
+	if memErr != nil {
+		// 非首次保存
+		if !errors.Is(memErr, os.ErrNotExist) {
+			return tools.ToolResult{Ok: false, Content: "Error: " + memErr.Error(), IsError: true}
+		}
+		// 索引不存在，说明 memory 一定不存在，可继续保存
+	} else if exists {
 		return tools.ToolResult{
 			Ok:      false,
 			Content: fmt.Sprintf("Error: memory %q already exists. Please use update_memory to modify it.", name),
@@ -140,12 +147,12 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	// rebuild MEMORY.md index
-	err := rebuildIndex(m.memoryDir)
+	// 增量更新 MEMORY.md 索引
+	err := upsertIndex(m.memoryDir, name, description, typ)
 	if err != nil {
 		return tools.ToolResult{
 			Ok:      false,
-			Content: fmt.Sprintf("Error: failed to rebuild memory index: %v", err),
+			Content: fmt.Sprintf("Error: failed to update memory index: %v", err),
 			IsError: true,
 		}
 	}
@@ -155,42 +162,6 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		Content: fmt.Sprintf("Memory saved successfully to %s", filePath),
 		IsError: false,
 	}
-}
-
-// rebuildIndex Rebuild the MEMORY.md index file, listing all valid memory entries in memoryDir.
-// Format: - name: description [type]
-func rebuildIndex(memoryDir string) error {
-	entries, err := os.ReadDir(memoryDir)
-	if err != nil {
-		return err
-	}
-
-	lines := []string{"# Memory Index\n"}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".md") || name == "MEMORY.md" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(memoryDir, name))
-		if err != nil {
-			continue
-		}
-		doc := ParseFrontMatter(string(data))
-		if doc.FrontMatter.Name != "" {
-			lines = append(lines, fmt.Sprintf("- %s: %s [%s]",
-				doc.FrontMatter.Name, doc.FrontMatter.Description, doc.FrontMatter.Type))
-		}
-	}
-
-	indexPath := filepath.Join(memoryDir, "MEMORY.md")
-	err = os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 // yamlQuote 对 frontmatter value 做安全引用。

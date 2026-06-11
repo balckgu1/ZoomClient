@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,12 +92,19 @@ func LoadMemorySection(memoryDir string) string {
 	// 按优先级排序
 	sortByPriority(entries)
 
-	// 输出摘要列表 name + description + type
+	// 输出摘要列表 name + description + type（限制条目数）
 	var sb strings.Builder
 	sb.WriteString("## Memories from previous sessions\n")
 	sb.WriteString("Use `search_memory` tool to retrieve full content when needed.\n\n")
 
-	for _, entry := range entries {
+	displayCount := len(entries)
+	truncated := false
+	if displayCount > MaxMemoryEntries {
+		displayCount = MaxMemoryEntries
+		truncated = true
+	}
+
+	for _, entry := range entries[:displayCount] {
 		sb.WriteString("- **[")
 		sb.WriteString(entry.Type)
 		sb.WriteString("]** ")
@@ -106,6 +114,11 @@ func LoadMemorySection(memoryDir string) string {
 			sb.WriteString(entry.Description)
 		}
 		sb.WriteString("\n")
+	}
+
+	if truncated {
+		remaining := len(entries) - displayCount
+		sb.WriteString(fmt.Sprintf("\n_...and %d more entries. Use `search_memory` to find specific ones._\n", remaining))
 	}
 
 	return strings.TrimRight(sb.String(), "\n")

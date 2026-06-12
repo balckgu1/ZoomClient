@@ -6,22 +6,19 @@ import (
 	"go.uber.org/zap"
 )
 
-// CompactTool 把"手动触发完整压缩"暴露成一个Tool
+// CompactTool 把 触发完整压缩 封装成tool
 type CompactTool struct {
 	manager *CompactManager
 }
 
-// NewCompactTool 创建 compact 工具
 func NewCompactTool(m *CompactManager) *CompactTool {
 	return &CompactTool{manager: m}
 }
 
-// Name 工具名
 func (t *CompactTool) Name() string {
 	return "compact"
 }
 
-// Description 工具描述
 func (t *CompactTool) Description() string {
 	return "Manually request a full conversation compaction. " +
 		"Use this when the dialog has grown long and you want to free up active context " +
@@ -29,7 +26,6 @@ func (t *CompactTool) Description() string {
 		"key decisions, next step). The actual compaction happens at the end of this turn."
 }
 
-// Parameters 不需要任何参数
 func (t *CompactTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type":       "object",

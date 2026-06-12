@@ -207,20 +207,18 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 		reason := "tool_result"
 		state.TransitionReason = &reason
 
-		// Context compact (full summary)
+		// Full Context compact
 		// Determine whether to trigger full compression after all tool results have been appended to state.messages
-		// Trigger conditions:
-		//   1) The model/user called the compact tool, marking pendingManualCompact;
-		//   2) The estimated total context size exceeds Config.ContextLimit
 		// After successful compression, state.Messages will be replaced with system + a continuity summary
 		if compactManager.ShouldAutoCompact(state.Messages) {
 			beforeSize := compactManager.EstimateSize(state.Messages)
 			newMessages, cerr := compactManager.CompactHistory(state.Messages)
 			if cerr != nil {
-				log.Warn("Complete compression failed, keep the original message history to continue", zap.Error(cerr))
+				log.Warn("Complete compression failed, keep the original message history to continue", zap.String("session", toolCtx.SessionID), zap.Error(cerr))
 			} else {
 				afterSize := compactManager.EstimateSize(newMessages)
 				log.Info("Complete compression completed",
+					zap.String("Session", toolCtx.SessionID),
 					zap.Int("Bytes before compression", beforeSize),
 					zap.Int("Bytes after compression", afterSize),
 					zap.Int("Message count", len(newMessages)),

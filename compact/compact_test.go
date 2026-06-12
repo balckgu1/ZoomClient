@@ -10,12 +10,13 @@ import (
 	"zoomClient/clients"
 	"zoomClient/fsm"
 	"zoomClient/tools"
+
+	"go.uber.org/zap"
 )
 
 // ===================== 测试辅助 =====================
 
-// stubChatClient 用于在不连真实模型的前提下测试第 3 层（整体摘要）。
-// 可以控制返回的摘要文本或返回错误，同时记录最近一次收到的 messages 便于断言。
+// stubChatClient 用于在不连真实模型的前提下测试整体压缩
 type stubChatClient struct {
 	summaryContent string        // 模型要返回的摘要文本；为空则走 returnErr
 	returnErr      error         // 模拟模型调用失败
@@ -23,7 +24,7 @@ type stubChatClient struct {
 	callCount      int           // 被调用的次数
 }
 
-// Chat 实现 clients.ChatClient 接口。
+// Chat 实现 clients.ChatClient 接口
 func (s *stubChatClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
 	s.callCount++
 	// 复制一份避免外部修改
@@ -41,7 +42,7 @@ func (s *stubChatClient) Chat(model string, messages []fsm.Message, toolList []t
 	}, nil
 }
 
-// newTestManager 构造一个可自定义阈值 + 临时落盘目录的 CompactManager。
+// newTestManager 构造一个可自定义阈值 + 临时落盘目录的 CompactManager
 func newTestManager(t *testing.T, cfg *CompactConfig, client clients.ChatClient) *CompactManager {
 	t.Helper()
 	if cfg.PersistDir == "" {
@@ -62,7 +63,7 @@ func defaultTestConfig() *CompactConfig {
 
 // ===================== 第 1 层：PersistLargeOutput =====================
 
-// TestPersistLargeOutput_SmallOutput_ReturnAsIs 小输出应原样返回，不落盘。
+// TestPersistLargeOutput_SmallOutput_ReturnAsIs 小输出应原样返回，不落盘
 func TestPersistLargeOutput_SmallOutput_ReturnAsIs(t *testing.T) {
 	cfg := defaultTestConfig()
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -81,7 +82,7 @@ func TestPersistLargeOutput_SmallOutput_ReturnAsIs(t *testing.T) {
 	}
 }
 
-// TestPersistLargeOutput_LargeOutput_PersistAndPreview 大输出应写磁盘并返回预览占位。
+// TestPersistLargeOutput_LargeOutput_PersistAndPreview 大输出应写磁盘并返回预览占位
 func TestPersistLargeOutput_LargeOutput_PersistAndPreview(t *testing.T) {
 	cfg := defaultTestConfig()
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -126,7 +127,7 @@ func TestPersistLargeOutput_LargeOutput_PersistAndPreview(t *testing.T) {
 	}
 }
 
-// TestPersistLargeOutput_EmptyToolID_FallbackName 工具 ID 为空时应使用兜底命名。
+// TestPersistLargeOutput_EmptyToolID_FallbackName 工具 ID 为空时应使用兜底命名
 func TestPersistLargeOutput_EmptyToolID_FallbackName(t *testing.T) {
 	cfg := defaultTestConfig()
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -146,7 +147,7 @@ func TestPersistLargeOutput_EmptyToolID_FallbackName(t *testing.T) {
 
 // ===================== 第 2 层：MicroCompact =====================
 
-// TestMicroCompact_FewerThanKeep_NoChange 工具结果少于保留阈值时不应修改。
+// TestMicroCompact_FewerThanKeep_NoChange 工具结果少于保留阈值时不应修改
 func TestMicroCompact_FewerThanKeep_NoChange(t *testing.T) {
 	cfg := defaultTestConfig() // KeepRecentToolResults = 3
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -170,7 +171,7 @@ func TestMicroCompact_FewerThanKeep_NoChange(t *testing.T) {
 	}
 }
 
-// TestMicroCompact_MoreThanKeep_ReplaceEarlier 工具结果超出保留阈值时仅保留最近 N 条。
+// TestMicroCompact_MoreThanKeep_ReplaceEarlier 工具结果超出保留阈值时仅保留最近 N 条
 func TestMicroCompact_MoreThanKeep_ReplaceEarlier(t *testing.T) {
 	cfg := defaultTestConfig() // KeepRecentToolResults = 3
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -226,7 +227,7 @@ func TestMicroCompact_MoreThanKeep_ReplaceEarlier(t *testing.T) {
 	}
 }
 
-// TestMicroCompact_Idempotent 已经是占位的 tool 消息再次调用 MicroCompact 应保持不变。
+// TestMicroCompact_Idempotent 已经是占位的 tool 消息再次调用 MicroCompact 应保持不变
 func TestMicroCompact_Idempotent(t *testing.T) {
 	cfg := defaultTestConfig()
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -253,9 +254,41 @@ func TestMicroCompact_Idempotent(t *testing.T) {
 	}
 }
 
+// TestMicroCompact_NoSideEffect 调用 MicroCompact 不应修改原始传入的 messages slice
+func TestMicroCompact_NoSideEffect(t *testing.T) {
+	cfg := defaultTestConfig() // KeepRecentToolResults = 3
+	m := newTestManager(t, cfg, &stubChatClient{})
+
+	messages := []fsm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "tool", Content: "old-1", ToolCallID: "c1"},
+		{Role: "tool", Content: "old-2", ToolCallID: "c2"},
+		{Role: "tool", Content: "keep-1", ToolCallID: "c3"},
+		{Role: "tool", Content: "keep-2", ToolCallID: "c4"},
+		{Role: "tool", Content: "keep-3", ToolCallID: "c5"},
+	}
+
+	// 记录原始内容
+	origContent := make([]string, len(messages))
+	for i, msg := range messages {
+		if s, ok := msg.Content.(string); ok {
+			origContent[i] = s
+		}
+	}
+
+	_ = m.MicroCompact(messages)
+
+	// 检查原始 messages 是否被修改
+	for i, msg := range messages {
+		if s, ok := msg.Content.(string); ok && s != origContent[i] {
+			t.Errorf("原始 messages[%d].Content 不应被修改，期望 %q，实际 %q", i, origContent[i], s)
+		}
+	}
+}
+
 // ===================== 大小估算与触发判断 =====================
 
-// TestEstimateSize_IncludesAllFields 验证估算涵盖 role/content/reasoning/toolcalls。
+// TestEstimateSize_IncludesAllFields 验证估算涵盖 role/content/reasoning/toolcalls
 func TestEstimateSize_IncludesAllFields(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
 
@@ -287,7 +320,7 @@ func TestEstimateSize_IncludesAllFields(t *testing.T) {
 	}
 }
 
-// TestShouldAutoCompact_UnderLimit_False 上下文未超限且无手动请求应返回 false。
+// TestShouldAutoCompact_UnderLimit_False 上下文未超限且无手动请求应返回 false
 func TestShouldAutoCompact_UnderLimit_False(t *testing.T) {
 	cfg := defaultTestConfig() // ContextLimit = 500
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -298,7 +331,7 @@ func TestShouldAutoCompact_UnderLimit_False(t *testing.T) {
 	}
 }
 
-// TestShouldAutoCompact_OverLimit_True 上下文超限应自动触发。
+// TestShouldAutoCompact_OverLimit_True 上下文超限应自动触发
 func TestShouldAutoCompact_OverLimit_True(t *testing.T) {
 	cfg := defaultTestConfig() // ContextLimit = 500
 	m := newTestManager(t, cfg, &stubChatClient{})
@@ -309,7 +342,7 @@ func TestShouldAutoCompact_OverLimit_True(t *testing.T) {
 	}
 }
 
-// TestShouldAutoCompact_ManualRequest_True 手动标记应直接触发，不看大小。
+// TestShouldAutoCompact_ManualRequest_True 手动标记应直接触发，不看大小
 func TestShouldAutoCompact_ManualRequest_True(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
 	m.RequestManualCompact()
@@ -322,7 +355,7 @@ func TestShouldAutoCompact_ManualRequest_True(t *testing.T) {
 
 // ===================== 第 3 层：CompactHistory =====================
 
-// TestCompactHistory_Success_ReplaceWithSummary 成功压缩后应得到 system + 摘要消息。
+// TestCompactHistory_Success_ReplaceWithSummary 成功压缩后应得到 system + 摘要消息
 func TestCompactHistory_Success_ReplaceWithSummary(t *testing.T) {
 	stub := &stubChatClient{summaryContent: "SUMMARY: goal=X; files=a.go; next=run tests"}
 	m := newTestManager(t, defaultTestConfig(), stub)
@@ -374,7 +407,7 @@ func TestCompactHistory_Success_ReplaceWithSummary(t *testing.T) {
 	}
 }
 
-// TestCompactHistory_ClientError_FallbackToOriginal 模型失败时应返回原消息与 error。
+// TestCompactHistory_ClientError_FallbackToOriginal 模型失败时应返回原消息与 error
 func TestCompactHistory_ClientError_FallbackToOriginal(t *testing.T) {
 	stub := &stubChatClient{returnErr: fmt.Errorf("network down")}
 	m := newTestManager(t, defaultTestConfig(), stub)
@@ -396,7 +429,7 @@ func TestCompactHistory_ClientError_FallbackToOriginal(t *testing.T) {
 	}
 }
 
-// TestCompactHistory_ConsumesManualFlag 执行一次压缩后，手动标记应被消费。
+// TestCompactHistory_ConsumesManualFlag 执行一次压缩后，手动标记应被消费
 func TestCompactHistory_ConsumesManualFlag(t *testing.T) {
 	stub := &stubChatClient{summaryContent: "ok"}
 	m := newTestManager(t, defaultTestConfig(), stub)
@@ -419,9 +452,156 @@ func TestCompactHistory_ConsumesManualFlag(t *testing.T) {
 	}
 }
 
+// TestCompactHistory_PreservesPendingToolCalls 压缩时应保留尾部带 tool_calls 的 assistant 及其配对 tool 结果
+func TestCompactHistory_PreservesPendingToolCalls(t *testing.T) {
+	stub := &stubChatClient{summaryContent: "SUMMARY: working on bug fix"}
+	m := newTestManager(t, defaultTestConfig(), stub)
+
+	messages := []fsm.Message{
+		{Role: "system", Content: "you are helpful"},
+		{Role: "user", Content: "帮我修 bug"},
+		{Role: "assistant", Content: "好的，我来看看"},
+		{Role: "tool", Content: "old result", ToolCallID: "c0"},
+		// 尾部：assistant 发起 tool_calls，紧跟两条 tool 结果
+		{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{
+			{ID: "c1", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"filename": "main.go"}}},
+			{ID: "c2", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"filename": "util.go"}}},
+		}},
+		{Role: "tool", Content: "main.go content", ToolCallID: "c1"},
+		{Role: "tool", Content: "util.go content", ToolCallID: "c2"},
+	}
+
+	got, err := m.CompactHistory(messages)
+	if err != nil {
+		t.Fatalf("压缩应成功，实际报错：%v", err)
+	}
+
+	// 期望：system + summary(user) + assistant(tool_calls) + tool(c1) + tool(c2) = 5 条
+	if len(got) != 5 {
+		t.Fatalf("压缩后应保留尾部 tool_calls 相关消息共 5 条，实际 %d 条", len(got))
+	}
+
+	// 前两条是 system + 摘要
+	if got[0].Role != "system" || got[0].Content != "you are helpful" {
+		t.Errorf("第 1 条应保留原 system，实际：%+v", got[0])
+	}
+	if got[1].Role != "user" {
+		t.Errorf("第 2 条应为摘要 user 消息，实际：%s", got[1].Role)
+	}
+	if s, _ := got[1].Content.(string); !strings.Contains(s, "SUMMARY:") {
+		t.Errorf("摘要消息应包含模型返回的摘要正文，实际：%v", got[1].Content)
+	}
+
+	// 后三条是原始的 assistant(tool_calls) + tool + tool，必须原样保留
+	if got[2].Role != "assistant" || len(got[2].ToolCalls) != 2 {
+		t.Errorf("第 3 条应为带 2 个 tool_calls 的 assistant，实际：%+v", got[2])
+	}
+	if got[3].Role != "tool" || got[3].ToolCallID != "c1" {
+		t.Errorf("第 4 条应为 ToolCallID=c1 的 tool 结果，实际：%+v", got[3])
+	}
+	if got[4].Role != "tool" || got[4].ToolCallID != "c2" {
+		t.Errorf("第 5 条应为 ToolCallID=c2 的 tool 结果，实际：%+v", got[4])
+	}
+}
+
+// TestCompactHistory_NoTrailingToolCalls_Unchanged 尾部没有 assistant(tool_calls) 时，行为应与之前完全一致
+func TestCompactHistory_NoTrailingToolCalls_Unchanged(t *testing.T) {
+	stub := &stubChatClient{summaryContent: "SUMMARY: done"}
+	m := newTestManager(t, defaultTestConfig(), stub)
+
+	messages := []fsm.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "任务完成了"},
+		{Role: "assistant", Content: "好的，任务已完成"},
+	}
+
+	got, err := m.CompactHistory(messages)
+	if err != nil {
+		t.Fatalf("压缩应成功，实际报错：%v", err)
+	}
+
+	// 没有尾部 tool_calls，应只有 system + summary = 2 条
+	if len(got) != 2 {
+		t.Fatalf("无尾部 tool_calls 时压缩后应为 2 条，实际 %d 条", len(got))
+	}
+	if got[0].Role != "system" || got[0].Content != "sys" {
+		t.Errorf("第 1 条应保留原 system，实际：%+v", got[0])
+	}
+	if got[1].Role != "user" {
+		t.Errorf("第 2 条应为摘要 user 消息，实际：%s", got[1].Role)
+	}
+}
+
+// TestFindPendingToolCallBoundary 辅助函数的边界查找测试
+func TestFindPendingToolCallBoundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []fsm.Message
+		want     int
+	}{
+		{
+			name:     "空消息",
+			messages: []fsm.Message{},
+			want:     -1,
+		},
+		{
+			name: "无 assistant 消息",
+			messages: []fsm.Message{
+				{Role: "user", Content: "hi"},
+				{Role: "tool", Content: "result", ToolCallID: "c1"},
+			},
+			want: -1,
+		},
+		{
+			name: "assistant 但无 tool_calls",
+			messages: []fsm.Message{
+				{Role: "assistant", Content: "hello"},
+			},
+			want: -1,
+		},
+		{
+			name: "最后一条是带 tool_calls 的 assistant",
+			messages: []fsm.Message{
+				{Role: "user", Content: "hi"},
+				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c1"}}},
+			},
+			want: 1,
+		},
+		{
+			name: "assistant(tool_calls) 后跟 tool 结果",
+			messages: []fsm.Message{
+				{Role: "user", Content: "hi"},
+				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c1"}}},
+				{Role: "tool", Content: "result", ToolCallID: "c1"},
+			},
+			want: 1,
+		},
+		{
+			name: "多个 assistant(tool_calls) 取最后一个",
+			messages: []fsm.Message{
+				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c1"}}},
+				{Role: "tool", Content: "r1", ToolCallID: "c1"},
+				{Role: "assistant", Content: "中间对话"},
+				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c2"}}},
+				{Role: "tool", Content: "r2", ToolCallID: "c2"},
+			},
+			want: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findPendingToolCallBoundary(tt.messages)
+			if got != tt.want {
+				t.Errorf("findPendingToolCallBoundary() = %d, 期望 %d", got, tt.want)
+			}
+		})
+	}
+}
+
 // ===================== CompactTool =====================
 
-// TestCompactTool_Call_MarksManualRequest 调用 compact 工具应标记手动压缩请求。
+// TestCompactTool_Call_MarksManualRequest 调用 compact 工具应标记手动压缩请求
 func TestCompactTool_Call_MarksManualRequest(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
 	tool := NewCompactTool(m)
@@ -430,7 +610,9 @@ func TestCompactTool_Call_MarksManualRequest(t *testing.T) {
 		t.Errorf("工具名应为 compact，实际：%s", tool.Name())
 	}
 
-	result := tool.Call(map[string]interface{}{}, &tools.ToolContext{})
+	result := tool.Call(map[string]interface{}{}, &tools.ToolContext{
+		Logger: zap.NewNop(),
+	})
 	if !result.Ok {
 		t.Errorf("Call 应成功，实际：%+v", result)
 	}
@@ -443,7 +625,6 @@ func TestCompactTool_Call_MarksManualRequest(t *testing.T) {
 }
 
 // TestCompactTool_Call_TriggersCompactionViaShouldAutoCompact 验证工具调用可驱动后续自动压缩判断。
-// 这条用例把"工具 → 标记 → 主循环判断"的接入链路走通，保证教学文档中"手动/自动复用同一条机制"成立。
 func TestCompactTool_Call_TriggersCompactionViaShouldAutoCompact(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{summaryContent: "ok"})
 	tool := NewCompactTool(m)

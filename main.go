@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"time"
 	"zoomClient/clients"
@@ -24,6 +26,7 @@ import (
 	"zoomClient/tools"
 	"zoomClient/ui"
 	"zoomClient/utils"
+	"zoomClient/web"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -247,9 +250,11 @@ func main() {
 	var modelType string
 	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
 	var outputMode string
-	flag.StringVar(&outputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar)")
+	flag.StringVar(&outputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar) | web (browser UI)")
 	var configDir string
 	flag.StringVar(&configDir, "config-dir", "", "Config directory path (default: ./config)")
+	var webPort int
+	flag.IntVar(&webPort, "port", 8080, "Web server port (web mode only)")
 	flag.Parse()
 
 	// Read configuration file
@@ -263,10 +268,14 @@ func main() {
 
 	// Initialize front-end emitter based on mode
 	var em emitter.Emitter
-	var view *ui.Renderer // nil in API mode, used for CLI input only
+	var view *ui.Renderer // nil in API/web mode, used for CLI input only
+	var webSess *web.Session
 	switch strings.ToLower(outputMode) {
 	case "api":
 		em = emitter.NewApiEmitter(os.Stdout)
+	case "web":
+		webSess = web.NewSession(uuid.NewString(), "") // model set after model selection
+		em = web.NewSseEmitter(webSess)
 	case "cli", "":
 		view = ui.New()
 		em = view
@@ -342,6 +351,11 @@ func main() {
 	default:
 		em.EmitError("config", "Unsupported model backend types: "+modelType)
 		log.Fatal("Unsupported model backend types", zap.String("-m", modelType))
+	}
+
+	// Set model name on web session (created before model selection)
+	if webSess != nil {
+		webSess.Model = modelname
 	}
 
 	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
@@ -434,7 +448,8 @@ func main() {
 	// Permission system
 	var permitMgr *permission.Manager
 	var apiAsker *permission.ApiAsker
-	if outputMode == "api" {
+	switch outputMode {
+	case "api":
 		apiAsker = permission.NewApiAsker(os.Stdout)
 		permitMgr = permission.NewManager(
 			permission.Mode(cfg.Permission.Mode),
@@ -442,7 +457,14 @@ func main() {
 			buildPermissionRules(cfg.Permission.AllowRules),
 			apiAsker,
 		)
-	} else {
+	case "web":
+		permitMgr = permission.NewManager(
+			permission.Mode(cfg.Permission.Mode),
+			buildPermissionRules(cfg.Permission.DenyRules),
+			buildPermissionRules(cfg.Permission.AllowRules),
+			web.NewWebAsker(webSess),
+		)
+	default:
 		permitMgr = permission.NewManager(
 			permission.Mode(cfg.Permission.Mode),
 			buildPermissionRules(cfg.Permission.DenyRules),
@@ -550,6 +572,56 @@ func main() {
 				goto sessionEnd
 			default:
 				em.EmitInfo("unknown action: " + cmd.Action)
+			}
+		}
+	} else if outputMode == "web" {
+		// ─── Web Mode: HTTP server + SSE + browser UI ───
+		webServer := web.NewServer(webSess, webPort)
+		go func() {
+			log.Info("Web server starting", zap.String("addr", webServer.Addr()))
+			if err := webServer.ListenAndServe(); err != nil {
+				log.Error("Web server error", zap.Error(err))
+			}
+		}()
+		// Open browser after short delay
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			openBrowser(webServer.Addr())
+		}()
+		log.Info("Web UI available at", zap.String("url", webServer.Addr()))
+		// Web REPL loop: read commands from CmdCh
+		for cmd := range webSess.CmdCh {
+			switch cmd.Action {
+			case "chat":
+				webSess.Busy.Store(true)
+				em.EmitEmotion("thinking", nil)
+				state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: cmd.Message})
+				agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, em)
+				webSess.Busy.Store(false)
+			case "clear":
+				if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
+					state.Messages = state.Messages[:1]
+				} else {
+					state.Messages = state.Messages[:0]
+				}
+				state.TurnCount = 0
+				em.EmitInfo("history cleared")
+			case "compact":
+				if len(state.Messages) <= 1 {
+					em.EmitInfo("no history to compact")
+					continue
+				}
+				before := compactManager.EstimateSize(state.Messages)
+				newMsgs, cerr := compactManager.CompactHistory(state.Messages)
+				if cerr != nil {
+					em.EmitError("compact", cerr.Error())
+					continue
+				}
+				state.Messages = newMsgs
+				after := compactManager.EstimateSize(newMsgs)
+				em.EmitCompact(before, after)
+			case "exit":
+				goto sessionEnd
 			}
 		}
 	} else {
@@ -777,5 +849,21 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 			"input":     tc.Function.Arguments,
 			"output":    results[i].Content,
 		})
+	}
+}
+
+// openBrowser opens the specified URL in the default browser.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		logger.Log.Warn("Failed to open browser", zap.String("url", url), zap.Error(err))
 	}
 }

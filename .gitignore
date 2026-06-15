@@ -39,3 +39,7 @@ desktop/src-tauri/binaries/
 desktop/src-tauri/logs/
 
 desktop/FRONTEND_ARCHITECTURE.md
+
+web/frontend/node_modules/
+
+web/frontend/dist/

@@ -15,25 +15,25 @@ type Command struct {
 	Action  string // "chat" | "clear" | "compact" | "exit"
 	Message string // chat 命令的消息内容
 }
-\
-// Event 表示一条要推送给前端浏览器的 SSE 事件。
+
+// Event 表示一条要推送给前端浏览器的 SSE 事件
 type Event struct {
 	CH   string `json:"ch"`   // "agent" | "system" | "emotion"
 	Data any    `json:"data"` // 事件负载
 }
 
-// Session 封装 Web 模式的一次 agent 会话。
+// Session 封装 Web 模式的一次 agent 会话
 type Session struct {
 	ID    string
 	State *fsm.State
 	Model string
 
-	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 包的主循环消费。
+	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 包的主循环消费
 	CmdCh chan Command
-	// EventCh 由 SseEmitter 写入事件，由 SSE HTTP handler 消费。
+	// EventCh 由 SseEmitter 写入事件，由 SSE HTTP handler 消费
 	EventCh chan Event
 
-	// Busy 标记 agentLoop 是否正在运行（供 /api/status 查询）。
+	// Busy 标记 agentLoop 是否正在运行（供 /api/status 查询）
 	Busy atomic.Bool
 
 	// 权限交互（模仿 ApiAsker 的 pending map 模式）
@@ -49,7 +49,7 @@ type permResponse struct {
 	reason string
 }
 
-// NewSession 创建一个 Web 模式的 Session。
+// NewSession 创建一个 Web 模式的 Session
 func NewSession(id, model string) *Session {
 	return &Session{
 		ID:      id,

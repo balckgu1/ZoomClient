@@ -15,6 +15,7 @@ docs/
 
 *.exe
 TODO.md
+FRONT-README.md
 
 .task_outputs/
 

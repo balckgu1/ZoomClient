@@ -32,10 +32,28 @@ import (
 	"go.uber.org/zap"
 )
 
+// AgentSession aggregates all session-level dependencies, eliminating the need
+// to pass 11+ parameters through every function call.
+type AgentSession struct {
+	State          *fsm.State
+	Cfg            *utils.Config
+	Client         clients.ChatClient
+	ModelName      string
+	Pipeline       *prompt.MessagePipeline
+	Registry       *tools.Registry
+	ToolCtx        *tools.ToolContext
+	TodoManager    *tools.TodoManager
+	CompactManager *compact.CompactManager
+	HookRunner     *hook.Runner
+	Em             emitter.Emitter
+}
+
 // agentLoop is the main agent reasoning loop.
-func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, model string,
-	pipeline *prompt.MessagePipeline, registry *tools.Registry, toolCtx *tools.ToolContext, todoManager *tools.TodoManager,
-	compactManager *compact.CompactManager, hookRunner *hook.Runner, em emitter.Emitter) {
+func agentLoop(s *AgentSession) {
+	cfg, client, state, model := s.Cfg, s.Client, s.State, s.ModelName
+	pipeline, registry, toolCtx := s.Pipeline, s.Registry, s.ToolCtx
+	todoManager, compactManager := s.TodoManager, s.CompactManager
+	hookRunner, em := s.HookRunner, s.Em
 	log := logger.Log
 
 	// Get tool list
@@ -43,7 +61,7 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 
 	// Infinite loop until no tool call or max turn count reached
 	for {
-		// Context compact: Layer 2 (micro-compact): replace older tool results with placeholders
+		// Context compact: micro-compact, replace older tool results with placeholders
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
 		// Pipeline assemble: system prompt + state.messages + reminders + attachments
@@ -240,57 +258,48 @@ func agentLoop(cfg *utils.Config, client clients.ChatClient, state *fsm.State, m
 	}
 }
 
-func main() {
-	// Initialize global logger
-	logger.Init()
-	defer logger.Sync()
-	log := logger.Log
+// cliFlags holds parsed command-line flags.
+type cliFlags struct {
+	ModelType  string
+	OutputMode string
+	ConfigDir  string
+	WebPort    int
+}
 
-	// Parse command line parameter: -m specifies the backend type of the model (default openai)
-	var modelType string
-	flag.StringVar(&modelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
-	var outputMode string
-	flag.StringVar(&outputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar) | web (browser UI)")
-	var configDir string
-	flag.StringVar(&configDir, "config-dir", "", "Config directory path (default: ./config)")
-	var webPort int
-	flag.IntVar(&webPort, "port", 8080, "Web server port (web mode only)")
+func parseFlags() cliFlags {
+	var f cliFlags
+	flag.StringVar(&f.ModelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
+	flag.StringVar(&f.OutputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar) | web (browser UI)")
+	flag.StringVar(&f.ConfigDir, "config-dir", "", "Config directory path (default: ./config)")
+	flag.IntVar(&f.WebPort, "port", 8080, "Web server port (web mode only)")
 	flag.Parse()
+	return f
+}
 
-	// Read configuration file
-	utils.InitConfigWithDir(configDir)
-	cfg := utils.GetConfig()
-	apiKey := ""
-
-	// Create a context with signal monitoring
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-
-	// Initialize front-end emitter based on mode
-	var em emitter.Emitter
-	var view *ui.Renderer // nil in API/web mode, used for CLI input only
-	var webSess *web.Session
+// initEmitter creates the appropriate emitter and optional session based on output mode.
+func initEmitter(outputMode string) (emitter.Emitter, *ui.Renderer, *web.Session) {
+	log := logger.Log
 	switch strings.ToLower(outputMode) {
 	case "api":
-		em = emitter.NewApiEmitter(os.Stdout)
+		return emitter.NewApiEmitter(os.Stdout), nil, nil
 	case "web":
-		webSess = web.NewSession(uuid.NewString(), "") // model set after model selection
-		em = web.NewSseEmitter(webSess)
+		sess := web.NewSession(uuid.NewString(), "")
+		return web.NewSseEmitter(sess), nil, sess
 	case "cli", "":
-		view = ui.New()
-		em = view
+		v := ui.New()
+		return v, v, nil
 	default:
 		log.Fatal("Unsupported output mode", zap.String("--mode", outputMode))
+		return nil, nil, nil
 	}
+}
 
-	// Select the corresponding ChatClient and model
-	var (
-		client    clients.ChatClient
-		modelname string
-	)
+// initClient creates the ChatClient and resolves model name based on backend type.
+func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (clients.ChatClient, string) {
+	log := logger.Log
 	switch strings.ToLower(modelType) {
 	case "openai":
-		apiKey = cfg.OpenAI.ApiKey
+		apiKey := cfg.OpenAI.ApiKey
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
@@ -302,24 +311,25 @@ func main() {
 		if baseURL == "" {
 			baseURL = "https://api.openai.com"
 		}
-		modelname = cfg.OpenAI.ModelName
+		modelname := cfg.OpenAI.ModelName
 		if modelname == "" {
 			modelname = "gpt-4o"
 		}
-		client = clients.NewOpenAIClient(baseURL, apiKey)
+		client := clients.NewOpenAIClient(baseURL, apiKey)
 		log.Info("OpenAI backend has been selected", zap.String("model", modelname), zap.String("base_url", baseURL))
+		return client, modelname
 	case "ollama", "":
 		if cfg.Ollama.BaseURL == "" {
 			log.Fatal("BaseURL is empty", zap.String("base_url", cfg.Ollama.BaseURL))
 		}
-		client = clients.NewOllamaClient(cfg.Ollama.BaseURL)
+		client := clients.NewOllamaClient(cfg.Ollama.BaseURL)
 		if cfg.Ollama.ModelName == "" {
 			log.Fatal("modelName is empty", zap.String("model_name", cfg.Ollama.ModelName))
 		}
-		modelname = cfg.Ollama.ModelName
-		log.Info("Olama backend has been selected", zap.String("model", modelname))
+		log.Info("Olama backend has been selected", zap.String("model", cfg.Ollama.ModelName))
+		return client, cfg.Ollama.ModelName
 	case "anthropic":
-		apiKey = cfg.Anthropic.ApiKey
+		apiKey := cfg.Anthropic.ApiKey
 		if apiKey == "" {
 			apiKey = os.Getenv("ANTHROPIC_API_KEY")
 		}
@@ -327,14 +337,15 @@ func main() {
 			em.EmitError("config", "Please set the API key ANTHROPIC_API_KEY")
 			log.Fatal("No API key ANTHROPIC_API_KEY")
 		}
-		client = clients.NewAnthropicClient(apiKey)
-		modelname = cfg.Anthropic.ModelName
+		client := clients.NewAnthropicClient(apiKey)
+		modelname := cfg.Anthropic.ModelName
 		if modelname == "" {
 			modelname = "claude-opus-4-8"
 		}
 		log.Info("Anthropic backend has been selected", zap.String("model", modelname))
+		return client, modelname
 	case "gemini":
-		apiKey = cfg.Gemini.ApiKey
+		apiKey := cfg.Gemini.ApiKey
 		if apiKey == "" {
 			apiKey = os.Getenv("GEMINI_API_KEY")
 		}
@@ -342,51 +353,26 @@ func main() {
 			em.EmitError("config", "Please set the API key GEMINI_API_KEY")
 			log.Fatal("No API key GEMINI_API_KEY")
 		}
-		client = clients.NewGeminiClient(apiKey)
-		modelname = cfg.Gemini.ModelName
+		client := clients.NewGeminiClient(apiKey)
+		modelname := cfg.Gemini.ModelName
 		if modelname == "" {
 			modelname = "gemini-3.5-flash"
 		}
 		log.Info("Gemini backend has been selected", zap.String("model", modelname))
+		return client, modelname
 	default:
 		em.EmitError("config", "Unsupported model backend types: "+modelType)
 		log.Fatal("Unsupported model backend types", zap.String("-m", modelType))
+		return nil, ""
 	}
+}
 
-	// Set model name on web session (created before model selection)
-	if webSess != nil {
-		webSess.Model = modelname
-	}
+// initTools creates the tool registry and registers all tools.
+func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
+	skillregistry *skills.SkillRegistry, toolCtx *tools.ToolContext, state *fsm.State,
+	permitMgr *permission.Manager) (*tools.Registry, *tools.TodoManager, *compact.CompactManager) {
+	log := logger.Log
 
-	log.Debug("Skill Dir", zap.String("dir", cfg.Skills.Dir))
-
-	workDir, err := os.Getwd()
-	if err != nil {
-		log.Fatal("Failed to get working directory", zap.Error(err))
-	}
-	// Instantiate tool context
-	toolCtx := &tools.ToolContext{
-		WorkPath:           workDir,
-		Ctx:                ctx,
-		DefaultBashTimeout: time.Duration(cfg.Tools.DefaultBashTimeout) * time.Second,
-		Logger:             log.Named("tool"),
-		SessionID:          uuid.NewString(),
-		AppState:           map[string]any{"turn": 0},
-	}
-
-	// create a skill registry
-	skillregistry, err := skills.NewSkillRegistry(cfg.Skills.Dir)
-	if err != nil {
-		log.Warn("Load skills failed, continue with empty registry", zap.Error(err))
-		skillregistry, _ = skills.NewSkillRegistry("")
-	}
-
-	// Assemble System Prompt with pipeline
-	promptBuilder := prompt.NewSystemPromptBuilder(skillregistry, cfg.Memory.Dir, modelname, toolCtx.WorkPath)
-	pipeline := prompt.NewPipeline(promptBuilder)
-	log.Info("MessagePipeline initialized")
-
-	// Create a tool registry
 	registry := tools.NewRegistry()
 
 	// Register basic tools
@@ -400,261 +386,303 @@ func main() {
 	// Register load_skills tool
 	registry.Register(skills.NewLoadSkillTool(skillregistry))
 
-	// Register save_memory tool
+	// Register memory tools
 	registry.Register(memory.NewSaveMemoryTool(cfg.Memory.Dir))
-	// Register search_memory tool
 	registry.Register(memory.NewSearchMemoryTool(cfg.Memory.Dir))
-	// Register update_memory_tool
 	registry.Register(memory.NewUpdateMemoryTool(cfg.Memory.Dir))
-	// Register delete_memory_tool
 	registry.Register(memory.NewDeleteMemoryTool(cfg.Memory.Dir))
 
-	// Instantiate todo manager
+	// Instantiate and register todo manager
 	todoManager := tools.NewTodoManager()
-	// Register todo tool
 	registry.Register(todoManager)
 
-	// Instantiate compact manager
+	// Instantiate and register compact manager
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)
-	// Register compact tool
 	registry.Register(compact.NewCompactTool(compactManager))
 
-	// Initialize session state.message
-	state := &fsm.State{
-		Messages:  []fsm.Message{},
-		TurnCount: 0,
-	}
-
-	// Create a subagent
+	// Create subagent and register sub_task tool
 	subAgent := subagent.NewSubAgent(client, modelname, cfg.Subagent.DefaultSystemPrompt, cfg.Subagent.ForkSubtaskPromptPrefix,
 		subagent.BuildSubAgentRegistry(), toolCtx, cfg.Subagent.DefaultMaxTurns)
 
-	// Subagent runner function
 	subAgentRunner := func(prompt string, parentMessages []fsm.Message) (string, error) {
 		if parentMessages == nil {
 			return subAgent.Run(prompt)
 		}
 		return subAgent.RunWithFork(prompt, parentMessages)
 	}
-
-	// Called by TaskTool when fork=true, retrieves the latest snapshot of state.Messages
 	parentMessagesProvider := func() []fsm.Message {
 		return state.Messages
 	}
-
-	// Register sub_task tool
 	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))
 
-	// Permission system
-	var permitMgr *permission.Manager
-	var apiAsker *permission.ApiAsker
-	switch outputMode {
-	case "api":
-		apiAsker = permission.NewApiAsker(os.Stdout)
-		permitMgr = permission.NewManager(
-			permission.Mode(cfg.Permission.Mode),
-			buildPermissionRules(cfg.Permission.DenyRules),
-			buildPermissionRules(cfg.Permission.AllowRules),
-			apiAsker,
-		)
-	case "web":
-		permitMgr = permission.NewManager(
-			permission.Mode(cfg.Permission.Mode),
-			buildPermissionRules(cfg.Permission.DenyRules),
-			buildPermissionRules(cfg.Permission.AllowRules),
-			web.NewWebAsker(webSess),
-		)
-	default:
-		permitMgr = permission.NewManager(
-			permission.Mode(cfg.Permission.Mode),
-			buildPermissionRules(cfg.Permission.DenyRules),
-			buildPermissionRules(cfg.Permission.AllowRules),
-			buildAsker(cfg.Permission.Interactive, false, nil),
-		)
-	}
-	// Inject permission valve
-	registry.SetPermissionDecider(permitMgr.Decide)
-	// Subagent uses an independent tool registry but should share the same permission policy
+	// Share permission policy with subagent's independent registry
 	if subAgent.Registry != nil {
 		subAgent.Registry.SetPermissionDecider(permitMgr.Decide)
 	}
-	log.Info("Permission system has been enabled",
-		zap.String("Mode", string(permitMgr.GetMode())),
-		zap.Int("Deny rule count", len(cfg.Permission.DenyRules)),
-		zap.Int("Allow rule count", len(cfg.Permission.AllowRules)),
-		zap.Bool("Interactive inquiry", cfg.Permission.Interactive),
-	)
 
 	log.Info("Registered tool list", zap.Any("tools", registry.GetAllNames()))
+	return registry, todoManager, compactManager
+}
 
-	// Assemble hook system: Runner centrally dispatches all events, handlers are registered by event name
-	hookRunner := buildHookRunner()
-	log.Info("Hook system has been enabled",
-		zap.Int("SessionStart handler count", hookRunner.HandlerCount(hook.EventSessionStart)),
-		zap.Int("PreToolUse handler count", hookRunner.HandlerCount(hook.EventPreToolUse)),
-		zap.Int("PostToolUse handler count", hookRunner.HandlerCount(hook.EventPostToolUse)),
+// initPermissionManager creates the permission manager based on output mode.
+func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Session) *permission.Manager {
+	var asker permission.Asker
+	switch outputMode {
+	case "api":
+		asker = permission.NewApiAsker(os.Stdout)
+	case "web":
+		asker = web.NewWebAsker(webSess)
+	default:
+		asker = buildAsker(cfg.Permission.Interactive, false, nil)
+	}
+	return permission.NewManager(
+		permission.Mode(cfg.Permission.Mode),
+		buildPermissionRules(cfg.Permission.DenyRules),
+		buildPermissionRules(cfg.Permission.AllowRules),
+		asker,
+	)
+}
+
+// handleSessionCommand handles commands shared across API and Web REPL modes.
+// Returns true if the command signals session exit.
+func handleSessionCommand(action string, s *AgentSession) bool {
+	switch action {
+	case "clear":
+		if len(s.State.Messages) > 0 && s.State.Messages[0].Role == "system" {
+			s.State.Messages = s.State.Messages[:1]
+		} else {
+			s.State.Messages = s.State.Messages[:0]
+		}
+		s.State.TurnCount = 0
+		s.Em.EmitInfo("history cleared")
+	case "compact":
+		if len(s.State.Messages) <= 1 {
+			s.Em.EmitInfo("no history to compact")
+			return false
+		}
+		before := s.CompactManager.EstimateSize(s.State.Messages)
+		newMsgs, cerr := s.CompactManager.CompactHistory(s.State.Messages)
+		if cerr != nil {
+			s.Em.EmitError("compact", cerr.Error())
+			return false
+		}
+		s.State.Messages = newMsgs
+		after := s.CompactManager.EstimateSize(newMsgs)
+		s.Em.EmitCompact(before, after)
+	case "exit":
+		return true
+	}
+	return false
+}
+
+// runAPIREPL runs the API mode REPL loop, reading NDJSON commands from stdin.
+func runAPIREPL(ctx context.Context, s *AgentSession, webPort int) {
+	log := logger.Log
+	apiAsker := permission.NewApiAsker(os.Stdout)
+	concurrentReader := emitter.NewConcurrentReader(os.Stdin, apiAsker)
+	defer concurrentReader.Stop()
+	go startHeartbeat(ctx, s.Em)
+
+	for {
+		cmd := concurrentReader.Next()
+		if cmd == nil {
+			log.Info("API mode stdin closed")
+			break
+		}
+		// Validate payload before ACK
+		var ackStatus string
+		if cmd.Action == "chat" {
+			payload, perr := emitter.ParseChatPayload(cmd)
+			if perr != nil || payload.Message == "" {
+				ackStatus = "rejected"
+				if cmd.ID != "" {
+					s.Em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "rejected", "reason": "invalid or empty message"})
+				}
+				continue
+			}
+		}
+		// Send ACK
+		if cmd.ID != "" && ackStatus == "" {
+			s.Em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "accepted"})
+		}
+		switch cmd.Action {
+		case "chat":
+			payload, _ := emitter.ParseChatPayload(cmd) // already validated above
+			s.Em.EmitEmotion("thinking", nil)
+			s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: payload.Message})
+			agentLoop(s)
+		case "config":
+			cfgPayload, _ := emitter.ParseConfigPayload(cmd)
+			if cfgPayload.ModelType != "" {
+				s.Em.EmitInfo("model_type change not supported at runtime, restart required")
+			}
+		default:
+			if handleSessionCommand(cmd.Action, s) {
+				return
+			}
+			if cmd.Action != "clear" && cmd.Action != "compact" {
+				s.Em.EmitInfo("unknown action: " + cmd.Action)
+			}
+		}
+	}
+}
+
+// runWebREPL starts the web server and runs the web mode REPL loop.
+func runWebREPL(s *AgentSession, webSess *web.Session, webPort int) {
+	log := logger.Log
+	webServer := web.NewServer(webSess, webPort)
+	// run http server
+	go func() {
+		log.Info("Web server starting", zap.String("addr", webServer.Addr()))
+		if err := webServer.ListenAndServe(); err != nil {
+			log.Error("Web server error", zap.Error(err))
+		}
+	}()
+	// Open browser after short delay
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		openBrowser(webServer.Addr())
+	}()
+	log.Info("Web UI available at", zap.String("url", webServer.Addr()))
+
+	// Web REPL loop: read commands from CmdCh
+	for cmd := range webSess.CmdCh {
+		switch cmd.Action {
+		case "chat":
+			webSess.Busy.Store(true)
+			s.Em.EmitEmotion("thinking", nil)
+			s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: cmd.Message})
+			agentLoop(s)
+			webSess.Busy.Store(false)
+		default:
+			if handleSessionCommand(cmd.Action, s) {
+				return
+			}
+		}
+	}
+}
+
+// runCLIREPL runs the CLI mode REPL loop, reading input from stdin.
+func runCLIREPL(s *AgentSession, view *ui.Renderer) {
+	for {
+		input, ok := view.PromptUser()
+		if !ok {
+			s.Em.EmitInfo("EOF, exiting...")
+			break
+		}
+		if input == "" {
+			continue
+		}
+		// Slash command handling
+		if strings.HasPrefix(input, "/") {
+			if handleSlashCommand(input, s.State, s.Em, s.CompactManager) {
+				break // /exit
+			}
+			continue
+		}
+		// Append user message and run agentLoop
+		s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: input})
+		agentLoop(s)
+		s.Em.EmitTurnSeparator()
+	}
+}
+
+func main() {
+	// Parse flags
+	flags := parseFlags()
+
+	// Initialize logger
+	logger.Init()
+	defer logger.Sync()
+	log := logger.Log
+
+	// Load Config
+	utils.InitConfigWithDir(flags.ConfigDir)
+	cfg := utils.GetConfig()
+
+	// Context
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	// Initialize emitter & UI
+	em, view, webSess := initEmitter(flags.OutputMode)
+
+	// Initialize model client
+	client, modelname := initClient(flags.ModelType, cfg, em)
+	if webSess != nil {
+		webSess.Model = modelname
+	}
+
+	// Build tool context
+	workDir, err := os.Getwd()
+	if err != nil {
+		log.Fatal("Failed to get working directory", zap.Error(err))
+	}
+	toolCtx := &tools.ToolContext{
+		WorkPath:           workDir,
+		Ctx:                ctx,
+		DefaultBashTimeout: time.Duration(cfg.Tools.DefaultBashTimeout) * time.Second,
+		Logger:             log.Named("tool"),
+		SessionID:          uuid.NewString(),
+		AppState:           map[string]any{"turn": 0},
+	}
+
+	// Load skills
+	skillregistry, err := skills.NewSkillRegistry(cfg.Skills.Dir)
+	if err != nil {
+		log.Warn("Load skills failed, continue with empty registry", zap.Error(err))
+		skillregistry, _ = skills.NewSkillRegistry("")
+	}
+
+	// Build system prompt pipeline
+	promptBuilder := prompt.NewSystemPromptBuilder(skillregistry, cfg.Memory.Dir, modelname, toolCtx.WorkPath)
+	pipeline := prompt.NewPipeline(promptBuilder)
+	log.Info("MessagePipeline initialized")
+
+	// Initialize Session state
+	state := &fsm.State{Messages: []fsm.Message{}, TurnCount: 0}
+
+	// Permission system
+	permitMgr := initPermissionManager(flags.OutputMode, cfg, webSess)
+	log.Info("Permission system has been enabled",
+		zap.String("Mode", string(permitMgr.GetMode())),
+		zap.Int("Deny rules", len(cfg.Permission.DenyRules)),
+		zap.Int("Allow rules", len(cfg.Permission.AllowRules)),
 	)
 
-	// Hook EventSessionStart
-	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
+	// Register tools and subagent
+	registry, todoManager, compactManager := initTools(cfg, client, modelname, skillregistry, toolCtx, state, permitMgr)
+	registry.SetPermissionDecider(permitMgr.Decide)
 
-	// Render session welcome banner
+	// Hook system
+	hookRunner := buildHookRunner()
+	log.Info("Hook system has been enabled")
+
+	// Assemble session & start
+	sess := &AgentSession{
+		State: state, Cfg: cfg, Client: client, ModelName: modelname,
+		Pipeline: pipeline, Registry: registry, ToolCtx: toolCtx,
+		TodoManager: todoManager, CompactManager: compactManager,
+		HookRunner: hookRunner, Em: em,
+	}
+
+	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
 	em.EmitSessionStart(modelname, logger.LogFilePath)
 	log.Info("Agent REPL start")
 
-	// API mode: start heartbeat goroutine + concurrent reader
-	var concurrentReader *emitter.ConcurrentReader
-	if outputMode == "api" {
-		concurrentReader = emitter.NewConcurrentReader(os.Stdin, apiAsker)
-		defer concurrentReader.Stop()
-		go startHeartbeat(ctx, em)
+	// Run REPL by mode
+	switch flags.OutputMode {
+	case "api":
+		runAPIREPL(ctx, sess, flags.WebPort)
+	case "web":
+		runWebREPL(sess, webSess, flags.WebPort)
+	default:
+		runCLIREPL(sess, view)
 	}
 
-	if outputMode == "api" {
-		// ─── API Mode REPL: read NDJSON commands from ConcurrentReader ───
-		for {
-			cmd := concurrentReader.Next()
-			if cmd == nil {
-				log.Info("API mode stdin closed")
-				break
-			}
-			// Validate payload before ACK
-			var ackStatus string
-			if cmd.Action == "chat" {
-				payload, perr := emitter.ParseChatPayload(cmd)
-				if perr != nil || payload.Message == "" {
-					ackStatus = "rejected"
-					if cmd.ID != "" {
-						em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "rejected", "reason": "invalid or empty message"})
-					}
-					continue
-				}
-			}
-			// Send ACK
-			if cmd.ID != "" && ackStatus == "" {
-				em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "accepted"})
-			}
-			switch cmd.Action {
-			case "chat":
-				payload, _ := emitter.ParseChatPayload(cmd) // already validated above
-				// Emit thinking emotion
-				em.EmitEmotion("thinking", nil)
-				state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: payload.Message})
-				agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, em)
-			case "config":
-				cfgPayload, _ := emitter.ParseConfigPayload(cmd)
-				if cfgPayload.ModelType != "" {
-					em.EmitInfo("model_type change not supported at runtime, restart required")
-				}
-			case "clear":
-				if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
-					state.Messages = state.Messages[:1]
-				} else {
-					state.Messages = state.Messages[:0]
-				}
-				state.TurnCount = 0
-				em.EmitInfo("history cleared")
-			case "compact":
-				if len(state.Messages) <= 1 {
-					em.EmitInfo("no history to compact")
-					continue
-				}
-				before := compactManager.EstimateSize(state.Messages)
-				newMsgs, cerr := compactManager.CompactHistory(state.Messages)
-				if cerr != nil {
-					em.EmitError("compact", cerr.Error())
-					continue
-				}
-				state.Messages = newMsgs
-				after := compactManager.EstimateSize(newMsgs)
-				em.EmitCompact(before, after)
-			case "exit":
-				goto sessionEnd
-			default:
-				em.EmitInfo("unknown action: " + cmd.Action)
-			}
-		}
-	} else if outputMode == "web" {
-		// ─── Web Mode: HTTP server + SSE + browser UI ───
-		webServer := web.NewServer(webSess, webPort)
-		go func() {
-			log.Info("Web server starting", zap.String("addr", webServer.Addr()))
-			if err := webServer.ListenAndServe(); err != nil {
-				log.Error("Web server error", zap.Error(err))
-			}
-		}()
-		// Open browser after short delay
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			openBrowser(webServer.Addr())
-		}()
-		log.Info("Web UI available at", zap.String("url", webServer.Addr()))
-		// Web REPL loop: read commands from CmdCh
-		for cmd := range webSess.CmdCh {
-			switch cmd.Action {
-			case "chat":
-				webSess.Busy.Store(true)
-				em.EmitEmotion("thinking", nil)
-				state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: cmd.Message})
-				agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, em)
-				webSess.Busy.Store(false)
-			case "clear":
-				if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
-					state.Messages = state.Messages[:1]
-				} else {
-					state.Messages = state.Messages[:0]
-				}
-				state.TurnCount = 0
-				em.EmitInfo("history cleared")
-			case "compact":
-				if len(state.Messages) <= 1 {
-					em.EmitInfo("no history to compact")
-					continue
-				}
-				before := compactManager.EstimateSize(state.Messages)
-				newMsgs, cerr := compactManager.CompactHistory(state.Messages)
-				if cerr != nil {
-					em.EmitError("compact", cerr.Error())
-					continue
-				}
-				state.Messages = newMsgs
-				after := compactManager.EstimateSize(newMsgs)
-				em.EmitCompact(before, after)
-			case "exit":
-				goto sessionEnd
-			}
-		}
-	} else {
-		// ─── CLI Mode REPL: read line from stdin ───
-		for {
-			input, ok := view.PromptUser()
-			if !ok {
-				em.EmitInfo("EOF, exiting...")
-				break
-			}
-			if input == "" {
-				continue
-			}
-			// Slash command handling
-			if strings.HasPrefix(input, "/") {
-				if handleSlashCommand(input, state, em, compactManager) {
-					break // /exit
-				}
-				continue
-			}
-			// Append user message and run agentLoop
-			state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: input})
-			agentLoop(cfg, client, state, modelname, pipeline, registry, toolCtx, todoManager, compactManager, hookRunner, em)
-			em.EmitTurnSeparator()
-		}
-	}
-
-sessionEnd:
-
+	// Session cleanup
 	log.Info("Agent REPL End", zap.Int("total_turns", state.TurnCount))
 	em.EmitSessionEnd(state.TurnCount)
-
-	// Session end, trigger EventSessionEnd
 	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
 }
 

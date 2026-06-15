@@ -9,12 +9,12 @@ type SseEmitter struct {
 	session *Session
 }
 
-// NewSseEmitter 创建一个绑定到指定 Session 的 SseEmitter。
+// NewSseEmitter 创建一个绑定到指定 Session 的 SseEmitter
 func NewSseEmitter(s *Session) *SseEmitter {
 	return &SseEmitter{session: s}
 }
 
-// emit 内部辅助：将事件推入 Session.EventCh。
+// emit 将事件推入 Session.EventCh
 func (e *SseEmitter) emit(ch string, data any) {
 	e.session.EventCh <- Event{CH: ch, Data: data}
 }
@@ -112,8 +112,6 @@ func (e *SseEmitter) EmitCompact(beforeBytes, afterBytes int) {
 		"after_bytes":  afterBytes,
 	})
 }
-
-// ─── 系统 / 控制 ───
 
 func (e *SseEmitter) EmitError(scope, msg string) {
 	e.emit("system", map[string]string{

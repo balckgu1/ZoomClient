@@ -1,7 +1,3 @@
-// web/web_asker.go
-//
-// WebAsker 实现 permission.Asker 接口，通过 SSE 推送权限询问事件，
-// 阻塞等待前端通过 POST /api/permission 回复。
 package web
 
 import (
@@ -9,7 +5,7 @@ import (
 	"time"
 )
 
-// WebAsker 是 Web 模式的权限询问器。
+// WebAsker 是 Web 模式的权限询问器
 // 通过 Session 的 EventCh 推送 permission_ask 事件，
 // 通过 Session 的 permPending channel 接收前端回复。
 type WebAsker struct {
@@ -17,7 +13,7 @@ type WebAsker struct {
 	timeout time.Duration // 等待超时，超时后自动拒绝
 }
 
-// NewWebAsker 创建 WebAsker，默认 60 秒超时。
+// NewWebAsker 创建 WebAsker，默认 60 秒超时
 func NewWebAsker(s *Session) *WebAsker {
 	return &WebAsker{
 		session: s,
@@ -25,8 +21,7 @@ func NewWebAsker(s *Session) *WebAsker {
 	}
 }
 
-// Ask 实现 permission.Asker 接口。
-// 推送 permission_ask 事件到前端，阻塞等待回复或超时。
+// Ask 实现 permission.Asker 接口，推送 permission_ask 事件到前端，阻塞等待回复或超时
 func (a *WebAsker) Ask(toolName string, args map[string]any, reason string) (bool, string) {
 	argsJSON, _ := json.Marshal(args)
 

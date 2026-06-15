@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-// ─── SSE 事件流 ───
-
 // handleSSE 建立 SSE 长连接，将 Session.EventCh 中的事件以 text/event-stream 格式推送。
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")

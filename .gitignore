@@ -15,6 +15,7 @@ docs/
 
 *.exe
 TODO.md
+FRONT-README.md
 
 .task_outputs/
 
@@ -39,3 +40,7 @@ desktop/src-tauri/binaries/
 desktop/src-tauri/logs/
 
 desktop/FRONTEND_ARCHITECTURE.md
+
+web/frontend/node_modules/
+
+web/frontend/dist/

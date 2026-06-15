@@ -11,20 +11,20 @@ import (
 	"sync"
 )
 
-// ApiEmitter 将 agent 事件转为 NDJSON 输出，供 Tauri Sidecar 前端消费。
+// ApiEmitter 将 agent 事件转为 NDJSON 输出，供 Tauri Sidecar 前端消费
 type ApiEmitter struct {
 	w  io.Writer
 	mu sync.Mutex // 保护并发写入
 }
 
-// NewApiEmitter 创建一个 ApiEmitter，输出到指定 Writer。
+// NewApiEmitter 创建一个 ApiEmitter，输出到指定 Writer
 func NewApiEmitter(w io.Writer) *ApiEmitter {
 	return &ApiEmitter{w: w}
 }
 
 // ─── 内部辅助 ───
 
-// emit 写入一行 NDJSON。
+// emit 写入一行 NDJSON
 func (e *ApiEmitter) emit(ch string, data any) {
 	msg := map[string]any{
 		"ch":   ch,

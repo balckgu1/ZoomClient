@@ -16,6 +16,7 @@ type Config struct {
 	Subagent   SubagentConfig   `mapstructure:"subagent"`
 	Skills     SkillsConfig     `mapstructure:"skills"`
 	Memory     MemoryConfig     `mapstructure:"memory"`
+	Session    SessionConfig    `mapstructure:"session"`
 	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
 	Compact    CompactConfig    `mapstructure:"compact"`
 	Permission PermissionConfig `mapstructure:"permission"`
@@ -56,6 +57,11 @@ type SkillsConfig struct {
 }
 
 type MemoryConfig struct {
+	Dir string `mapstructure:"dir"`
+}
+
+// SessionConfig 会话持久化配置
+type SessionConfig struct {
 	Dir string `mapstructure:"dir"`
 }
 

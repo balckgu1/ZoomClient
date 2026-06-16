@@ -143,6 +143,86 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ─── 会话管理 ───
+
+// handleSessions 处理 /api/sessions 路由（GET 列表 / POST 新建）。
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		metas, err := s.sessionMgr.List()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, metas)
+
+	case http.MethodPost:
+		record := s.sessionMgr.CreateSession()
+		s.session.RecordID = record.ID
+		// Reset state for new session
+		s.session.State.Messages = nil
+		s.session.State.TurnCount = 0
+		writeJSON(w, http.StatusCreated, record.ToMeta())
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSessionByID 处理 /api/sessions/{id} 路由（GET/DELETE/PATCH）。
+func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
+	// 从路径中提取 id
+	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id required"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		record, err := s.sessionMgr.Load(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		// Switch backend state to loaded session
+		s.session.RecordID = record.ID
+		s.session.State.Messages = record.Messages
+		s.session.State.TurnCount = record.TurnCount
+		writeJSON(w, http.StatusOK, record)
+
+	case http.MethodDelete:
+		if err := s.sessionMgr.Delete(id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		// 如果删除的是当前会话，更新 session.RecordID
+		s.session.RecordID = s.sessionMgr.Current()
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	case http.MethodPatch:
+		var req struct {
+			Title string `json:"title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if req.Title == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title is required"})
+			return
+		}
+		if err := s.sessionMgr.Rename(id, req.Title); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "title": req.Title})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // ─── 辅助函数 ───
 
 // writeJSON 将数据序列化为 JSON 写入响应。

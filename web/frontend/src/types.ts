@@ -22,6 +22,21 @@ export interface PermissionAsk {
   reason: string;
 }
 
+// Session metadata (for sidebar list)
+export interface SessionMeta {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  turn_count: number;
+}
+
+// Full session record (with messages)
+export interface SessionRecord extends SessionMeta {
+  messages: ChatMessage[];
+  model: string;
+}
+
 // App state
 export interface AppState {
   messages: ChatMessage[];

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"zoomClient/memory"
 	"zoomClient/permission"
 	"zoomClient/prompt"
+	"zoomClient/session"
 	"zoomClient/skills"
 	"zoomClient/subagent"
 	"zoomClient/tools"
@@ -528,13 +530,13 @@ func runAPIREPL(ctx context.Context, s *AgentSession, webPort int) {
 }
 
 // runWebREPL starts the web server and runs the web mode REPL loop.
-func runWebREPL(s *AgentSession, webSess *web.Session, webPort int) {
+func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webPort int, sessMgr *session.Manager) {
 	log := logger.Log
-	webServer := web.NewServer(webSess, webPort)
+	webServer := web.NewServer(webSess, sessMgr, webPort)
 	// run http server
 	go func() {
 		log.Info("Web server starting", zap.String("addr", webServer.Addr()))
-		if err := webServer.ListenAndServe(); err != nil {
+		if err := webServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("Web server error", zap.Error(err))
 		}
 	}()
@@ -545,18 +547,77 @@ func runWebREPL(s *AgentSession, webSess *web.Session, webPort int) {
 	}()
 	log.Info("Web UI available at", zap.String("url", webServer.Addr()))
 
-	// Web REPL loop: read commands from CmdCh
-	for cmd := range webSess.CmdCh {
-		switch cmd.Action {
-		case "chat":
-			webSess.Busy.Store(true)
-			s.Em.EmitEmotion("thinking", nil)
-			s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: cmd.Message})
-			agentLoop(s)
-			webSess.Busy.Store(false)
-		default:
-			if handleSessionCommand(cmd.Action, s) {
+	// Web REPL loop: read commands from CmdCh, with ctx cancellation support
+	firstTurn := true
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Received interrupt signal, shutting down web server...")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := webServer.Shutdown(shutdownCtx); err != nil {
+				log.Warn("Web server shutdown error", zap.Error(err))
+			}
+			cancel()
+			return
+
+		case cmd, ok := <-webSess.CmdCh:
+			if !ok {
+				log.Info("Web session CmdCh closed")
 				return
+			}
+			switch cmd.Action {
+			case "chat":
+				webSess.Busy.Store(true)
+				s.Em.EmitEmotion("thinking", nil)
+				s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: cmd.Message})
+				agentLoop(s)
+				webSess.Busy.Store(false)
+
+				// Save session after each turn
+				record := &session.SessionRecord{
+					ID:        webSess.RecordID,
+					Title:     "NewSession",
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+					Model:     s.ModelName,
+					TurnCount: s.State.TurnCount,
+					Messages:  s.State.Messages,
+				}
+				if err := sessMgr.Save(record); err != nil {
+					log.Warn("save session failed", zap.Error(err))
+				}
+
+				// Generate title after first turn
+				if firstTurn {
+					firstTurn = false
+					go func() {
+						title, err := sessMgr.GenerateTitle(record)
+						if err != nil {
+							log.Warn("generate title failed", zap.Error(err))
+							return
+						}
+						if title != "" {
+							record.Title = title
+							if serr := sessMgr.Save(record); serr != nil {
+								log.Warn("save title failed", zap.Error(serr))
+							}
+							// Push title update via SSE
+							if sseEm, ok := s.Em.(*web.SseEmitter); ok {
+								sseEm.EmitSessionRenamed(record.ID, title)
+							}
+						}
+					}()
+				}
+
+			default:
+				if handleSessionCommand(cmd.Action, s) {
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					if err := webServer.Shutdown(shutdownCtx); err != nil {
+						log.Warn("Web server shutdown error", zap.Error(err))
+					}
+					cancel()
+					return
+				}
 			}
 		}
 	}
@@ -670,12 +731,27 @@ func main() {
 	em.EmitSessionStart(modelname, logger.LogFilePath)
 	log.Info("Agent REPL start")
 
+	// Initialize session manager (Web mode)
+	var sessMgr *session.Manager
+	if flags.OutputMode == "web" {
+		var serr error
+		sessMgr, serr = session.NewManager(cfg.Session.Dir, client, modelname)
+		if serr != nil {
+			log.Warn("Session manager init failed, history disabled", zap.Error(serr))
+		} else {
+			// Create initial session
+			initialRecord := sessMgr.CreateSession()
+			webSess.RecordID = initialRecord.ID
+			log.Info("Session history enabled", zap.String("dir", cfg.Session.Dir))
+		}
+	}
+
 	// Run REPL by mode
 	switch flags.OutputMode {
 	case "api":
 		runAPIREPL(ctx, sess, flags.WebPort)
 	case "web":
-		runWebREPL(sess, webSess, flags.WebPort)
+		runWebREPL(ctx, sess, webSess, flags.WebPort, sessMgr)
 	default:
 		runCLIREPL(sess, view)
 	}

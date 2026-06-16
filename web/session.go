@@ -24,9 +24,10 @@ type Event struct {
 
 // Session 封装 Web 模式的一次 agent 会话
 type Session struct {
-	ID    string
-	State *fsm.State
-	Model string
+	ID       string
+	RecordID string // 关联到 session.SessionRecord 的 ID
+	State    *fsm.State
+	Model    string
 
 	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 包的主循环消费
 	CmdCh chan Command

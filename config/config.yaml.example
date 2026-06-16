@@ -58,6 +58,10 @@ skills:
 memory:
   dir: "./.memory"  # memory directory
 
+# session config
+session:
+  dir: "./.sessions"  # session history directory
+
 # compact system config
 compact:
   persistThreshold:      4000  # persist threshold

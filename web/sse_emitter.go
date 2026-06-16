@@ -147,3 +147,12 @@ func (e *SseEmitter) EmitSystem(event string, data map[string]string) {
 	}
 	e.emit("system", payload)
 }
+
+// EmitSessionRenamed 推送会话标题更新事件。
+func (e *SseEmitter) EmitSessionRenamed(id, title string) {
+	e.emit("system", map[string]string{
+		"event": "session_renamed",
+		"id":    id,
+		"title": title,
+	})
+}

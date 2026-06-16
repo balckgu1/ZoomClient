@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
-import type { ChatMessage, PermissionAsk, SSEEvent } from "../types";
+import type { ChatMessage, PermissionAsk, SSEEvent, SessionMeta } from "../types";
 import { connectSSE } from "../lib/sse";
-import { sendChat, sendClear, sendCompact, sendExit, sendPermission } from "../lib/api";
+import {
+  sendChat, sendClear, sendCompact, sendExit, sendPermission,
+  fetchSessions, createSession, loadSession, deleteSession, renameSession,
+} from "../lib/api";
 import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
 import { InputBar } from "./InputBar";
 import { PermissionDialog } from "./PermissionDialog";
+import { Sidebar } from "./Sidebar";
 
 export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -16,10 +20,24 @@ export function App() {
   const [permission, setPermission] = useState<PermissionAsk | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Session state
+  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState("");
+
   // Show a toast message briefly
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  // Refresh session list from backend
+  const refreshSessions = useCallback(async () => {
+    try {
+      const list = await fetchSessions();
+      setSessions(list || []);
+    } catch {
+      // ignore
+    }
   }, []);
 
   // Handle incoming SSE events
@@ -48,6 +66,13 @@ export function App() {
         });
       } else if (event === "session_end") {
         showToast("Session ended");
+      } else if (event === "session_renamed") {
+        // Update session title in sidebar
+        const id = d.id;
+        const title = d.title;
+        setSessions((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, title } : s))
+        );
       }
       return;
     }
@@ -65,7 +90,6 @@ export function App() {
         ]);
       } else if (type === "tool_result") {
         setMessages((prev) => {
-          // Find the last tool_call without result and update it
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
             const m = updated[i];
@@ -95,15 +119,18 @@ export function App() {
       } else if (type === "done") {
         setBusy(false);
         setTurnCount((c) => c + 1);
+        // Refresh session list after turn completes
+        refreshSessions();
       }
     }
-  }, [showToast]);
+  }, [showToast, refreshSessions]);
 
-  // Connect SSE on mount
+  // Connect SSE on mount + load sessions
   useEffect(() => {
     const disconnect = connectSSE("/api/events", handleSSEEvent, setConnected);
+    refreshSessions();
     return disconnect;
-  }, [handleSSEEvent]);
+  }, [handleSSEEvent, refreshSessions]);
 
   // Send a chat message
   const handleSend = useCallback(
@@ -159,17 +186,109 @@ export function App() {
     [permission, showToast]
   );
 
+  // ─── Session actions ───
+
+  const handleNewSession = useCallback(async () => {
+    try {
+      const meta = await createSession();
+      setCurrentSessionId(meta.id);
+      setMessages([]);
+      setTurnCount(0);
+      await refreshSessions();
+    } catch (err) {
+      showToast(`Create session failed: ${err}`);
+    }
+  }, [refreshSessions, showToast]);
+
+  const handleSelectSession = useCallback(async (id: string) => {
+    if (id === currentSessionId) return;
+    try {
+      const record = await loadSession(id);
+      setCurrentSessionId(id);
+      // Convert backend messages (fsm.Message format) to ChatMessage format
+      const converted: ChatMessage[] = [];
+      if (record.messages) {
+        for (const msg of record.messages) {
+          const m = msg as Record<string, unknown>;
+          if (m.role === "user") {
+            converted.push({ role: "user", content: String(m.content || "") });
+          } else if (m.role === "assistant") {
+            if (m.reasoning_content) {
+              converted.push({ role: "reasoning", content: String(m.reasoning_content) });
+            }
+            converted.push({ role: "assistant", content: String(m.content || "") });
+          } else if (m.role === "tool" && m.tool_call_id) {
+            // Skip tool messages for cleaner display
+          }
+        }
+      }
+      setMessages(converted);
+      setTurnCount(record.turn_count || 0);
+    } catch (err) {
+      showToast(`Load session failed: ${err}`);
+    }
+  }, [currentSessionId, showToast]);
+
+  const handleDeleteSession = useCallback(async (id: string) => {
+    if (!confirm("Are you sure to delete this session?")) return;
+    try {
+      await deleteSession(id);
+      if (id === currentSessionId) {
+        // Refresh and select latest
+        const list = await fetchSessions();
+        setSessions(list || []);
+        if (list.length > 0) {
+          handleSelectSession(list[0].id);
+        } else {
+          handleNewSession();
+        }
+      } else {
+        await refreshSessions();
+      }
+    } catch (err) {
+      showToast(`Delete failed: ${err}`);
+    }
+  }, [currentSessionId, refreshSessions, handleSelectSession, handleNewSession, showToast]);
+
+  const handleRenameSession = useCallback(async (id: string, title: string) => {
+    try {
+      await renameSession(id, title);
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s))
+      );
+    } catch (err) {
+      showToast(`Rename failed: ${err}`);
+    }
+  }, [showToast]);
+
+  // Auto-select first session on initial load
+  useEffect(() => {
+    if (!currentSessionId && sessions.length > 0) {
+      setCurrentSessionId(sessions[0].id);
+    }
+  }, [sessions, currentSessionId]);
+
   return (
-    <div class="app">
-      <StatusBar
-        status={{ messages, model, connected, busy, turnCount, pendingPermission: permission }}
+    <div class="app-layout">
+      <Sidebar
+        sessions={sessions}
+        currentId={currentSessionId}
+        onSelect={handleSelectSession}
+        onNew={handleNewSession}
+        onDelete={handleDeleteSession}
+        onRename={handleRenameSession}
       />
-      <MessageList messages={messages} />
-      {toast && <div class="toast">{toast}</div>}
-      {permission && (
-        <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
-      )}
-      <InputBar disabled={busy} onSend={handleSend} onSlashCommand={handleSlashCommand} />
+      <div class="app-main">
+        <StatusBar
+          status={{ messages, model, connected, busy, turnCount, pendingPermission: permission }}
+        />
+        <MessageList messages={messages} />
+        {toast && <div class="toast">{toast}</div>}
+        {permission && (
+          <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
+        )}
+        <InputBar disabled={busy} onSend={handleSend} onSlashCommand={handleSlashCommand} />
+      </div>
     </div>
   );
 }

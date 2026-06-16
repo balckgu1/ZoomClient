@@ -10,17 +10,14 @@ import (
 	"zoomClient/tools"
 )
 
-// ===================== 客户端定义 =====================
-
-// OpenAIClient OpenAI 兼容协议聊天客户端。
-// 支持 DeepSeek、Kimi、Qwen、OpenAI 等所有 OpenAI 兼容格式的模型后端。
+// OpenAIClient is an OpenAI Client
 type OpenAIClient struct {
 	BaseURL string       // API base url
-	APIKey  string       // 用于鉴权的 API Key
-	Client  *http.Client // 底层 HTTP 客户端
+	APIKey  string       // API Key
+	Client  *http.Client // HTTP Client
 }
 
-// NewOpenAIClient 创建新的 OpenAI 兼容客户端。
+// NewOpenAIClient 初始化 OpenAI Client
 func NewOpenAIClient(baseURL, apiKey string) *OpenAIClient {
 	return &OpenAIClient{
 		BaseURL: baseURL,
@@ -29,45 +26,43 @@ func NewOpenAIClient(baseURL, apiKey string) *OpenAIClient {
 	}
 }
 
-// ===================== 请求 / 响应数据模型（OpenAI 兼容） =====================
-
-// OpenAITool 表示发送给 OpenAI 兼容后端的 tool 定义。
+// OpenAITool 表示发送给 OpenAI 的 tool 定义
 type OpenAITool struct {
 	Type     string         `json:"type"`
 	Function OpenAIFunction `json:"function"`
 }
 
-// OpenAIFunction 工具的函数描述。
+// OpenAIFunction 工具的函数描述
 type OpenAIFunction struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
 }
 
-// OpenAIMessage OpenAI 兼容协议中的消息结构。
+// OpenAIMessage OpenAI 兼容协议中的消息结构
 type OpenAIMessage struct {
 	Role             string           `json:"role"`
 	Content          interface{}      `json:"content,omitempty"`
 	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string           `json:"tool_call_id,omitempty"`      // tool 角色消息所关联的工具调用 ID
+	ToolCallID       string           `json:"tool_call_id,omitempty"`      // tool role 消息所关联的工具调用 ID
 	ReasoningContent string           `json:"reasoning_content,omitempty"` // thinking 模式下模型产生的推理内容，多轮对话必须原样回传
 }
 
-// OpenAIToolCall OpenAI 兼容的工具调用结构。
-// 注意：arguments 字段在 OpenAI 协议中是 JSON 字符串而非对象。
+// OpenAIToolCall OpenAI 兼容的工具调用结构
+// arguments 在 OpenAI 协议中是 JSON 字符串
 type OpenAIToolCall struct {
 	ID       string                 `json:"id"`
 	Type     string                 `json:"type"`
 	Function OpenAIToolCallFunction `json:"function"`
 }
 
-// OpenAIToolCallFunction 工具调用对应的函数信息。
+// OpenAIToolCallFunction 工具调用对应的函数信息
 type OpenAIToolCallFunction struct {
 	Name      string `json:"name"`
-	Arguments string `json:"arguments"` // 注意：JSON 字符串，需自行反序列化为对象
+	Arguments string `json:"arguments"` // JSON 字符串
 }
 
-// OpenAIChatRequest OpenAI 兼容聊天补全请求体。
+// OpenAIChatRequest OpenAI Chat 请求
 type OpenAIChatRequest struct {
 	Model       string          `json:"model"`
 	Messages    []OpenAIMessage `json:"messages"`
@@ -76,23 +71,21 @@ type OpenAIChatRequest struct {
 	Temperature float64         `json:"temperature,omitempty"`
 }
 
-// OpenAIChatResponse OpenAI 兼容聊天补全响应体。
+// OpenAIChatResponse OpenAI Chat 响应
 type OpenAIChatResponse struct {
 	ID      string         `json:"id"`
 	Model   string         `json:"model"`
 	Choices []OpenAIChoice `json:"choices"`
 }
 
-// OpenAIChoice 单个候选结果。
+// OpenAIChoice 单个候选结果
 type OpenAIChoice struct {
 	Index        int           `json:"index"`
 	Message      OpenAIMessage `json:"message"`
 	FinishReason string        `json:"finish_reason"`
 }
 
-// ===================== 转换辅助函数 =====================
-
-// BuildOpenAITools 将通用工具接口列表转换为 OpenAI 兼容的 tool schema。
+// BuildOpenAITools 将 tools 切片转换为 OpenAI 兼容的 tool schema
 func BuildOpenAITools(toolList []tools.Tool) []OpenAITool {
 	result := make([]OpenAITool, 0, len(toolList))
 	for _, t := range toolList {
@@ -108,11 +101,9 @@ func BuildOpenAITools(toolList []tools.Tool) []OpenAITool {
 	return result
 }
 
-// convertToOpenAIMessages 将内部 fsm.Message 列表转换为 OpenAI 兼容协议消息列表。
-//
-// 重点处理：
-//  1. tool 角色消息需携带 tool_call_id 字段；
-//  2. assistant 工具调用中的 arguments 需序列化为 JSON 字符串。
+// convertToOpenAIMessages 将内部 fsm.Message 列表转换为 OpenAI 兼容协议消息列表
+//   - tool role 消息需携带 tool_call_id
+//   - assistant 工具调用中的 arguments 需序列化为 JSON 字符串
 func convertToOpenAIMessages(messages []fsm.Message) []OpenAIMessage {
 	result := make([]OpenAIMessage, 0, len(messages))
 	for _, msg := range messages {
@@ -149,8 +140,8 @@ func convertToOpenAIMessages(messages []fsm.Message) []OpenAIMessage {
 	return result
 }
 
-// convertFromOpenAIToolCalls 将 OpenAI 兼容后端返回的工具调用转换为内部 ToolCall 格式。
-// 主要工作是将 arguments 的 JSON 字符串解析为 map。
+// convertFromOpenAIToolCalls 将 OpenAI APU 返回工具调用转换为 ToolCall 格式
+// 将 arguments 的 JSON 字符串解析为 map
 func convertFromOpenAIToolCalls(openaiToolCalls []OpenAIToolCall) []tools.ToolCall {
 	if len(openaiToolCalls) == 0 {
 		return nil
@@ -173,73 +164,74 @@ func convertFromOpenAIToolCalls(openaiToolCalls []OpenAIToolCall) []tools.ToolCa
 	return result
 }
 
-// ===================== Chat 方法实现 =====================
-
-// Chat 实现 ChatClient 接口，向 OpenAI 兼容后端发起一次对话补全请求。
+// Chat 实现 ChatClient 接口，向 OpenAI 后端发起一次对话
 //
-// 实现要点：
-//  1. 工具列表转换为 OpenAI 兼容格式；
-//  2. 消息列表中的工具调用 arguments 序列化为字符串；
-//  3. 响应中的 arguments 字符串反序列化为 map，统一对外抽象。
+//   - 工具列表转换为 OpenAI 兼容格式
+//   - 消息列表中的工具调用 arguments 序列化为字符串
+//   - 响应中的 arguments 字符串反序列化为 map
 func (c *OpenAIClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
-	// 1. 协议转换
+	// 协议转换
 	openaiTools := BuildOpenAITools(toolList)
 	openaiMessages := convertToOpenAIMessages(messages)
 
-	// 2. 构造请求体。
+	// 构造请求体
 	reqData := OpenAIChatRequest{
 		Model:    model,
 		Messages: openaiMessages,
 		Tools:    openaiTools,
 		Stream:   false,
 	}
+
+	// 解析额外参数
 	if temp, ok := options["temperature"].(float64); ok {
 		reqData.Temperature = temp
 	}
 
 	jsonData, err := json.Marshal(reqData)
 	if err != nil {
-		return nil, fmt.Errorf("OpenAI 请求序列化失败: %w", err)
+		return nil, fmt.Errorf("OpenAI request serialization failed: %w", err)
 	}
 
-	// 3. 发送 HTTP 请求
+	// 构造 HTTP 请求
 	url := fmt.Sprintf("%s/chat/completions", c.BaseURL)
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("OpenAI 创建请求失败: %w", err)
+		return nil, fmt.Errorf("OpenAI request creation failed: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 
+	// 发送 HTTP 请求
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("OpenAI 请求发送失败: %w", err)
+		return nil, fmt.Errorf("OpenAI request send failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// 读取 HTTP 响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("OpenAI 响应读取失败: %w", err)
+		return nil, fmt.Errorf("OpenAI request body read failed: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenAI API 返回状态码 %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("OpenAI API returns status code %d: %s", resp.StatusCode, string(body))
 	}
 
-	// 4. 解析响应
-	var oiResp OpenAIChatResponse
-	if err := json.Unmarshal(body, &oiResp); err != nil {
-		return nil, fmt.Errorf("OpenAI 响应解析失败: %w", err)
+	// 解析 HTTP 响应
+	var openaiResp OpenAIChatResponse
+	if err := json.Unmarshal(body, &openaiResp); err != nil {
+		return nil, fmt.Errorf("OpenAI response parsing failed: %w", err)
 	}
 
-	if len(oiResp.Choices) == 0 {
-		return nil, fmt.Errorf("OpenAI 响应中无有效 choices")
+	if len(openaiResp.Choices) == 0 {
+		return nil, fmt.Errorf("OpenAI response has invalid choices")
 	}
 
-	// 5. 归一化为内部 ChatResponse 结构
-	choice := oiResp.Choices[0]
+	// 将 OpenAI 响应归一化为内部 ChatResponse 结构
+	choice := openaiResp.Choices[0]
 	chatResp := &ChatResponse{
-		Model: oiResp.Model,
+		Model: openaiResp.Model,
 		Done:  true,
 		Message: fsm.Message{
 			Role:             choice.Message.Role,
@@ -248,7 +240,7 @@ func (c *OpenAIClient) Chat(model string, messages []fsm.Message, toolList []too
 			ReasoningContent: choice.Message.ReasoningContent,
 		},
 	}
-	// content 字段为 null 时 Go 会得到 nil，统一回填为空字符串避免 main 中类型断言失败
+	// content 为空时，设置为空字符串，避免类型断言失败
 	if chatResp.Message.Content == nil {
 		chatResp.Message.Content = ""
 	}

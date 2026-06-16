@@ -13,23 +13,19 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-// ===================== 客户端定义 =====================
-
-// AnthropicClient Anthropic 聊天客户端，使用官方 anthropic-sdk-go。
+// AnthropicClient Anthropic 客户端，使用 anthropic-sdk-go
 type AnthropicClient struct {
 	client anthropic.Client
 }
 
-// NewAnthropicClient 创建新的 Anthropic 客户端。
+// NewAnthropicClient 初始化 Anthropic Client
 func NewAnthropicClient(apiKey string) *AnthropicClient {
 	return &AnthropicClient{
 		client: anthropic.NewClient(option.WithAPIKey(apiKey)),
 	}
 }
 
-// ===================== 转换辅助函数 =====================
-
-// buildAnthropicTools 将通用工具列表转换为 Anthropic SDK 的 ToolUnionParam 格式。
+// buildAnthropicTools 将通用工具列表转换为 Anthropic SDK 的 ToolUnionParam 格式
 func buildAnthropicTools(toolList []tools.Tool) []anthropic.ToolUnionParam {
 	result := make([]anthropic.ToolUnionParam, 0, len(toolList))
 	for _, t := range toolList {
@@ -53,7 +49,7 @@ func buildAnthropicTools(toolList []tools.Tool) []anthropic.ToolUnionParam {
 	return result
 }
 
-// anthropicContentStr 将 fsm.Message.Content 安全转为字符串。
+// anthropicContentStr 将 fsm.Message.Content 安全转为字符串
 func anthropicContentStr(c interface{}) string {
 	switch v := c.(type) {
 	case nil:
@@ -66,8 +62,8 @@ func anthropicContentStr(c interface{}) string {
 	}
 }
 
-// convertToAnthropicMessages 将内部 fsm.Message 列表转换为 Anthropic 协议消息列表。
-// 同时返回提取出的 system 文本（Anthropic 要求 system 作为顶层参数）。
+// convertToAnthropicMessages 将内部 fsm.Message 列表转换为 Anthropic 协议消息列表
+// 同时返回提取出的 system 文本（Anthropic 要求 system 作为顶层参数）
 //
 // 处理规则：
 //  1. system  → 提取为 systemText，跳过不加入数组
@@ -137,8 +133,6 @@ func convertToAnthropicMessages(messages []fsm.Message) ([]anthropic.MessagePara
 	}
 	return result, systemText
 }
-
-// ===================== Chat 方法实现 =====================
 
 // Chat 实现 ChatClient 接口，向 Anthropic 发起一次消息补全请求。
 //

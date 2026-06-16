@@ -1,7 +1,3 @@
-// session/session.go
-//
-// 会话管理数据结构定义。
-// SessionRecord 存储完整会话数据（含消息历史），SessionMeta 仅存元信息用于索引列表。
 package session
 
 import (
@@ -9,8 +5,7 @@ import (
 	"zoomClient/fsm"
 )
 
-// SessionRecord 表示一个完整的会话记录，包含消息历史。
-// 持久化为 .sessions/{id}.json 文件。
+// SessionRecord 表示一个完整的session记录，包含消息历史，持久化为 {id}.json 文件
 type SessionRecord struct {
 	ID        string        `json:"id"`
 	Title     string        `json:"title"`
@@ -21,7 +16,7 @@ type SessionRecord struct {
 	Messages  []fsm.Message `json:"messages"`
 }
 
-// SessionMeta 仅包含会话元信息，用于 index.json 中的快速列表展示。
+// SessionMeta 仅包含session元信息，用于 index.json 中的列表显示
 type SessionMeta struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
@@ -30,7 +25,7 @@ type SessionMeta struct {
 	TurnCount int       `json:"turn_count"`
 }
 
-// ToMeta 从 SessionRecord 提取元信息。
+// ToMeta 从 session 中提取元信息
 func (r *SessionRecord) ToMeta() SessionMeta {
 	return SessionMeta{
 		ID:        r.ID,
@@ -41,7 +36,7 @@ func (r *SessionRecord) ToMeta() SessionMeta {
 	}
 }
 
-// IsEmpty 判断会话是否为空（无消息或仅含 system 消息且无对话轮次）。
+// IsEmpty 判断session是否为空
 func (r *SessionRecord) IsEmpty() bool {
 	if r.TurnCount > 0 {
 		return false

@@ -34,8 +34,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// AgentSession aggregates all session-level dependencies, eliminating the need
-// to pass 11+ parameters through every function call.
+// AgentSession aggregates all session-level dependencies
 type AgentSession struct {
 	State          *fsm.State
 	Cfg            *utils.Config

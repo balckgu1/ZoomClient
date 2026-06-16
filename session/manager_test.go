@@ -16,12 +16,12 @@ func init() {
 	logger.Log, _ = zap.NewDevelopment()
 }
 
-// mockClient 是一个简单的 mock ChatClient，用于测试。
+// mockClient 是一个 mock ChatClient，用于测试
 type mockClient struct{}
 
 func (m *mockClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
 	return &clients.ChatResponse{
-		Message: fsm.Message{Content: "Go语言排序算法讲解"},
+		Message: fsm.Message{Content: "Explaining Sorting Algorithms in Go"},
 	}, nil
 }
 
@@ -57,8 +57,8 @@ func TestManager_SaveAndLoad(t *testing.T) {
 
 	r := mgr.CreateSession()
 	r.Messages = []fsm.Message{
-		{Role: "user", Content: "你好"},
-		{Role: "assistant", Content: "你好！"},
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hello! How can I help you today?"},
 	}
 	r.TurnCount = 1
 
@@ -136,75 +136,102 @@ func TestManager_DeleteLastCreatesNew(t *testing.T) {
 }
 
 func TestManager_Rename(t *testing.T) {
-	mgr := tempManager(t)
+	testcases := []struct {
+		name      string
+		newTitle  string
+		wantErr   bool
+		wantTitle string
+	}{
+		{
+			name:      "valid rename",
+			newTitle:  "newTitle",
+			wantErr:   false,
+			wantTitle: "newTitle",
+		},
+		{
+			name:      "reject empty title",
+			newTitle:  "",
+			wantErr:   true,
+			wantTitle: "NewSession",
+		},
+	}
+	for _, tt := range testcases {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := tempManager(t)
+			r := manager.CreateSession()
+			r.TurnCount = 1
+			r.Messages = []fsm.Message{{Role: "user", Content: "test"}}
+			manager.Save(r)
 
-	r := mgr.CreateSession()
-	r.TurnCount = 1
-	r.Messages = []fsm.Message{{Role: "user", Content: "test"}}
-	mgr.Save(r)
-
-	if err := mgr.Rename(r.ID, "新名称"); err != nil {
-		t.Fatalf("Rename failed: %v", err)
+			err := manager.Rename(r.ID, tt.newTitle)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error for empty title, got nil")
+				}
+			}
+			if err != nil && !tt.wantErr {
+				t.Fatalf("Rename failed: %v", err)
+			}
+			loaded, _ := manager.Load(r.ID)
+			if loaded.Title != tt.wantTitle {
+				t.Errorf("want newTitle = %s, got: %s", tt.wantTitle, loaded.Title)
+			}
+		})
 	}
 
-	loaded, _ := mgr.Load(r.ID)
-	if loaded.Title != "新名称" {
-		t.Errorf("Title = %s, want 新名称", loaded.Title)
-	}
-}
-
-func TestManager_RenameEmpty(t *testing.T) {
-	mgr := tempManager(t)
-
-	r := mgr.CreateSession()
-	if err := mgr.Rename(r.ID, ""); err == nil {
-		t.Error("should reject empty title")
-	}
 }
 
 func TestManager_GenerateTitle(t *testing.T) {
-	mgr := tempManager(t)
-
-	record := &SessionRecord{
-		ID:        "title-001",
-		Title:     "新会话",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Messages: []fsm.Message{
-			{Role: "user", Content: "请用Go实现快速排序"},
-			{Role: "assistant", Content: "好的，以下是Go语言实现快速排序的代码..."},
+	testcases := []struct {
+		name          string
+		fallbackTitle string
+		messages      []fsm.Message
+		wantErr       bool
+		wantTitle     string
+	}{
+		{
+			name:          "generate from messages",
+			fallbackTitle: "NewSession",
+			messages: []fsm.Message{
+				{Role: "user", Content: "Please implement quicksort in Go"},
+				{Role: "assistant", Content: "Alright, here's the code for implementing quicksort in Go..."},
+			},
+			wantErr:   false,
+			wantTitle: "Explaining Sorting A",
+		},
+		{
+			name:          "fallback when no messages",
+			fallbackTitle: "NewSession",
+			messages:      []fsm.Message{},
+			wantErr:       false,
+			wantTitle:     "NewSession",
 		},
 	}
+	for _, tt := range testcases {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := tempManager(t)
 
-	title, err := mgr.GenerateTitle(record)
-	if err != nil {
-		t.Fatalf("GenerateTitle failed: %v", err)
-	}
-	if title == "" {
-		t.Error("title should not be empty")
-	}
-	// mock returns "Go语言排序算法讲解"
-	if title != "Go语言排序算法讲解" {
-		t.Errorf("title = %s", title)
-	}
-}
+			record := &SessionRecord{
+				ID:        "title-test",
+				Title:     tt.fallbackTitle,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Messages:  tt.messages,
+			}
 
-func TestManager_GenerateTitleFallback(t *testing.T) {
-	mgr := tempManager(t)
-
-	record := &SessionRecord{
-		ID:        "title-002",
-		Title:     "新会话",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Messages:  []fsm.Message{}, // no messages
+			title, err := mgr.GenerateTitle(record)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error for empty title, got nil")
+				}
+			}
+			if err != nil && !tt.wantErr {
+				t.Fatalf("GenerateTitle failed: %v", err)
+			}
+			if title != tt.wantTitle {
+				t.Errorf("title = %s, want %s", title, tt.wantTitle)
+			}
+		})
 	}
 
-	title, err := mgr.GenerateTitle(record)
-	if err != nil {
-		t.Fatalf("GenerateTitle failed: %v", err)
-	}
-	if title != "新会话" {
-		t.Errorf("fallback title = %s, want 新会话", title)
-	}
 }

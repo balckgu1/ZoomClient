@@ -1,7 +1,3 @@
-// web/session.go
-//
-// Session 封装 Web 模式下的 agent 会话状态和通信 channel。
-// agentLoop 由 main 包提供（通过回调注入），Session 本身不包含 LLM 逻辑。
 package web
 
 import (
@@ -10,7 +6,7 @@ import (
 	"zoomClient/fsm"
 )
 
-// Command 表示一条来自前端 HTTP 请求的上行命令。
+// Command 表示一条来自前端 HTTP 请求的上行命令
 type Command struct {
 	Action  string // "chat" | "clear" | "compact" | "exit"
 	Message string // chat 命令的消息内容
@@ -29,7 +25,7 @@ type Session struct {
 	State    *fsm.State
 	Model    string
 
-	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 包的主循环消费
+	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 消费
 	CmdCh chan Command
 	// EventCh 由 SseEmitter 写入事件，由 SSE HTTP handler 消费
 	EventCh chan Event
@@ -61,10 +57,10 @@ func NewSession(id, model string) *Session {
 	}
 }
 
-// ─── 权限交互（供 WebAsker 使用） ───
+// 权限交互，供 WebAsker 使用
 
-// RequestPermission 推送权限询问事件并返回 requestID。
-// 调用方随后通过 WaitForPermission 阻塞等待回复。
+// RequestPermission 推送权限询问事件并返回 requestID
+// 调用方随后通过 WaitForPermission 阻塞等待回复
 func (s *Session) RequestPermission(toolName string, argsJSON string, reason string) string {
 	id := s.permIDSeq.Add(1)
 	reqID := "web_perm_" + itoa(id)
@@ -84,7 +80,7 @@ func (s *Session) RequestPermission(toolName string, argsJSON string, reason str
 	return reqID
 }
 
-// WaitForPermission 阻塞等待权限回复，返回 (allow, denyReason)。
+// WaitForPermission 阻塞等待权限回复，返回 (allow, denyReason)
 func (s *Session) WaitForPermission(reqID string) (bool, string) {
 	v, ok := s.permPending.Load(reqID)
 	if !ok {
@@ -100,14 +96,14 @@ func (s *Session) WaitForPermission(reqID string) (bool, string) {
 	return resp.ok, resp.reason
 }
 
-// ResolvePermission 由 HTTP handler 调用，写入权限回复。
+// ResolvePermission 由 HTTP handler 调用，写入权限回复
 func (s *Session) ResolvePermission(id string, ok bool, reason string) {
 	if v, loaded := s.permPending.Load(id); loaded {
 		v.(chan permResponse) <- permResponse{ok: ok, reason: reason}
 	}
 }
 
-// itoa 简单的 int64 → string，避免 import strconv。
+// itoa 简单的 int64 → string，避免 import strconv
 func itoa(n int64) string {
 	if n == 0 {
 		return "0"

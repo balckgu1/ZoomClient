@@ -1,8 +1,3 @@
-// session/store.go
-//
-// JSON 文件持久化层。
-// 采用双层存储：index.json（会话索引）+ {id}.json（单会话完整数据）。
-// 启动时执行 reconcile 修复索引与实际文件的不一致。
 package session
 
 import (
@@ -19,12 +14,12 @@ import (
 
 const indexFileName = "index.json"
 
-// Store 负责会话数据的 JSON 文件持久化。
+// Store 负责会话数据的 JSON 文件持久化
 type Store struct {
 	dir string
 }
 
-// NewStore 创建 Store，并确保存储目录存在。
+// NewStore 初始化 Store
 func NewStore(dir string) (*Store, error) {
 	if dir == "" {
 		dir = "./.sessions"
@@ -39,23 +34,24 @@ func NewStore(dir string) (*Store, error) {
 	return s, nil
 }
 
-// Dir 返回存储目录路径。
+// Dir 返回 session 存储目录路径
 func (s *Store) Dir() string {
 	return s.dir
 }
 
-// indexPath 返回 index.json 的完整路径。
+// indexPath 返回 index.json 的完整路径
 func (s *Store) indexPath() string {
 	return filepath.Join(s.dir, indexFileName)
 }
 
-// sessionPath 返回指定会话 JSON 文件的完整路径。
+// sessionPath 返回指定 session JSON 的完整路径
 func (s *Store) sessionPath(id string) string {
 	return filepath.Join(s.dir, id+".json")
 }
 
-// readIndex 读取 index.json，文件不存在时返回空切片。
+// readIndex 读取 index.json，文件不存在时返回空切片
 func (s *Store) readIndex() ([]SessionMeta, error) {
+
 	data, err := os.ReadFile(s.indexPath())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -64,13 +60,14 @@ func (s *Store) readIndex() ([]SessionMeta, error) {
 		return nil, fmt.Errorf("read index: %w", err)
 	}
 	var metas []SessionMeta
-	if err := json.Unmarshal(data, &metas); err != nil {
+	err = json.Unmarshal(data, &metas)
+	if err != nil {
 		return nil, fmt.Errorf("parse index: %w", err)
 	}
 	return metas, nil
 }
 
-// writeIndex 将索引写入 index.json。
+// writeIndex 将索引写入 index.json
 func (s *Store) writeIndex(metas []SessionMeta) error {
 	data, err := json.MarshalIndent(metas, "", "  ")
 	if err != nil {
@@ -82,7 +79,7 @@ func (s *Store) writeIndex(metas []SessionMeta) error {
 	return nil
 }
 
-// List 返回所有会话的元信息列表，按 UpdatedAt 倒序排列。
+// List 返回所有会话的元信息列表，按 UpdatedAt 倒序排列
 func (s *Store) List() ([]SessionMeta, error) {
 	metas, err := s.readIndex()
 	if err != nil {
@@ -94,7 +91,7 @@ func (s *Store) List() ([]SessionMeta, error) {
 	return metas, nil
 }
 
-// Load 读取指定会话的完整数据（含消息历史）。
+// Load 读取指定会话的完整数据（含消息历史）
 func (s *Store) Load(id string) (*SessionRecord, error) {
 	if !isValidID(id) {
 		return nil, fmt.Errorf("invalid session id: %s", id)
@@ -110,7 +107,7 @@ func (s *Store) Load(id string) (*SessionRecord, error) {
 	return &record, nil
 }
 
-// Save 保存会话数据到磁盘，并更新索引。
+// Save 保存会话数据到磁盘，并更新索引
 func (s *Store) Save(record *SessionRecord) error {
 	// 写入会话文件
 	data, err := json.MarshalIndent(record, "", "  ")
@@ -141,7 +138,7 @@ func (s *Store) Save(record *SessionRecord) error {
 	return s.writeIndex(metas)
 }
 
-// Delete 删除指定会话的文件并更新索引。
+// Delete 删除指定会话的文件并更新索引
 func (s *Store) Delete(id string) error {
 	if !isValidID(id) {
 		return fmt.Errorf("invalid session id: %s", id)
@@ -175,7 +172,7 @@ func (s *Store) Rename(id, newTitle string) error {
 	return s.Save(record)
 }
 
-// reconcile 扫描存储目录，修复 index.json 与实际文件的不一致。
+// reconcile 扫描存储目录，修复 index.json 与实际文件的不一致
 // - 磁盘有文件但索引没有 → 补充到索引
 // - 索引有条目但磁盘无文件 → 从索引移除
 func (s *Store) reconcile() error {

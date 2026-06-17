@@ -46,3 +46,18 @@ export interface AppState {
   turnCount: number;
   pendingPermission: PermissionAsk | null;
 }
+
+// Model preset (for model selector)
+export interface ModelPreset {
+  name: string;
+  type: string;
+  base_url?: string;
+  api_key?: string;
+  model_name: string;
+}
+
+// Model list response
+export interface ModelsResponse {
+  models: ModelPreset[];
+  active: string;
+}

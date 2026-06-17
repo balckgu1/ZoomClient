@@ -57,3 +57,10 @@ func (p *MessagePipeline) injectAttachments(msgs []fsm.Message) []fsm.Message {
 	// 预留：后续可将 attachment 作为 user 消息追加
 	return msgs
 }
+
+// UpdateModelName 热更新 Pipeline 使用的模型名
+func (p *MessagePipeline) UpdateModelName(model string) {
+	if p.builder != nil {
+		p.builder.UpdateModel(model)
+	}
+}

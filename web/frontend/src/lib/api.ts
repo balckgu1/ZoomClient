@@ -99,3 +99,25 @@ export async function deleteSession(id: string): Promise<void> {
 export async function renameSession(id: string, title: string): Promise<void> {
   await patch(`/api/sessions/${id}`, { title });
 }
+
+// ─── Model API ───
+
+import type { ModelPreset, ModelsResponse } from "../types";
+
+export async function fetchModels(): Promise<ModelsResponse> {
+  const res = await fetch(`${BASE}/api/models`);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+export async function addModel(preset: ModelPreset): Promise<void> {
+  await post("/api/models", preset as unknown as Record<string, unknown>);
+}
+
+export async function selectModel(name: string): Promise<void> {
+  await post("/api/model/select", { name });
+}
+
+export async function deleteModel(name: string): Promise<void> {
+  await del(`/api/models/${name}`);
+}

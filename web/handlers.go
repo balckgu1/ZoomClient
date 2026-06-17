@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"zoomClient/model"
 )
 
 // handleSSE 建立 SSE 长连接，将 Session.EventCh 中的事件以 text/event-stream 格式推送。
@@ -221,6 +222,92 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ─── 模型管理 ───
+
+// handleModels 处理 /api/models 路由（GET 列表 / POST 新增）。
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		presets := s.modelRegistry.List()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"models": presets,
+			"active": s.modelRegistry.Active(),
+		})
+	case http.MethodPost:
+		var req struct {
+			Name      string `json:"name"`
+			Type      string `json:"type"`
+			BaseURL   string `json:"base_url"`
+			APIKey    string `json:"api_key"`
+			ModelName string `json:"model_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if req.Name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+			return
+		}
+		if req.ModelName == "" {
+			req.ModelName = req.Name
+		}
+		if req.Type == "" {
+			req.Type = "openai"
+		}
+		preset := &model.Preset{
+			Name:      req.Name,
+			Type:      req.Type,
+			BaseURL:   req.BaseURL,
+			APIKey:    req.APIKey,
+			ModelName: req.ModelName,
+		}
+		s.modelRegistry.Add(preset)
+		writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSelectModel 处理 POST /api/model/select
+func (s *Server) handleSelectModel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	s.session.CmdCh <- Command{Action: "select_model", ModelName: req.Name}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// handleModelByID 处理 DELETE /api/models/{name}
+func (s *Server) handleModelByID(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/models/")
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model name required"})
+		return
+	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.modelRegistry.Remove(name); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // ─── 辅助函数 ───

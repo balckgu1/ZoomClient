@@ -20,6 +20,7 @@ import (
 	"zoomClient/hook"
 	"zoomClient/logger"
 	"zoomClient/memory"
+	"zoomClient/model"
 	"zoomClient/permission"
 	"zoomClient/prompt"
 	"zoomClient/session"
@@ -40,6 +41,7 @@ type AgentSession struct {
 	Cfg            *utils.Config
 	Client         clients.ChatClient
 	ModelName      string
+	ModelRegistry  *model.Registry
 	Pipeline       *prompt.MessagePipeline
 	Registry       *tools.Registry
 	ToolCtx        *tools.ToolContext
@@ -47,6 +49,20 @@ type AgentSession struct {
 	CompactManager *compact.CompactManager
 	HookRunner     *hook.Runner
 	Em             emitter.Emitter
+}
+
+// SwitchModel 热切换到指定模型预设，保留对话历史。
+func (s *AgentSession) SwitchModel(name string) error {
+	preset, err := s.ModelRegistry.Select(name)
+	if err != nil {
+		return err
+	}
+	client, modelName := model.BuildClient(preset)
+	s.Client = client
+	s.ModelName = modelName
+	s.CompactManager.UpdateModel(client, modelName)
+	s.Pipeline.UpdateModelName(modelName)
+	return nil
 }
 
 // agentLoop is the main agent reasoning loop.
@@ -476,6 +492,130 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 	return false
 }
 
+// handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
+func handleSlashCommand(input string, s *AgentSession) bool {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(parts[0])
+	switch cmd {
+	case "/exit", "/quit":
+		return true
+	case "/clear":
+		if len(s.State.Messages) > 0 && s.State.Messages[0].Role == "system" {
+			s.State.Messages = s.State.Messages[:1]
+		} else {
+			s.State.Messages = s.State.Messages[:0]
+		}
+		s.State.TurnCount = 0
+		s.Em.EmitInfo("history cleared (system prompt kept)")
+	case "/compact":
+		if len(s.State.Messages) <= 1 {
+			s.Em.EmitInfo("no history to compact")
+			return false
+		}
+		before := s.CompactManager.EstimateSize(s.State.Messages)
+		newMsgs, cerr := s.CompactManager.CompactHistory(s.State.Messages)
+		if cerr != nil {
+			s.Em.EmitError("compact", cerr.Error())
+			return false
+		}
+		s.State.Messages = newMsgs
+		after := s.CompactManager.EstimateSize(newMsgs)
+		s.Em.EmitCompact(before, after)
+	case "/setmode":
+		handleSetMode(parts[1:], s)
+	case "/selectmode":
+		handleSelectMode(parts[1:], s)
+	case "/models":
+		handleListModels(s)
+	case "/help":
+		s.Em.EmitInfo("/exit      - quit")
+		s.Em.EmitInfo("/clear     - clear conversation history (system prompt kept)")
+		s.Em.EmitInfo("/compact   - manually compact conversation history")
+		s.Em.EmitInfo("/setmode   - add/update a model preset (-m name -t type -u url -k key [--model modelname])")
+		s.Em.EmitInfo("/selectmode - switch to a configured model (-m name)")
+		s.Em.EmitInfo("/models    - list all configured model presets")
+		s.Em.EmitInfo("/help      - show this message")
+	default:
+		s.Em.EmitInfo("unknown command: " + input + "  (try /help)")
+	}
+	return false
+}
+
+// handleSetMode 处理 /setmode 命令：解析参数并注册模型预设。
+func handleSetMode(args []string, s *AgentSession) {
+	fs := flag.NewFlagSet("setmode", flag.ContinueOnError)
+	var name, typ, baseURL, apiKey, modelName string
+	fs.StringVar(&name, "m", "", "preset name")
+	fs.StringVar(&typ, "t", "openai", "backend type: openai | ollama | anthropic | gemini")
+	fs.StringVar(&baseURL, "u", "", "API base URL")
+	fs.StringVar(&apiKey, "k", "", "API key")
+	fs.StringVar(&modelName, "model", "", "actual model name (defaults to preset name)")
+	if err := fs.Parse(args); err != nil {
+		s.Em.EmitInfo("usage: /setmode -m <name> -t <type> -u <baseurl> -k <apikey> [--model <modelname>]")
+		return
+	}
+	if name == "" {
+		s.Em.EmitInfo("error: -m <name> is required")
+		return
+	}
+	if modelName == "" {
+		modelName = name
+	}
+	preset := &model.Preset{
+		Name:      name,
+		Type:      typ,
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		ModelName: modelName,
+	}
+	s.ModelRegistry.Add(preset)
+	s.Em.EmitInfo(fmt.Sprintf("Model preset %q saved (type: %s, model: %s)", name, typ, modelName))
+}
+
+// handleSelectMode 处理 /selectmode 命令：切换到指定模型
+func handleSelectMode(args []string, s *AgentSession) {
+	fs := flag.NewFlagSet("selectmode", flag.ContinueOnError)
+	var name string
+	fs.StringVar(&name, "m", "", "preset name to switch to")
+	if err := fs.Parse(args); err != nil {
+		s.Em.EmitInfo("usage: /selectmode -m <name>")
+		return
+	}
+	if name == "" {
+		s.Em.EmitInfo("error: -m <name> is required")
+		return
+	}
+	if err := s.SwitchModel(name); err != nil {
+		s.Em.EmitInfo(fmt.Sprintf("switch failed: %s", err.Error()))
+		return
+	}
+	s.Em.EmitInfo(fmt.Sprintf("Switched to model %q (%s)", name, s.ModelName))
+}
+
+// handleListModels 处理 /models 命令：列出所有已配置的模型预设。
+func handleListModels(s *AgentSession) {
+	presets := s.ModelRegistry.List()
+	active := s.ModelRegistry.Active()
+	if len(presets) == 0 {
+		s.Em.EmitInfo("No model presets configured. Use /setmode to add one.")
+		return
+	}
+	for _, p := range presets {
+		marker := "  "
+		if p.Name == active {
+			marker = "* "
+		}
+		activeTag := ""
+		if p.Name == active {
+			activeTag = " [active]"
+		}
+		s.Em.EmitInfo(fmt.Sprintf("%s%s (%s, %s)%s", marker, p.Name, p.Type, p.ModelName, activeTag))
+	}
+}
+
 // runAPIREPL runs the API mode REPL loop, reading NDJSON commands from stdin.
 func runAPIREPL(ctx context.Context, s *AgentSession, webPort int) {
 	log := logger.Log
@@ -531,7 +671,7 @@ func runAPIREPL(ctx context.Context, s *AgentSession, webPort int) {
 // runWebREPL starts the web server and runs the web mode REPL loop.
 func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webPort int, sessMgr *session.Manager) {
 	log := logger.Log
-	webServer := web.NewServer(webSess, sessMgr, webPort)
+	webServer := web.NewServer(webSess, sessMgr, s.ModelRegistry, webPort)
 	// run http server
 	go func() {
 		log.Info("Web server starting", zap.String("addr", webServer.Addr()))
@@ -608,6 +748,16 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					}()
 				}
 
+			case "select_model":
+				if err := s.SwitchModel(cmd.ModelName); err != nil {
+					s.Em.EmitError("model", fmt.Sprintf("switch failed: %s", err.Error()))
+				} else {
+					s.Em.EmitInfo(fmt.Sprintf("Switched to model %q (%s)", cmd.ModelName, s.ModelName))
+					if webSess != nil {
+						webSess.Model = s.ModelName
+					}
+				}
+
 			default:
 				if handleSessionCommand(cmd.Action, s) {
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -635,7 +785,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 		}
 		// Slash command handling
 		if strings.HasPrefix(input, "/") {
-			if handleSlashCommand(input, s.State, s.Em, s.CompactManager) {
+			if handleSlashCommand(input, s) {
 				break // /exit
 			}
 			continue
@@ -672,6 +822,33 @@ func main() {
 	if webSess != nil {
 		webSess.Model = modelname
 	}
+
+	// Initialize Model Registry
+	configDir := flags.ConfigDir
+	if configDir == "" {
+		configDir = "./config"
+	}
+	modelRegistry := model.NewRegistry(configDir + "/models.yaml")
+	// Register default presets from config.yaml (openai and ollama only)
+	if cfg.OpenAI.ApiKey != "" || cfg.OpenAI.BaseURL != "" {
+		modelRegistry.RegisterDefault(&model.Preset{
+			Name:      "openai",
+			Type:      "openai",
+			BaseURL:   cfg.OpenAI.BaseURL,
+			APIKey:    cfg.OpenAI.ApiKey,
+			ModelName: cfg.OpenAI.ModelName,
+		})
+	}
+	if cfg.Ollama.BaseURL != "" {
+		modelRegistry.RegisterDefault(&model.Preset{
+			Name:      "ollama",
+			Type:      "ollama",
+			BaseURL:   cfg.Ollama.BaseURL,
+			ModelName: cfg.Ollama.ModelName,
+		})
+	}
+	// Set active preset to current model type
+	modelRegistry.SetActive(flags.ModelType)
 
 	// Build tool context
 	workDir, err := os.Getwd()
@@ -721,7 +898,8 @@ func main() {
 	// Assemble session & start
 	sess := &AgentSession{
 		State: state, Cfg: cfg, Client: client, ModelName: modelname,
-		Pipeline: pipeline, Registry: registry, ToolCtx: toolCtx,
+		ModelRegistry: modelRegistry,
+		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
 		TodoManager: todoManager, CompactManager: compactManager,
 		HookRunner: hookRunner, Em: em,
 	}
@@ -759,46 +937,6 @@ func main() {
 	log.Info("Agent REPL End", zap.Int("total_turns", state.TurnCount))
 	em.EmitSessionEnd(state.TurnCount)
 	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
-}
-
-// handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
-func handleSlashCommand(input string, state *fsm.State, em emitter.Emitter, cm *compact.CompactManager) bool {
-	cmd := strings.TrimSpace(strings.ToLower(input))
-	switch cmd {
-	case "/exit", "/quit":
-		return true
-	case "/clear":
-		// Keep system message, clear other history
-		if len(state.Messages) > 0 && state.Messages[0].Role == "system" {
-			state.Messages = state.Messages[:1]
-		} else {
-			state.Messages = state.Messages[:0]
-		}
-		state.TurnCount = 0
-		em.EmitInfo("history cleared (system prompt kept)")
-	case "/compact":
-		if len(state.Messages) <= 1 {
-			em.EmitInfo("no history to compact")
-			return false
-		}
-		before := cm.EstimateSize(state.Messages)
-		newMsgs, cerr := cm.CompactHistory(state.Messages)
-		if cerr != nil {
-			em.EmitError("compact", cerr.Error())
-			return false
-		}
-		state.Messages = newMsgs
-		after := cm.EstimateSize(newMsgs)
-		em.EmitCompact(before, after)
-	case "/help":
-		em.EmitInfo("/exit  - quit")
-		em.EmitInfo("/clear - clear conversation history (system prompt kept)")
-		em.EmitInfo("/compact - manually compact conversation history")
-		em.EmitInfo("/help  - show this message")
-	default:
-		em.EmitInfo("unknown command: " + input + "  (try /help)")
-	}
-	return false
 }
 
 // startHeartbeat 周期性地输出心跳事件，用于前端检测 sidecar 存活状态。

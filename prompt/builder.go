@@ -42,3 +42,8 @@ func (b *SystemPromptBuilder) Build() string {
 	}
 	return strings.Join(nonEmpty, "\n\n")
 }
+
+// UpdateModel 热更新 Builder 使用的模型名
+func (b *SystemPromptBuilder) UpdateModel(model string) {
+	b.model = model
+}

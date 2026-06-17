@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
-import type { ChatMessage, PermissionAsk, SSEEvent, SessionMeta } from "../types";
+import type { ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset } from "../types";
 import { connectSSE } from "../lib/sse";
 import {
   sendChat, sendClear, sendCompact, sendExit, sendPermission,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
+  fetchModels, addModel, selectModel,
 } from "../lib/api";
 import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
 import { InputBar } from "./InputBar";
 import { PermissionDialog } from "./PermissionDialog";
 import { Sidebar } from "./Sidebar";
+import { ModelSelector } from "./ModelSelector";
 
 export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -24,6 +26,10 @@ export function App() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState("");
 
+  // Model state
+  const [models, setModels] = useState<ModelPreset[]>([]);
+  const [activeModel, setActiveModel] = useState("");
+
   // Show a toast message briefly
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -35,6 +41,17 @@ export function App() {
     try {
       const list = await fetchSessions();
       setSessions(list || []);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Refresh model list from backend
+  const refreshModels = useCallback(async () => {
+    try {
+      const resp = await fetchModels();
+      setModels(resp.models || []);
+      setActiveModel(resp.active || "");
     } catch {
       // ignore
     }
@@ -125,12 +142,13 @@ export function App() {
     }
   }, [showToast, refreshSessions]);
 
-  // Connect SSE on mount + load sessions
+  // Connect SSE on mount + load sessions + load models
   useEffect(() => {
     const disconnect = connectSSE("/api/events", handleSSEEvent, setConnected);
     refreshSessions();
+    refreshModels();
     return disconnect;
-  }, [handleSSEEvent, refreshSessions]);
+  }, [handleSSEEvent, refreshSessions, refreshModels]);
 
   // Send a chat message
   const handleSend = useCallback(
@@ -268,6 +286,28 @@ export function App() {
     }
   }, [sessions, currentSessionId]);
 
+  // ─── Model actions ───
+
+  const handleModelSelect = useCallback(async (name: string) => {
+    try {
+      await selectModel(name);
+      setActiveModel(name);
+      showToast(`Switching to model "${name}"...`);
+    } catch (err) {
+      showToast(`Model switch failed: ${err}`);
+    }
+  }, [showToast]);
+
+  const handleModelAdd = useCallback(async (preset: ModelPreset) => {
+    try {
+      await addModel(preset);
+      await refreshModels();
+      showToast(`Model "${preset.name}" added`);
+    } catch (err) {
+      showToast(`Add model failed: ${err}`);
+    }
+  }, [refreshModels, showToast]);
+
   return (
     <div class="app-layout">
       <Sidebar
@@ -282,6 +322,15 @@ export function App() {
         <StatusBar
           status={{ messages, model, connected, busy, turnCount, pendingPermission: permission }}
         />
+        <div class="model-bar">
+          <ModelSelector
+            models={models}
+            active={activeModel}
+            onSelect={handleModelSelect}
+            onAdd={handleModelAdd}
+            disabled={busy}
+          />
+        </div>
         <MessageList messages={messages} />
         {toast && <div class="toast">{toast}</div>}
         {permission && (

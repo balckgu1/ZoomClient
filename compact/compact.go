@@ -63,6 +63,12 @@ func NewCompactManager(cfg *CompactConfig, client clients.ChatClient, model stri
 	}
 }
 
+// UpdateModel 热更新 CompactManager 使用的客户端和模型名。
+func (m *CompactManager) UpdateModel(client clients.ChatClient, model string) {
+	m.client = client
+	m.model = model
+}
+
 // PersistLargeOutput 若ToolResult过大，将工具结果写入磁盘，返回占位文本
 func (m *CompactManager) PersistLargeOutput(toolUseID string, output string) string {
 	// 如果ToolResult <= 阈值，原样返回

@@ -8,8 +8,9 @@ import (
 
 // Command 表示一条来自前端 HTTP 请求的上行命令
 type Command struct {
-	Action  string // "chat" | "clear" | "compact" | "exit"
-	Message string // chat 命令的消息内容
+	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model"
+	Message   string // chat 命令的消息内容
+	ModelName string // select_model 命令的目标模型名
 }
 
 // Event 表示一条要推送给前端浏览器的 SSE 事件

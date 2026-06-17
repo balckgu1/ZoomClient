@@ -5,25 +5,28 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"zoomClient/model"
 	"zoomClient/session"
 )
 
 // Server 封装 HTTP Server
 type Server struct {
-	session    *Session
-	sessionMgr *session.Manager
-	mux        *http.ServeMux
-	port       int
-	httpServer *http.Server
+	session       *Session
+	sessionMgr    *session.Manager
+	modelRegistry *model.Registry
+	mux           *http.ServeMux
+	port          int
+	httpServer    *http.Server
 }
 
 // NewServer 创建 HTTP Server
-func NewServer(sess *Session, sessionMgr *session.Manager, port int) *Server {
+func NewServer(sess *Session, sessionMgr *session.Manager, modelRegistry *model.Registry, port int) *Server {
 	s := &Server{
-		session:    sess,
-		sessionMgr: sessionMgr,
-		mux:        http.NewServeMux(),
-		port:       port,
+		session:       sess,
+		sessionMgr:    sessionMgr,
+		modelRegistry: modelRegistry,
+		mux:           http.NewServeMux(),
+		port:          port,
 	}
 	s.registerRoutes()
 	addr := fmt.Sprintf(":%d", port)
@@ -48,6 +51,11 @@ func (s *Server) registerRoutes() {
 	// 会话管理端点
 	s.mux.HandleFunc("/api/sessions", s.handleSessions)
 	s.mux.HandleFunc("/api/sessions/", s.handleSessionByID)
+
+	// 模型管理端点
+	s.mux.HandleFunc("/api/models", s.handleModels)
+	s.mux.HandleFunc("/api/model/select", s.handleSelectModel)
+	s.mux.HandleFunc("/api/models/", s.handleModelByID)
 
 	// 静态文件（go:embed 的前端构建产物）
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")

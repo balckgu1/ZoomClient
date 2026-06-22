@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -343,8 +344,8 @@ func TestRunWithFork_HitsMaxTurns(t *testing.T) {
 	parentMessages := []fsm.Message{{Role: "user", Content: "p"}}
 
 	summary, err := sub.RunWithFork("死循环读文件", parentMessages)
-	if err != nil {
-		t.Fatalf("达到 MaxTurns 应优雅退出而非报错：%v", err)
+	if !errors.Is(err, ErrMaxTurnsReached) {
+		t.Fatalf("达到 MaxTurns 应返回 ErrMaxTurnsReached，实际 err=%v", err)
 	}
 	if !strings.Contains(summary, "truncated") {
 		t.Errorf("摘要应含 truncated 提示，实际：%s", summary)
@@ -569,3 +570,135 @@ func TestTaskTool_WithLiveProvider_ReadsLatestState(t *testing.T) {
 		t.Errorf("两次 fork 观察到的父消息长度应为 [1,2]，实际 %v", observedLengths)
 	}
 }
+
+// =============================================================================
+// E. context 取消测试
+// =============================================================================
+
+// TestSubagentLoop_RespectsContextCancellation
+// 验证：当 ToolCtx.Ctx 被取消时，subagentLoop 应在下一轮开始前退出
+func TestSubagentLoop_RespectsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	fake := &fakeChatClient{
+		responses: []*clients.ChatResponse{
+			toolCallResponse("read_file", map[string]interface{}{"filename": "a.txt"}, "c1"),
+			finalResponse("不应到达这里"),
+		},
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatalf("写入临时文件失败：%v", err)
+	}
+
+	wrapper := &cancelAfterFirstClient{
+		inner:  fake,
+		cancel: cancel,
+	}
+
+	sub := &SubAgent{
+		Client:       wrapper,
+		Model:        "fake-model",
+		SystemPrompt: "test",
+		Registry:     BuildSubAgentRegistry(),
+		ToolCtx:      &tools.ToolContext{WorkPath: tmpDir, Ctx: ctx},
+		MaxTurns:     5,
+	}
+
+	_, err := sub.Run("读取文件")
+	if err == nil {
+		t.Fatal("context 取消后应返回 error")
+	}
+	if !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("error 应包含 cancelled 信息，实际：%v", err)
+	}
+	if wrapper.calls > 1 {
+		t.Errorf("取消后 LLM 不应被再次调用，实际调用次数：%d", wrapper.calls)
+	}
+}
+
+// cancelAfterFirstClient 包装 fakeChatClient，第一轮工具调用完成后取消 context
+type cancelAfterFirstClient struct {
+	inner  *fakeChatClient
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (c *cancelAfterFirstClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
+	c.calls++
+	resp, err := c.inner.Chat(model, messages, toolList, options)
+	// 第一轮返回后取消 context
+	if c.calls == 1 {
+		c.cancel()
+	}
+	return resp, err
+}
+
+// =============================================================================
+// F. deepCopyMessage 单元测试
+// =============================================================================
+
+// TestDeepCopyMessage_ToolCallsIsolation
+// 验证：修改副本的 ToolCalls 不影响原始消息
+func TestDeepCopyMessage_ToolCallsIsolation(t *testing.T) {
+	original := fsm.Message{
+		Role:    "assistant",
+		Content: "",
+		ToolCalls: []tools.ToolCall{
+			{ID: "call_1", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"filename": "a.txt"}}},
+		},
+	}
+
+	copied := deepCopyMessage(original)
+
+	// 修改副本的 ToolCalls
+	copied.ToolCalls[0].ID = "modified"
+	copied.ToolCalls = append(copied.ToolCalls, tools.ToolCall{ID: "call_2"})
+
+	// 原始不应被影响
+	if original.ToolCalls[0].ID != "call_1" {
+		t.Errorf("原始 ToolCalls ID 被修改：got %s, want call_1", original.ToolCalls[0].ID)
+	}
+	if len(original.ToolCalls) != 1 {
+		t.Errorf("原始 ToolCalls 长度被修改：got %d, want 1", len(original.ToolCalls))
+	}
+}
+
+// TestDeepCopyMessage_SliceContentIsolation
+// 验证：修改副本的 []interface{} Content 不影响原始消息
+func TestDeepCopyMessage_SliceContentIsolation(t *testing.T) {
+	original := fsm.Message{
+		Role:    "user",
+		Content: []interface{}{"text part", "image part"},
+	}
+
+	copied := deepCopyMessage(original)
+
+	// 修改副本
+	copiedSlice := copied.Content.([]interface{})
+	copiedSlice[0] = "modified"
+
+	// 原始不应被影响
+	origSlice := original.Content.([]interface{})
+	if origSlice[0] != "text part" {
+		t.Errorf("原始 Content 切片被修改：got %v, want 'text part'", origSlice[0])
+	}
+}
+
+// TestDeepCopyMessage_StringContentPreserved
+// 验证：字符串 Content 正常保留（string 不可变，无需深拷贝）
+func TestDeepCopyMessage_StringContentPreserved(t *testing.T) {
+	original := fsm.Message{
+		Role:    "user",
+		Content: "hello world",
+	}
+
+	copied := deepCopyMessage(original)
+	if copied.Content != "hello world" {
+		t.Errorf("字符串 Content 应被保留，实际：%v", copied.Content)
+	}
+	if copied.Role != "user" {
+		t.Errorf("Role 应被保留，实际：%s", copied.Role)
+	}
+}
+

@@ -418,8 +418,11 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	registry.Register(compact.NewCompactTool(compactManager))
 
 	// Create subagent and register sub_task tool
+	options := map[string]interface{}{
+		"temperature": cfg.Subagent.Temperature,
+	}
 	subAgent := subagent.NewSubAgent(client, modelname, cfg.Subagent.DefaultSystemPrompt, cfg.Subagent.ForkSubtaskPromptPrefix,
-		subagent.BuildSubAgentRegistry(), toolCtx, cfg.Subagent.DefaultMaxTurns)
+		subagent.BuildSubAgentRegistry(), toolCtx, cfg.Subagent.DefaultMaxTurns, options)
 
 	subAgentRunner := func(prompt string, parentMessages []fsm.Message) (string, error) {
 		if parentMessages == nil {
@@ -493,37 +496,24 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 }
 
 // handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
+// Shared commands (clear, compact, exit) are delegated to handleSessionCommand.
 func handleSlashCommand(input string, s *AgentSession) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return false
 	}
 	cmd := strings.ToLower(parts[0])
+	// Delegate shared commands to handleSessionCommand (strip leading "/")
 	switch cmd {
-	case "/exit", "/quit":
-		return true
-	case "/clear":
-		if len(s.State.Messages) > 0 && s.State.Messages[0].Role == "system" {
-			s.State.Messages = s.State.Messages[:1]
-		} else {
-			s.State.Messages = s.State.Messages[:0]
+	case "/clear", "/compact", "/exit", "/quit":
+		action := strings.TrimPrefix(cmd, "/")
+		if action == "quit" {
+			action = "exit"
 		}
-		s.State.TurnCount = 0
-		s.Em.EmitInfo("history cleared (system prompt kept)")
-	case "/compact":
-		if len(s.State.Messages) <= 1 {
-			s.Em.EmitInfo("no history to compact")
-			return false
-		}
-		before := s.CompactManager.EstimateSize(s.State.Messages)
-		newMsgs, cerr := s.CompactManager.CompactHistory(s.State.Messages)
-		if cerr != nil {
-			s.Em.EmitError("compact", cerr.Error())
-			return false
-		}
-		s.State.Messages = newMsgs
-		after := s.CompactManager.EstimateSize(newMsgs)
-		s.Em.EmitCompact(before, after)
+		return handleSessionCommand(action, s)
+	}
+	// Slash-only commands
+	switch cmd {
 	case "/setmode":
 		handleSetMode(parts[1:], s)
 	case "/selectmode":

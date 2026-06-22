@@ -1,6 +1,8 @@
 package subagent
 
 import (
+	"errors"
+	"strings"
 	"zoomClient/fsm"
 	"zoomClient/tools"
 )
@@ -103,6 +105,11 @@ func (t *TaskTool) Call(args map[string]any, ctx *tools.ToolContext) tools.ToolR
 
 	summary, err := t.runFn(prompt, parentMessages)
 	if err != nil {
+		// ErrMaxTurnsReached：子任务未收敛，但仍携带部分有用摘要，
+		// 返回 Ok=false 让父 agent 感知子任务未完成，同时保留摘要内容。
+		if errors.Is(err, ErrMaxTurnsReached) {
+			return tools.ToolResult{Ok: false, Content: summary, IsError: true}
+		}
 		return tools.ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
 
@@ -119,7 +126,7 @@ func parseBoolArg(args map[string]any, key string) bool {
 	case bool:
 		return v
 	case string:
-		return v == "true" || v == "True" || v == "TRUE"
+		return strings.EqualFold(v, "true")
 	default:
 		return false
 	}

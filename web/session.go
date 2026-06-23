@@ -3,6 +3,7 @@ package web
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 	"zoomClient/fsm"
 )
 
@@ -25,6 +26,13 @@ type Session struct {
 	RecordID string // 关联到 session.SessionRecord 的 ID
 	State    *fsm.State
 	Model    string
+
+	// IsNew 标记是否为新建会话（而非从磁盘加载的已有会话），用于控制是否触发自动命名
+	IsNew bool
+	// ExistingTitle 从已有会话加载时保留的原标题，用于后续保存时不被 "NewSession" 覆盖
+	ExistingTitle string
+	// ExistingCreatedAt 从已有会话加载时保留的创建时间
+	ExistingCreatedAt time.Time
 
 	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 消费
 	CmdCh chan Command

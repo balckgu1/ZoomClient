@@ -686,7 +686,6 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 	log.Info("Web UI available at", zap.String("url", webServer.Addr()))
 
 	// Web REPL loop: read commands from CmdCh, with ctx cancellation support
-	firstTurn := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -714,10 +713,18 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				webSess.Busy.Store(false)
 
 				// Save session after each turn
+				title := webSess.ExistingTitle
+				if title == "" || title == "NewSession" {
+					title = "NewSession"
+				}
+				createdAt := time.Now()
+				if !webSess.ExistingCreatedAt.IsZero() {
+					createdAt = webSess.ExistingCreatedAt
+				}
 				record := &session.SessionRecord{
 					ID:        webSess.RecordID,
-					Title:     "NewSession",
-					CreatedAt: time.Now(),
+					Title:     title,
+					CreatedAt: createdAt,
 					UpdatedAt: time.Now(),
 					Model:     s.ModelName,
 					TurnCount: s.State.TurnCount,
@@ -727,23 +734,24 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					log.Warn("save session failed", zap.Error(err))
 				}
 
-				// Generate title after first turn
-				if firstTurn {
-					firstTurn = false
+				// Generate title only for new sessions (not loaded from disk)
+				if webSess.IsNew {
+					webSess.IsNew = false
 					go func() {
-						title, err := sessMgr.GenerateTitle(record)
+						generatedTitle, err := sessMgr.GenerateTitle(record)
 						if err != nil {
 							log.Warn("generate title failed", zap.Error(err))
 							return
 						}
-						if title != "" {
-							record.Title = title
+						if generatedTitle != "" {
+							record.Title = generatedTitle
+							webSess.ExistingTitle = generatedTitle
 							if serr := sessMgr.Save(record); serr != nil {
 								log.Warn("save title failed", zap.Error(serr))
 							}
 							// Push title update via SSE
 							if sseEm, ok := s.Em.(*web.SseEmitter); ok {
-								sseEm.EmitSessionRenamed(record.ID, title)
+								sseEm.EmitSessionRenamed(record.ID, generatedTitle)
 							}
 						}
 					}()

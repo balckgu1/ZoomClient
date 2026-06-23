@@ -174,6 +174,8 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		// Reset state for new session
 		s.session.State.Messages = nil
 		s.session.State.TurnCount = 0
+		s.session.IsNew = true
+		s.session.ExistingTitle = ""
 		writeJSON(w, http.StatusCreated, record.ToMeta())
 
 	default:
@@ -201,6 +203,9 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		s.session.RecordID = record.ID
 		s.session.State.Messages = record.Messages
 		s.session.State.TurnCount = record.TurnCount
+		s.session.IsNew = false
+		s.session.ExistingTitle = record.Title
+		s.session.ExistingCreatedAt = record.CreatedAt
 		writeJSON(w, http.StatusOK, record)
 
 	case http.MethodDelete:

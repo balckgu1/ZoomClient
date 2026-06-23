@@ -102,6 +102,16 @@ func (s *Server) handleExit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
+// handleStop 处理 POST /api/stop —— 中断正在运行的 agentLoop
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.session.CmdCh <- Command{Action: "stop"}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
 // ─── 权限回复 ───
 
 type permissionRequest struct {

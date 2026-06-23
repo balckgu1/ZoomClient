@@ -327,6 +327,24 @@ body {
 .tool-meta {
   color: var(--text-muted);
   font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-expand-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.tool-expand-btn:hover {
+  background: var(--surface);
+  border-color: var(--accent);
 }
 .tool-result-content {
   font-size: 11px;
@@ -392,6 +410,13 @@ body {
 }
 .send-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.send-btn.stop-btn {
+  background: var(--error);
+}
+.send-btn.stop-btn:hover:not(:disabled) {
+  background: #dc2626;
+}
 
 /* ─── Toast ─── */
 .toast {
@@ -620,6 +645,28 @@ body {
 }
 
 /* Edit model sub-menu */
+.model-selector-search {
+  padding: 4px 12px;
+}
+
+.model-selector-search-input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+  font-family: var(--font-sans);
+}
+.model-selector-search-input:focus {
+  border-color: var(--accent);
+}
+.model-selector-search-input::placeholder {
+  color: var(--text-muted);
+}
+
 .model-selector-edit {
   color: var(--text-muted);
 }
@@ -816,6 +863,12 @@ body {
 }
 
 /* ─── Markdown Content Styles ─── */
+.md-plaintext {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.65;
+}
+
 .md-content {
   line-height: 1.65;
   word-break: break-word;

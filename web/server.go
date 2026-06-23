@@ -45,6 +45,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/clear", s.handleClear)
 	s.mux.HandleFunc("/api/compact", s.handleCompact)
 	s.mux.HandleFunc("/api/exit", s.handleExit)
+	s.mux.HandleFunc("/api/stop", s.handleStop)
 	s.mux.HandleFunc("/api/permission", s.handlePermission)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 

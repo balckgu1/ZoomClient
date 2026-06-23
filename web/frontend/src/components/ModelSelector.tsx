@@ -16,34 +16,49 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
   const [dialogMode, setDialogMode] = useState<"add" | "edit" | null>(null);
   const [editTarget, setEditTarget] = useState<ModelPreset | undefined>(undefined);
   const [showEditSub, setShowEditSub] = useState(false);
+  const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside, reset all sub-states
+  const closeDropdown = () => {
+    setOpen(false);
+    setShowEditSub(false);
+    setSearch("");
+  };
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
+        closeDropdown();
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Filter models by search query
+  const filtered = search
+    ? models.filter((m) =>
+        m.name.toLowerCase().includes(search.toLowerCase()) ||
+        m.model_name.toLowerCase().includes(search.toLowerCase())
+      )
+    : models;
+
   const handleSelect = (name: string) => {
     onSelect(name);
-    setOpen(false);
+    closeDropdown();
   };
 
   const handleOpenAdd = () => {
     setDialogMode("add");
     setEditTarget(undefined);
-    setOpen(false);
+    closeDropdown();
   };
 
   const handleOpenEdit = (preset: ModelPreset) => {
     setDialogMode("edit");
     setEditTarget(preset);
-    setOpen(false);
+    closeDropdown();
   };
 
   const handleDialogSave = (preset: ModelPreset) => {
@@ -67,7 +82,7 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
     <div class="model-selector" ref={ref}>
       <button
         class="model-selector-trigger"
-        onClick={() => !disabled && setOpen(!open)}
+        onClick={() => !disabled && (open ? closeDropdown() : setOpen(true))}
         disabled={disabled}
         title="Switch model"
       >
@@ -77,10 +92,22 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
 
       {open && (
         <div class="model-selector-dropdown">
-          {models.length === 0 && (
-            <div class="model-selector-empty">No models configured</div>
+          {models.length > 3 && (
+            <div class="model-selector-search">
+              <input
+                class="model-selector-search-input"
+                type="text"
+                placeholder="Search models..."
+                value={search}
+                onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
           )}
-          {models.map((m) => (
+          {filtered.length === 0 && (
+            <div class="model-selector-empty">{search ? "No matching models" : "No models configured"}</div>
+          )}
+          {filtered.map((m) => (
             <div
               key={m.name}
               class={`model-selector-item ${m.name === active ? "active" : ""}`}

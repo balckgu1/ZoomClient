@@ -66,7 +66,8 @@ func (s *AgentSession) SwitchModel(name string) error {
 }
 
 // agentLoop is the main agent reasoning loop.
-func agentLoop(s *AgentSession) {
+// stopCh is optional (nil for CLI/API mode). When closed, the loop aborts at the next safe point.
+func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 	cfg, client, state, model := s.Cfg, s.Client, s.State, s.ModelName
 	pipeline, registry, toolCtx := s.Pipeline, s.Registry, s.ToolCtx
 	todoManager, compactManager := s.TodoManager, s.CompactManager
@@ -78,6 +79,14 @@ func agentLoop(s *AgentSession) {
 
 	// Infinite loop until no tool call or max turn count reached
 	for {
+		// Check for stop signal (web mode)
+		select {
+		case <-stopCh:
+			em.EmitInfo("Generation stopped by user")
+			em.EmitDone()
+			return
+		default:
+		}
 		// Context compact: micro-compact, replace older tool results with placeholders
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
@@ -641,7 +650,7 @@ func runAPIREPL(ctx context.Context, s *AgentSession, webPort int) {
 			payload, _ := emitter.ParseChatPayload(cmd) // already validated above
 			s.Em.EmitEmotion("thinking", nil)
 			s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: payload.Message})
-			agentLoop(s)
+			agentLoop(s, nil)
 		case "config":
 			cfgPayload, _ := emitter.ParseConfigPayload(cmd)
 			if cfgPayload.ModelType != "" {
@@ -699,7 +708,9 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				webSess.Busy.Store(true)
 				s.Em.EmitEmotion("thinking", nil)
 				s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: cmd.Message})
-				agentLoop(s)
+				// Create a fresh stop channel for this generation
+				webSess.StopCh = make(chan struct{})
+				agentLoop(s, webSess.StopCh)
 				webSess.Busy.Store(false)
 
 				// Save session after each turn
@@ -748,6 +759,17 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					}
 				}
 
+			case "stop":
+				// Close the stop channel to interrupt a running agentLoop
+				if webSess.StopCh != nil {
+					select {
+					case <-webSess.StopCh:
+						// already closed
+					default:
+						close(webSess.StopCh)
+					}
+				}
+
 			default:
 				if handleSessionCommand(cmd.Action, s) {
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -782,7 +804,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 		}
 		// Append user message and run agentLoop
 		s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: input})
-		agentLoop(s)
+		agentLoop(s, nil)
 		s.Em.EmitTurnSeparator()
 	}
 }

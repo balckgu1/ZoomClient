@@ -8,7 +8,7 @@ import (
 
 // Command 表示一条来自前端 HTTP 请求的上行命令
 type Command struct {
-	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model"
+	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model" | "stop"
 	Message   string // chat 命令的消息内容
 	ModelName string // select_model 命令的目标模型名
 }
@@ -33,6 +33,9 @@ type Session struct {
 
 	// Busy 标记 agentLoop 是否正在运行（供 /api/status 查询）
 	Busy atomic.Bool
+
+	// StopCh 在收到 stop 命令时关闭，用于中断正在运行的 agentLoop
+	StopCh chan struct{}
 
 	// 权限交互（模仿 ApiAsker 的 pending map 模式）
 	permPending sync.Map // id -> chan permResponse

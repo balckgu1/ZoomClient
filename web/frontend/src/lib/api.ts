@@ -51,6 +51,10 @@ export async function sendExit(): Promise<void> {
   await post("/api/exit");
 }
 
+export async function sendStop(): Promise<void> {
+  await post("/api/stop");
+}
+
 export async function sendPermission(
   id: string,
   allow: boolean,

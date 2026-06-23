@@ -6,13 +6,13 @@ export interface SSEEvent {
 
 // Chat message types displayed in the UI
 export type ChatMessage =
-  | { role: "user"; content: string }
-  | { role: "assistant"; content: string; streaming?: boolean }
-  | { role: "reasoning"; content: string }
-  | { role: "tool_call"; name: string; args: string; result?: string; isError?: boolean }
-  | { role: "sub_agent"; prompt: string }
-  | { role: "hook_blocked"; tool: string; reason: string }
-  | { role: "system"; content: string };
+  | { _id: number; role: "user"; content: string }
+  | { _id: number; role: "assistant"; content: string; streaming?: boolean }
+  | { _id: number; role: "reasoning"; content: string }
+  | { _id: number; role: "tool_call"; name: string; args: string; result?: string; isError?: boolean }
+  | { _id: number; role: "sub_agent"; prompt: string }
+  | { _id: number; role: "hook_blocked"; tool: string; reason: string }
+  | { _id: number; role: "system"; content: string };
 
 // Permission ask event from backend
 export interface PermissionAsk {

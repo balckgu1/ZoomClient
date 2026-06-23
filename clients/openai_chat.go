@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 	"zoomClient/fsm"
@@ -24,7 +25,16 @@ func NewOpenAIClient(baseURL, apiKey string) *OpenAIClient {
 		BaseURL: baseURL,
 		APIKey:  apiKey,
 		Client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 0, // 禁用全局 Deadline
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   15 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout:   30 * time.Second,
+				ResponseHeaderTimeout: 180 * time.Second, // 等待首个响应字节
+				IdleConnTimeout:       90 * time.Second,
+			},
 		},
 	}
 }

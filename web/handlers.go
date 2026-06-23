@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"zoomClient/fsm"
 	"zoomClient/model"
 )
 
@@ -292,22 +293,111 @@ func (s *Server) handleSelectModel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
-// handleModelByID 处理 DELETE /api/models/{name}
+// handleModelByID 处理 DELETE / PUT /api/models/{name}
 func (s *Server) handleModelByID(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/models/")
+	// 如果路径正好是 /api/models/test，交给 handleModelTest 处理
+	if name == "test" {
+		s.handleModelTest(w, r)
+		return
+	}
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model name required"})
 		return
 	}
-	if r.Method != http.MethodDelete {
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.modelRegistry.Remove(name); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	case http.MethodPut:
+		var req struct {
+			Name      string `json:"name"`
+			Type      string `json:"type"`
+			BaseURL   string `json:"base_url"`
+			APIKey    string `json:"api_key"`
+			ModelName string `json:"model_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if req.ModelName == "" {
+			req.ModelName = req.Name
+		}
+		if req.Type == "" {
+			req.Type = "openai"
+		}
+		// Remove old preset and add updated one
+		_ = s.modelRegistry.Remove(name)
+		preset := &model.Preset{
+			Name:      name,
+			Type:      req.Type,
+			BaseURL:   req.BaseURL,
+			APIKey:    req.APIKey,
+			ModelName: req.ModelName,
+		}
+		s.modelRegistry.Add(preset)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleModelTest 处理 POST /api/models/test —— 测试模型连通性
+func (s *Server) handleModelTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := s.modelRegistry.Remove(name); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+	var req struct {
+		Type      string `json:"type"`
+		BaseURL   string `json:"base_url"`
+		APIKey    string `json:"api_key"`
+		ModelName string `json:"model_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	preset := &model.Preset{
+		Name:      "_test_",
+		Type:      req.Type,
+		BaseURL:   req.BaseURL,
+		APIKey:    req.APIKey,
+		ModelName: req.ModelName,
+	}
+	client, modelName := model.BuildClient(preset)
+
+	// 发送一条最小消息测试连通性
+	_, err := client.Chat(modelName, []fsm.Message{
+		{Role: "user", Content: "hi"},
+	}, nil, nil)
+	if err != nil {
+		msg := fmt.Sprintf("Connection failed: %v", err)
+		// 对常见网络错误给出更友好的提示
+		errStr := err.Error()
+		if strings.Contains(errStr, "no such host") || strings.Contains(errStr, "dial tcp") && strings.Contains(errStr, "lookup") {
+			msg += " | Hint: DNS resolution failed — the API endpoint may not be accessible from your network. Try using a VPN, proxy, or an alternative endpoint."
+		} else if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded") {
+			msg += " | Hint: Request timed out — check your network connection or increase the timeout."
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "error",
+			"message": msg,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Connection successful",
+	})
 }
 
 // ─── 辅助函数 ───

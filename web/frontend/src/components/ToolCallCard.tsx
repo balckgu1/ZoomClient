@@ -6,13 +6,18 @@ interface Props {
 }
 
 export function ToolCallCard({ name, args, result, isError }: Props) {
-  const statusIcon = result === undefined ? "⏳" : isError ? "❌" : "✅";
+  const isPending = result === undefined;
+  const statusIcon = isPending ? null : isError ? "❌" : "✅";
   const lines = result ? result.split("\n").length : 0;
 
   return (
     <div class={`message tool-card ${isError ? "tool-error" : ""}`}>
       <div class="tool-header">
-        <span class="tool-icon">{statusIcon}</span>
+        {isPending ? (
+          <span class="tool-pending-icon">⏳</span>
+        ) : (
+          <span class="tool-icon">{statusIcon}</span>
+        )}
         <span class="tool-name">{name}</span>
       </div>
       {args && <pre class="tool-args">{args}</pre>}

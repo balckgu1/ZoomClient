@@ -121,3 +121,25 @@ export async function selectModel(name: string): Promise<void> {
 export async function deleteModel(name: string): Promise<void> {
   await del(`/api/models/${name}`);
 }
+
+export async function testModel(preset: ModelPreset): Promise<{ status: string; message: string }> {
+  const res = await post("/api/models/test", preset as unknown as Record<string, unknown>);
+  return res.json();
+}
+
+async function put(path: string, body: Record<string, unknown>): Promise<Response> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res;
+}
+
+export async function updateModel(name: string, preset: ModelPreset): Promise<void> {
+  await put(`/api/models/${name}`, preset as unknown as Record<string, unknown>);
+}

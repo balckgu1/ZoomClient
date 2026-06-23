@@ -1,22 +1,21 @@
 import { useState, useRef, useEffect } from "preact/hooks";
 import type { ModelPreset } from "../types";
+import { ModelDialog } from "./ModelDialog";
 
 interface Props {
   models: ModelPreset[];
   active: string;
   onSelect: (name: string) => void;
   onAdd: (preset: ModelPreset) => void;
+  onEdit: (name: string, preset: ModelPreset) => void;
   disabled?: boolean;
 }
 
-export function ModelSelector({ models, active, onSelect, onAdd, disabled }: Props) {
+export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disabled }: Props) {
   const [open, setOpen] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [formName, setFormName] = useState("");
-  const [formType, setFormType] = useState("openai");
-  const [formURL, setFormURL] = useState("");
-  const [formKey, setFormKey] = useState("");
-  const [formModel, setFormModel] = useState("");
+  const [dialogMode, setDialogMode] = useState<"add" | "edit" | null>(null);
+  const [editTarget, setEditTarget] = useState<ModelPreset | undefined>(undefined);
+  const [showEditSub, setShowEditSub] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -24,7 +23,6 @@ export function ModelSelector({ models, active, onSelect, onAdd, disabled }: Pro
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
-        setShowForm(false);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -36,22 +34,31 @@ export function ModelSelector({ models, active, onSelect, onAdd, disabled }: Pro
     setOpen(false);
   };
 
-  const handleAdd = () => {
-    if (!formName.trim()) return;
-    onAdd({
-      name: formName.trim(),
-      type: formType,
-      base_url: formURL.trim() || undefined,
-      api_key: formKey.trim() || undefined,
-      model_name: formModel.trim() || formName.trim(),
-    });
-    setFormName("");
-    setFormType("openai");
-    setFormURL("");
-    setFormKey("");
-    setFormModel("");
-    setShowForm(false);
+  const handleOpenAdd = () => {
+    setDialogMode("add");
+    setEditTarget(undefined);
     setOpen(false);
+  };
+
+  const handleOpenEdit = (preset: ModelPreset) => {
+    setDialogMode("edit");
+    setEditTarget(preset);
+    setOpen(false);
+  };
+
+  const handleDialogSave = (preset: ModelPreset) => {
+    if (dialogMode === "add") {
+      onAdd(preset);
+    } else if (dialogMode === "edit" && editTarget) {
+      onEdit(editTarget.name, preset);
+    }
+    setDialogMode(null);
+    setEditTarget(undefined);
+  };
+
+  const handleDialogClose = () => {
+    setDialogMode(null);
+    setEditTarget(undefined);
   };
 
   const activeLabel = active || "No model";
@@ -86,49 +93,37 @@ export function ModelSelector({ models, active, onSelect, onAdd, disabled }: Pro
           ))}
 
           <div class="model-selector-divider" />
-
-          {!showForm ? (
-            <div
-              class="model-selector-item model-selector-add"
-              onClick={() => setShowForm(true)}
-            >
-              + Add model
-            </div>
-          ) : (
-            <div class="model-selector-form">
-              <input
-                placeholder="Name"
-                value={formName}
-                onInput={(e) => setFormName((e.target as HTMLInputElement).value)}
-              />
-              <select value={formType} onChange={(e) => setFormType((e.target as HTMLSelectElement).value)}>
-                <option value="openai">OpenAI</option>
-                <option value="ollama">Ollama</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="gemini">Gemini</option>
-              </select>
-              <input
-                placeholder="Base URL"
-                value={formURL}
-                onInput={(e) => setFormURL((e.target as HTMLInputElement).value)}
-              />
-              <input
-                placeholder="API Key"
-                type="password"
-                value={formKey}
-                onInput={(e) => setFormKey((e.target as HTMLInputElement).value)}
-              />
-              <input
-                placeholder="Model name (optional)"
-                value={formModel}
-                onInput={(e) => setFormModel((e.target as HTMLInputElement).value)}
-              />
-              <button class="model-selector-form-btn" onClick={handleAdd}>
-                Save
-              </button>
+          <div class="model-selector-item model-selector-add" onClick={handleOpenAdd}>
+            + Add model
+          </div>
+          {models.length > 0 && (
+            <div class="model-selector-item model-selector-edit" onClick={() => setShowEditSub(!showEditSub)}>
+              <span class="model-selector-edit-label">Edit model</span>
+              <span class="model-selector-sub-arrow">{showEditSub ? "▼" : "▶"}</span>
             </div>
           )}
+          {showEditSub &&
+            models.map((m) => (
+              <div
+                key={`edit-${m.name}`}
+                class="model-selector-item model-selector-sub-item"
+                onClick={() => handleOpenEdit(m)}
+              >
+                <span class="model-selector-sub-icon">✎</span>
+                <span class="model-selector-item-name">{m.name}</span>
+                <span class="model-selector-item-meta">{m.type}</span>
+              </div>
+            ))}
         </div>
+      )}
+
+      {dialogMode && (
+        <ModelDialog
+          mode={dialogMode}
+          initial={editTarget}
+          onSave={handleDialogSave}
+          onClose={handleDialogClose}
+        />
       )}
     </div>
   );

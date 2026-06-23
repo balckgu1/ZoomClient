@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 	"zoomClient/fsm"
 	"zoomClient/tools"
 )
@@ -22,7 +23,9 @@ func NewOpenAIClient(baseURL, apiKey string) *OpenAIClient {
 	return &OpenAIClient{
 		BaseURL: baseURL,
 		APIKey:  apiKey,
-		Client:  &http.Client{},
+		Client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 

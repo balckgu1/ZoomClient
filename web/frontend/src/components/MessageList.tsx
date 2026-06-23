@@ -1,12 +1,16 @@
 import { useEffect, useRef } from "preact/hooks";
 import type { ChatMessage } from "../types";
+import type { AgentPhase } from "./AgentStatus";
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ToolCallCard } from "./ToolCallCard";
+import { AgentStatus } from "./AgentStatus";
 
 interface Props {
   messages: ChatMessage[];
+  agentPhase: AgentPhase;
+  toolName?: string;
 }
 
 function renderMessage(msg: ChatMessage, i: number) {
@@ -14,7 +18,7 @@ function renderMessage(msg: ChatMessage, i: number) {
     case "user":
       return <UserMessage key={i} content={msg.content} />;
     case "assistant":
-      return <AssistantMessage key={i} content={msg.content} />;
+      return <AssistantMessage key={i} content={msg.content} streaming={msg.streaming} />;
     case "reasoning":
       return <ReasoningBlock key={i} content={msg.content} />;
     case "tool_call":
@@ -50,22 +54,29 @@ function renderMessage(msg: ChatMessage, i: number) {
   }
 }
 
-export function MessageList({ messages }: Props) {
+export function MessageList({ messages, agentPhase, toolName }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [messages.length, agentPhase]);
 
   return (
     <main class="message-list">
-      {messages.length === 0 && (
+      {messages.length === 0 && agentPhase === "idle" && (
         <div class="empty-state">
-          <p>Send a message to start the conversation.</p>
-          <p class="hint">Use <code>/clear</code>, <code>/compact</code>, or <code>/exit</code> for commands.</p>
+          <div class="empty-state__logo">⚡</div>
+          <h2 class="empty-state__title">ZoomClient</h2>
+          <p class="empty-state__desc">Send a message to start the conversation.</p>
+          <div class="empty-state__hints">
+            <span class="hint-tag"><code>/clear</code> Clear history</span>
+            <span class="hint-tag"><code>/compact</code> Compact context</span>
+            <span class="hint-tag"><code>/exit</code> Exit session</span>
+          </div>
         </div>
       )}
       {messages.map((msg, i) => renderMessage(msg, i))}
+      <AgentStatus phase={agentPhase} toolName={toolName} />
       <div ref={endRef} />
     </main>
   );

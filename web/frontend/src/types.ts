@@ -7,7 +7,7 @@ export interface SSEEvent {
 // Chat message types displayed in the UI
 export type ChatMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string }
+  | { role: "assistant"; content: string; streaming?: boolean }
   | { role: "reasoning"; content: string }
   | { role: "tool_call"; name: string; args: string; result?: string; isError?: boolean }
   | { role: "sub_agent"; prompt: string }

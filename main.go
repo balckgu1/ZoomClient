@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -290,6 +291,7 @@ type cliFlags struct {
 	OutputMode string
 	ConfigDir  string
 	WebPort    int
+	WorkDir    string
 }
 
 func parseFlags() cliFlags {
@@ -297,6 +299,7 @@ func parseFlags() cliFlags {
 	flag.StringVar(&f.ModelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
 	flag.StringVar(&f.OutputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar) | web (browser UI)")
 	flag.StringVar(&f.ConfigDir, "config-dir", "", "Config directory path (default: ./config)")
+	flag.StringVar(&f.WorkDir, "workdir", "", "Project working directory (default: current directory)")
 	flag.IntVar(&f.WebPort, "port", 8080, "Web server port (web mode only)")
 	flag.Parse()
 	return f
@@ -529,14 +532,17 @@ func handleSlashCommand(input string, s *AgentSession) bool {
 		handleSelectMode(parts[1:], s)
 	case "/models":
 		handleListModels(s)
+	case "/workspace":
+		handleWorkspace(parts[1:], s)
 	case "/help":
-		s.Em.EmitInfo("/exit      - quit")
-		s.Em.EmitInfo("/clear     - clear conversation history (system prompt kept)")
-		s.Em.EmitInfo("/compact   - manually compact conversation history")
-		s.Em.EmitInfo("/setmode   - add/update a model preset (-m name -t type -u url -k key [--model modelname])")
+		s.Em.EmitInfo("/exit       - quit")
+		s.Em.EmitInfo("/clear      - clear conversation history (system prompt kept)")
+		s.Em.EmitInfo("/compact    - manually compact conversation history")
+		s.Em.EmitInfo("/setmode    - add/update a model preset (-m name -t type -u url -k key [--model modelname])")
 		s.Em.EmitInfo("/selectmode - switch to a configured model (-m name)")
-		s.Em.EmitInfo("/models    - list all configured model presets")
-		s.Em.EmitInfo("/help      - show this message")
+		s.Em.EmitInfo("/models     - list all configured model presets")
+		s.Em.EmitInfo("/workspace  - show or switch working directory (/workspace [path])")
+		s.Em.EmitInfo("/help       - show this message")
 	default:
 		s.Em.EmitInfo("unknown command: " + input + "  (try /help)")
 	}
@@ -613,6 +619,41 @@ func handleListModels(s *AgentSession) {
 		}
 		s.Em.EmitInfo(fmt.Sprintf("%s%s (%s, %s)%s", marker, p.Name, p.Type, p.ModelName, activeTag))
 	}
+}
+
+// handleWorkspace 处理 /workspace 命令：切换工作目录
+func handleWorkspace(args []string, s *AgentSession) {
+	if len(args) == 0 {
+		s.Em.EmitInfo(fmt.Sprintf("Current workspace: %s", s.ToolCtx.WorkPath))
+		s.Em.EmitInfo("Usage: /workspace <path>  (e.g. /workspace /path/to/project)")
+		return
+	}
+
+	targetPath := args[0]
+	// 解析为绝对路径
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		s.Em.EmitError("workspace", fmt.Sprintf("Failed to resolve path: %v", err))
+		return
+	}
+
+	// 校验路径存在且为目录
+	info, err := os.Stat(absPath)
+	if err != nil {
+		s.Em.EmitError("workspace", fmt.Sprintf("Path does not exist: %s", absPath))
+		return
+	}
+	if !info.IsDir() {
+		s.Em.EmitError("workspace", fmt.Sprintf("Path is not a directory: %s", absPath))
+		return
+	}
+
+	// 更新 ToolContext 和 SystemPrompt
+	oldPath := s.ToolCtx.WorkPath
+	s.ToolCtx.WorkPath = absPath
+	s.Pipeline.UpdateWorkDir(absPath)
+
+	s.Em.EmitInfo(fmt.Sprintf("Workspace switched: %s → %s", oldPath, absPath))
 }
 
 // runAPIREPL runs the API mode REPL loop, reading NDJSON commands from stdin.
@@ -871,10 +912,24 @@ func main() {
 	modelRegistry.SetActive(flags.ModelType)
 
 	// Build tool context
-	workDir, err := os.Getwd()
-	if err != nil {
-		log.Fatal("Failed to get working directory", zap.Error(err))
+	workDir := flags.WorkDir
+	var err error
+	if workDir == "" {
+		workDir, err = os.Getwd()
+		if err != nil {
+			log.Fatal("Failed to get working directory", zap.Error(err))
+		}
+	} else {
+		workDir, err = filepath.Abs(workDir)
+		if err != nil {
+			log.Fatal("Failed to parse working directory to abslute path", zap.Error(err))
+		}
+		// check the directory exists
+		if info, err := os.Stat(workDir); err != nil || !info.IsDir() {
+			log.Fatal("Invalid work directory", zap.String("dir", workDir))
+		}
 	}
+
 	toolCtx := &tools.ToolContext{
 		WorkPath:           workDir,
 		Ctx:                ctx,

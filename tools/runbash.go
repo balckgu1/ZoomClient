@@ -89,11 +89,6 @@ func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult 
 	if isDangerousCommand(command) {
 		return ToolResult{Ok: false, Content: "Error: dangerous command detected", IsError: true}
 	}
-	// Execute the command
-	_, err := isSafePath(ToolCtx.WorkPath, command)
-	if err != nil {
-		return ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
-	}
 
 	// 使用 context 实现超时控制与取消传播
 	execCtx := context.Background()
@@ -103,8 +98,11 @@ func (t RunBashTool) Call(args map[string]any, ToolCtx *ToolContext) ToolResult 
 	execCtx, cancel := context.WithTimeout(execCtx, ToolCtx.DefaultBashTimeout)
 	defer cancel()
 
-	ToolCtx.Logger.Info("Executing command", zap.String("session", ToolCtx.SessionID), zap.String("workdir", ToolCtx.WorkPath), zap.String("command", command))
+	if ToolCtx.Logger != nil {
+		ToolCtx.Logger.Info("Executing command", zap.String("session", ToolCtx.SessionID), zap.String("workdir", ToolCtx.WorkPath), zap.String("command", command))
+	}
 	cmd := resolveShellWithContext(execCtx, command)
+	cmd.Dir = ToolCtx.WorkPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if execCtx.Err() == context.DeadlineExceeded {

@@ -47,3 +47,8 @@ func (b *SystemPromptBuilder) Build() string {
 func (b *SystemPromptBuilder) UpdateModel(model string) {
 	b.model = model
 }
+
+// UpdateWorkDir 热更新 Builder 使用的工作目录
+func (b *SystemPromptBuilder) UpdateWorkDir(workDir string) {
+	b.workDir = workDir
+}

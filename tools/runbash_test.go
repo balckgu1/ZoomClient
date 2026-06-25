@@ -1,6 +1,9 @@
 package tools
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestIsDangerousCommand_Normal(t *testing.T) {
 	command := "ls"
@@ -97,6 +100,7 @@ func TestRunBashTool_Call_Normal(t *testing.T) {
 		t.Errorf("tool should not be dangerous")
 	}
 	toolCtx := newTestContext(workDir)
+	toolCtx.DefaultBashTimeout = 30 * time.Second
 	result := tool.Call(args, toolCtx)
 	if !result.Ok {
 		t.Errorf("tool result should be ok")

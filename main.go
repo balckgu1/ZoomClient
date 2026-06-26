@@ -38,18 +38,21 @@ import (
 
 // AgentSession aggregates all session-level dependencies
 type AgentSession struct {
-	State          *fsm.State
-	Cfg            *utils.Config
-	Client         clients.ChatClient
-	ModelName      string
-	ModelRegistry  *model.Registry
-	Pipeline       *prompt.MessagePipeline
-	Registry       *tools.Registry
-	ToolCtx        *tools.ToolContext
-	TodoManager    *tools.TodoManager
-	CompactManager *compact.CompactManager
-	HookRunner     *hook.Runner
-	Em             emitter.Emitter
+	State           *fsm.State
+	Cfg             *utils.Config
+	Client          clients.ChatClient
+	ModelName       string
+	ModelRegistry   *model.Registry
+	Pipeline        *prompt.MessagePipeline
+	Registry        *tools.Registry
+	ToolCtx         *tools.ToolContext
+	TodoManager     *tools.TodoManager
+	CompactManager  *compact.CompactManager
+	HookRunner      *hook.Runner
+	Em              emitter.Emitter
+	SessionMgr      *session.Manager // 会话持久化管理器
+	SessionRecordID string           // 当前会话记录 ID
+	IsNewSession    bool             // 是否为新建会话（用于触发自动命名）
 }
 
 // SwitchModel 热切换到指定模型预设，保留对话历史。
@@ -534,6 +537,8 @@ func handleSlashCommand(input string, s *AgentSession) bool {
 		handleListModels(s)
 	case "/workspace":
 		handleWorkspace(parts[1:], s)
+	case "/session":
+		handleSessionCmd(parts[1:], s)
 	case "/help":
 		s.Em.EmitInfo("/exit       - quit")
 		s.Em.EmitInfo("/clear      - clear conversation history (system prompt kept)")
@@ -542,6 +547,7 @@ func handleSlashCommand(input string, s *AgentSession) bool {
 		s.Em.EmitInfo("/selectmode - switch to a configured model (-m name)")
 		s.Em.EmitInfo("/models     - list all configured model presets")
 		s.Em.EmitInfo("/workspace  - show or switch working directory (/workspace [path])")
+		s.Em.EmitInfo("/session    - manage sessions: list | load <id> | new | delete <id> | rename <id> <title>")
 		s.Em.EmitInfo("/help       - show this message")
 	default:
 		s.Em.EmitInfo("unknown command: " + input + "  (try /help)")
@@ -654,6 +660,106 @@ func handleWorkspace(args []string, s *AgentSession) {
 	s.Pipeline.UpdateWorkDir(absPath)
 
 	s.Em.EmitInfo(fmt.Sprintf("Workspace switched: %s → %s", oldPath, absPath))
+}
+
+// handleSessionCmd 处理 /session 子命令：list | load <id> | new | delete <id> | rename <id> <title>
+func handleSessionCmd(args []string, s *AgentSession) {
+	if s.SessionMgr == nil {
+		s.Em.EmitInfo("Session manager not available")
+		return
+	}
+	if len(args) == 0 {
+		s.Em.EmitInfo("/session list              - list all sessions")
+		s.Em.EmitInfo("/session load <id>         - load a session by ID")
+		s.Em.EmitInfo("/session new               - create a new empty session")
+		s.Em.EmitInfo("/session delete <id>       - delete a session")
+		s.Em.EmitInfo("/session rename <id> <title> - rename a session")
+		s.Em.EmitInfo("/session current           - show current session info")
+		return
+	}
+
+	subcmd := strings.ToLower(args[0])
+	switch subcmd {
+	case "list":
+		metas, err := s.SessionMgr.List()
+		if err != nil {
+			s.Em.EmitError("session", err.Error())
+			return
+		}
+		if len(metas) == 0 {
+			s.Em.EmitInfo("No saved sessions.")
+			return
+		}
+		for _, meta := range metas {
+			marker := "  "
+			if meta.ID == s.SessionRecordID {
+				marker = "* "
+			}
+			s.Em.EmitInfo(fmt.Sprintf("%s[%s] %s (%d turns, %s)",
+				marker, meta.ID[:8]+"...", meta.Title,
+				meta.TurnCount, meta.UpdatedAt.Format("2006-01-02 15:04")))
+		}
+
+	case "load":
+		if len(args) < 2 {
+			s.Em.EmitInfo("Usage: /session load <id>")
+			return
+		}
+		id := args[1]
+		record, err := s.SessionMgr.Load(id)
+		if err != nil {
+			s.Em.EmitError("session", fmt.Sprintf("load failed: %s", err.Error()))
+			return
+		}
+		s.State.Messages = record.Messages
+		s.State.TurnCount = record.TurnCount
+		s.SessionRecordID = record.ID
+		s.IsNewSession = false
+		s.Em.EmitInfo(fmt.Sprintf("Loaded session: %s (%d messages, %d turns)",
+			record.Title, len(record.Messages), record.TurnCount))
+
+	case "new":
+		record := s.SessionMgr.CreateSession()
+		s.State.Messages = nil
+		s.State.TurnCount = 0
+		s.SessionRecordID = record.ID
+		s.IsNewSession = true
+		s.Em.EmitInfo(fmt.Sprintf("New session created: %s", record.ID[:8]+"..."))
+
+	case "delete":
+		if len(args) < 2 {
+			s.Em.EmitInfo("Usage: /session delete <id>")
+			return
+		}
+		id := args[1]
+		if err := s.SessionMgr.Delete(id); err != nil {
+			s.Em.EmitError("session", fmt.Sprintf("delete failed: %s", err.Error()))
+			return
+		}
+		s.SessionRecordID = s.SessionMgr.Current()
+		s.Em.EmitInfo(fmt.Sprintf("Session deleted: %s", id[:8]+"..."))
+
+	case "rename":
+		if len(args) < 3 {
+			s.Em.EmitInfo("Usage: /session rename <id> <new title>")
+			return
+		}
+		id := args[1]
+		newTitle := strings.Join(args[2:], " ")
+		if err := s.SessionMgr.Rename(id, newTitle); err != nil {
+			s.Em.EmitError("session", fmt.Sprintf("rename failed: %s", err.Error()))
+			return
+		}
+		s.Em.EmitInfo(fmt.Sprintf("Session renamed to: %s", newTitle))
+
+	case "current":
+		s.Em.EmitInfo(fmt.Sprintf("Current session: %s (new: %v, turns: %d)",
+			s.SessionRecordID[:8]+"...", s.IsNewSession, s.State.TurnCount))
+
+	default:
+		s.Em.EmitInfo("Unknown session command: " + subcmd)
+		s.Em.EmitInfo("Try: /session list | load | new | delete | rename | current")
+	}
 }
 
 // runAPIREPL runs the API mode REPL loop, reading NDJSON commands from stdin.
@@ -854,6 +960,41 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 		// Append user message and run agentLoop
 		s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: input})
 		agentLoop(s, nil)
+
+		// Save session after each turn
+		if s.SessionMgr != nil {
+			record := &session.SessionRecord{
+				ID:        s.SessionRecordID,
+				Title:     "NewSession",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Model:     s.ModelName,
+				TurnCount: s.State.TurnCount,
+				Messages:  s.State.Messages,
+			}
+			if err := s.SessionMgr.Save(record); err != nil {
+				logger.Log.Warn("save session failed", zap.Error(err))
+			}
+			// Generate title for new sessions (async)
+			if s.IsNewSession {
+				s.IsNewSession = false
+				go func() {
+					generatedTitle, err := s.SessionMgr.GenerateTitle(record)
+					if err != nil {
+						logger.Log.Warn("generate title failed", zap.Error(err))
+						return
+					}
+					if generatedTitle != "" {
+						record.Title = generatedTitle
+						if serr := s.SessionMgr.Save(record); serr != nil {
+							logger.Log.Warn("save title failed", zap.Error(serr))
+						}
+						s.Em.EmitInfo(fmt.Sprintf("Session title: %s", generatedTitle))
+					}
+				}()
+			}
+		}
+
 		s.Em.EmitTurnSeparator()
 	}
 }
@@ -983,18 +1124,20 @@ func main() {
 	em.EmitSessionStart(modelname, logger.LogFilePath)
 	log.Info("Agent REPL start")
 
-	// Initialize session manager (Web mode)
+	// Initialize session manager (all modes)
 	var sessMgr *session.Manager
-	if flags.OutputMode == "web" {
-		var serr error
-		sessMgr, serr = session.NewManager(cfg.Session.Dir, client, modelname)
-		if serr != nil {
-			log.Warn("Session manager init failed, history disabled", zap.Error(serr))
-		} else {
-			// Create initial session
-			initialRecord := sessMgr.CreateSession()
+	sessMgr, serr := session.NewManager(cfg.Session.Dir, client, modelname)
+	if serr != nil {
+		log.Warn("Session manager init failed, history disabled", zap.Error(serr))
+	} else {
+		initialRecord := sessMgr.CreateSession()
+		sess.SessionMgr = sessMgr
+		sess.SessionRecordID = initialRecord.ID
+		sess.IsNewSession = true
+		log.Info("Session history enabled", zap.String("dir", cfg.Session.Dir))
+		// Web mode: also bind record ID to web session
+		if webSess != nil {
 			webSess.RecordID = initialRecord.ID
-			log.Info("Session history enabled", zap.String("dir", cfg.Session.Dir))
 		}
 	}
 

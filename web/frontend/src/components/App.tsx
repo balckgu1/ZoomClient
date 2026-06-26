@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "preact/hooks";
+import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type { ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset } from "../types";
+import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
 import {
-  sendChat, sendClear, sendCompact, sendExit, sendPermission,
+  sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
-  fetchModels, addModel, selectModel,
+  fetchModels, addModel, selectModel, updateModel,
 } from "../lib/api";
 import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
@@ -20,7 +21,9 @@ export function App() {
   const [model, setModel] = useState("");
   const [turnCount, setTurnCount] = useState(0);
   const [permission, setPermission] = useState<PermissionAsk | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  // Toast queue: multiple toasts are queued and shown sequentially
+  const [toastQueue, setToastQueue] = useState<string[]>([]);
+  const [currentToast, setCurrentToast] = useState<string | null>(null);
 
   // Session state
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
@@ -30,11 +33,58 @@ export function App() {
   const [models, setModels] = useState<ModelPreset[]>([]);
   const [activeModel, setActiveModel] = useState("");
 
-  // Show a toast message briefly
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+  // Agent phase state (for status indicator)
+  const [agentPhase, setAgentPhase] = useState<AgentPhase>("idle");
+  const [currentToolName, setCurrentToolName] = useState<string>("");
+
+  // Typewriter effect refs
+  const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingText = useRef<string>("");
+  const currentIndex = useRef<number>(0);
+  const streamingMsgIdx = useRef<number>(-1);
+
+  // Message ID counter for stable React keys
+  const nextMsgId = useRef(0);
+  const genId = useCallback(() => { nextMsgId.current += 1; return nextMsgId.current; }, []);
+
+  // Finish typewriter: flush remaining text immediately
+  const finishTypewriter = useCallback(() => {
+    if (typewriterTimer.current) {
+      clearInterval(typewriterTimer.current);
+      typewriterTimer.current = null;
+    }
+    const remaining = pendingText.current;
+    const idx = currentIndex.current;
+    const msgIdx = streamingMsgIdx.current;
+    if (msgIdx >= 0 && idx < remaining.length) {
+      setMessages((prev) => {
+        const updated = [...prev];
+        if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
+          updated[msgIdx] = { ...updated[msgIdx], content: remaining, streaming: false } as ChatMessage;
+        }
+        return updated;
+      });
+    }
+    currentIndex.current = 0;
+    pendingText.current = "";
+    streamingMsgIdx.current = -1;
   }, []);
+
+  // Show a toast message briefly. Multiple toasts are queued and shown sequentially.
+  const showToast = useCallback((msg: string) => {
+    setToastQueue((prev) => [...prev, msg]);
+  }, []);
+
+  // Process toast queue: show next when current disappears
+  useEffect(() => {
+    if (currentToast === null && toastQueue.length > 0) {
+      const [next, ...rest] = toastQueue;
+      setCurrentToast(next);
+      setToastQueue(rest);
+      const timer = setTimeout(() => setCurrentToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [currentToast, toastQueue]);
 
   // Refresh session list from backend
   const refreshSessions = useCallback(async () => {
@@ -55,6 +105,47 @@ export function App() {
     } catch {
       // ignore
     }
+  }, []);
+
+  // Start typewriter effect for a given assistant message
+  const startTypewriter = useCallback((fullText: string, msgIdx: number) => {
+    // Clear any existing timer
+    if (typewriterTimer.current) clearInterval(typewriterTimer.current);
+    pendingText.current = fullText;
+    currentIndex.current = 0;
+    streamingMsgIdx.current = msgIdx;
+    setAgentPhase("streaming");
+
+    // Speed: ~15ms per char for short text, faster for long text
+    const speed = fullText.length > 1000 ? 5 : fullText.length > 500 ? 8 : 15;
+
+    typewriterTimer.current = setInterval(() => {
+      currentIndex.current += 1;
+      const ci = currentIndex.current;
+      const text = pendingText.current;
+      if (ci >= text.length) {
+        // Done streaming
+        if (typewriterTimer.current) clearInterval(typewriterTimer.current);
+        typewriterTimer.current = null;
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
+            updated[msgIdx] = { ...updated[msgIdx], content: text, streaming: false } as ChatMessage;
+          }
+          return updated;
+        });
+        streamingMsgIdx.current = -1;
+        setAgentPhase("idle");
+        return;
+      }
+      setMessages((prev) => {
+        const updated = [...prev];
+        if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
+          updated[msgIdx] = { ...updated[msgIdx], content: text.slice(0, ci), streaming: true } as ChatMessage;
+        }
+        return updated;
+      });
+    }, speed);
   }, []);
 
   // Handle incoming SSE events
@@ -84,7 +175,6 @@ export function App() {
       } else if (event === "session_end") {
         showToast("Session ended");
       } else if (event === "session_renamed") {
-        // Update session title in sidebar
         const id = d.id;
         const title = d.title;
         setSessions((prev) =>
@@ -94,17 +184,39 @@ export function App() {
       return;
     }
 
+    if (evt.ch === "emotion") {
+      if (d.state === "thinking") {
+        setAgentPhase("thinking");
+        setCurrentToolName("");
+      }
+      return;
+    }
+
     if (evt.ch === "agent") {
       const type = d.type;
       if (type === "assistant") {
-        setMessages((prev) => [...prev, { role: "assistant", content: d.content }]);
+        // Finish any ongoing typewriter first
+        finishTypewriter();
+        const fullText = d.content;
+        // Add empty assistant message, then start typewriter
+        setMessages((prev) => {
+          const updated = [...prev, { _id: genId(), role: "assistant", content: "", streaming: true } as ChatMessage];
+          const newIdx = updated.length - 1;
+          // Schedule typewriter after state update
+          setTimeout(() => startTypewriter(fullText, newIdx), 0);
+          return updated;
+        });
       } else if (type === "reasoning") {
-        setMessages((prev) => [...prev, { role: "reasoning", content: d.content }]);
+        setMessages((prev) => [...prev, { _id: genId(), role: "reasoning", content: d.content }]);
+        setAgentPhase("thinking");
       } else if (type === "tool_call") {
+        finishTypewriter();
         setMessages((prev) => [
           ...prev,
-          { role: "tool_call", name: d.name, args: d.args },
+          { _id: genId(), role: "tool_call", name: d.name, args: d.args },
         ]);
+        setAgentPhase("handling");
+        setCurrentToolName(d.name || "");
       } else if (type === "tool_result") {
         setMessages((prev) => {
           const updated = [...prev];
@@ -121,26 +233,31 @@ export function App() {
           }
           return updated;
         });
+        // After tool result, back to thinking if still busy
+        setAgentPhase("thinking");
+        setCurrentToolName("");
       } else if (type === "sub_agent") {
-        setMessages((prev) => [...prev, { role: "sub_agent", prompt: d.prompt }]);
+        setMessages((prev) => [...prev, { _id: genId(), role: "sub_agent", prompt: d.prompt }]);
       } else if (type === "hook_blocked") {
         setMessages((prev) => [
           ...prev,
-          { role: "hook_blocked", tool: d.tool, reason: d.reason },
+          { _id: genId(), role: "hook_blocked", tool: d.tool, reason: d.reason },
         ]);
       } else if (type === "todo_panel") {
         setMessages((prev) => [
           ...prev,
-          { role: "system", content: `📋 Plan\n${d.content}` },
+          { _id: genId(), role: "system", content: `📋 Plan\n${d.content}` },
         ]);
       } else if (type === "done") {
+        finishTypewriter();
         setBusy(false);
+        setAgentPhase("idle");
+        setCurrentToolName("");
         setTurnCount((c) => c + 1);
-        // Refresh session list after turn completes
         refreshSessions();
       }
     }
-  }, [showToast, refreshSessions]);
+  }, [showToast, refreshSessions, finishTypewriter, startTypewriter]);
 
   // Connect SSE on mount + load sessions + load models
   useEffect(() => {
@@ -153,12 +270,14 @@ export function App() {
   // Send a chat message
   const handleSend = useCallback(
     async (message: string) => {
-      setMessages((prev) => [...prev, { role: "user", content: message }]);
+      setMessages((prev) => [...prev, { _id: genId(), role: "user", content: message }]);
       setBusy(true);
+      setAgentPhase("thinking");
       try {
         await sendChat(message);
       } catch (err) {
         setBusy(false);
+        setAgentPhase("idle");
         showToast(`Send failed: ${err}`);
       }
     },
@@ -229,12 +348,12 @@ export function App() {
         for (const msg of record.messages) {
           const m = msg as Record<string, unknown>;
           if (m.role === "user") {
-            converted.push({ role: "user", content: String(m.content || "") });
+            converted.push({ _id: genId(), role: "user", content: String(m.content || "") });
           } else if (m.role === "assistant") {
             if (m.reasoning_content) {
-              converted.push({ role: "reasoning", content: String(m.reasoning_content) });
+              converted.push({ _id: genId(), role: "reasoning", content: String(m.reasoning_content) });
             }
-            converted.push({ role: "assistant", content: String(m.content || "") });
+            converted.push({ _id: genId(), role: "assistant", content: String(m.content || "") });
           } else if (m.role === "tool" && m.tool_call_id) {
             // Skip tool messages for cleaner display
           }
@@ -292,6 +411,7 @@ export function App() {
     try {
       await selectModel(name);
       setActiveModel(name);
+      setModel(name);
       showToast(`Switching to model "${name}"...`);
     } catch (err) {
       showToast(`Model switch failed: ${err}`);
@@ -307,6 +427,30 @@ export function App() {
       showToast(`Add model failed: ${err}`);
     }
   }, [refreshModels, showToast]);
+
+  const handleModelEdit = useCallback(async (name: string, preset: ModelPreset) => {
+    try {
+      await updateModel(name, preset);
+      await refreshModels();
+      showToast(`Model "${name}" updated`);
+    } catch (err) {
+      showToast(`Edit model failed: ${err}`);
+    }
+  }, [refreshModels, showToast]);
+
+  // Handle stop button
+  const handleStop = useCallback(async () => {
+    try {
+      await sendStop();
+      finishTypewriter();
+      setBusy(false);
+      setAgentPhase("idle");
+      setCurrentToolName("");
+      showToast("Generation stopped");
+    } catch (err) {
+      showToast(`Stop failed: ${err}`);
+    }
+  }, [finishTypewriter, showToast]);
 
   return (
     <div class="app-layout">
@@ -328,15 +472,16 @@ export function App() {
             active={activeModel}
             onSelect={handleModelSelect}
             onAdd={handleModelAdd}
+            onEdit={handleModelEdit}
             disabled={busy}
           />
         </div>
-        <MessageList messages={messages} />
-        {toast && <div class="toast">{toast}</div>}
+        <MessageList messages={messages} agentPhase={agentPhase} toolName={currentToolName} />
+        {currentToast && <div class="toast">{currentToast}</div>}
         {permission && (
           <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
         )}
-        <InputBar disabled={busy} onSend={handleSend} onSlashCommand={handleSlashCommand} />
+        <InputBar disabled={busy} busy={busy} onSend={handleSend} onSlashCommand={handleSlashCommand} onStop={handleStop} />
       </div>
     </div>
   );

@@ -3,11 +3,13 @@ import type { JSX } from "preact";
 
 interface Props {
   disabled: boolean;
+  busy: boolean;
   onSend: (message: string) => void;
   onSlashCommand: (cmd: string) => void;
+  onStop: () => void;
 }
 
-export function InputBar({ disabled, onSend, onSlashCommand }: Props) {
+export function InputBar({ disabled, busy, onSend, onSlashCommand, onStop }: Props) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -52,11 +54,11 @@ export function InputBar({ disabled, onSend, onSlashCommand }: Props) {
         rows={1}
       />
       <button
-        class="send-btn"
-        onClick={handleSubmit}
-        disabled={disabled || !text.trim()}
+        class={`send-btn${busy ? " stop-btn" : ""}`}
+        onClick={busy ? onStop : handleSubmit}
+        disabled={!busy && (!text.trim() || disabled)}
       >
-        Send
+        {busy ? "⏹ Stop" : "Send"}
       </button>
     </footer>
   );

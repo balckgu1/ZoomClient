@@ -47,9 +47,10 @@ type GeminiConfig struct {
 
 // SubagentConfig subagent config
 type SubagentConfig struct {
-	DefaultMaxTurns         int    `mapstructure:"defaultMaxTurns"`
-	DefaultSystemPrompt     string `mapstructure:"defaultSystemPrompt"`
-	ForkSubtaskPromptPrefix string `mapstructure:"forkSubtaskPromptPrefix"`
+	DefaultMaxTurns         int     `mapstructure:"defaultMaxTurns"`
+	DefaultSystemPrompt     string  `mapstructure:"defaultSystemPrompt"`
+	ForkSubtaskPromptPrefix string  `mapstructure:"forkSubtaskPromptPrefix"`
+	Temperature             float64 `mapstructure:"temperature"`
 }
 
 type SkillsConfig struct {

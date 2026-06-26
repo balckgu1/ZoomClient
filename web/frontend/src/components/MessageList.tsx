@@ -1,26 +1,30 @@
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useCallback } from "preact/hooks";
 import type { ChatMessage } from "../types";
+import type { AgentPhase } from "./AgentStatus";
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { ReasoningBlock } from "./ReasoningBlock";
 import { ToolCallCard } from "./ToolCallCard";
+import { AgentStatus } from "./AgentStatus";
 
 interface Props {
   messages: ChatMessage[];
+  agentPhase: AgentPhase;
+  toolName?: string;
 }
 
-function renderMessage(msg: ChatMessage, i: number) {
+function renderMessage(msg: ChatMessage) {
   switch (msg.role) {
     case "user":
-      return <UserMessage key={i} content={msg.content} />;
+      return <UserMessage key={msg._id} content={msg.content} />;
     case "assistant":
-      return <AssistantMessage key={i} content={msg.content} />;
+      return <AssistantMessage key={msg._id} content={msg.content} streaming={msg.streaming} />;
     case "reasoning":
-      return <ReasoningBlock key={i} content={msg.content} />;
+      return <ReasoningBlock key={msg._id} content={msg.content} />;
     case "tool_call":
       return (
         <ToolCallCard
-          key={i}
+          key={msg._id}
           name={msg.name}
           args={msg.args}
           result={msg.result}
@@ -29,19 +33,19 @@ function renderMessage(msg: ChatMessage, i: number) {
       );
     case "sub_agent":
       return (
-        <div key={i} class="message system-message">
+        <div key={msg._id} class="message system-message">
           <span class="system-icon">🤖</span> Sub-agent: {msg.prompt}
         </div>
       );
     case "hook_blocked":
       return (
-        <div key={i} class="message system-message hook-blocked">
+        <div key={msg._id} class="message system-message hook-blocked">
           ⚠️ Hook blocked: {msg.tool} ({msg.reason})
         </div>
       );
     case "system":
       return (
-        <div key={i} class="message system-message">
+        <div key={msg._id} class="message system-message">
           {msg.content}
         </div>
       );
@@ -50,22 +54,52 @@ function renderMessage(msg: ChatMessage, i: number) {
   }
 }
 
-export function MessageList({ messages }: Props) {
+export function MessageList({ messages, agentPhase, toolName }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const userScrolledUp = useRef(false);
 
+  // 判断用户是否在底部附近（距离底部 80px 以内视为"在底部"）
+  const isNearBottom = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  // 监听用户手动滚动
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    const el = listRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      userScrolledUp.current = !isNearBottom();
+    };
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [isNearBottom]);
+
+  // 自动滚动：仅在用户处于底部附近时触发
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages.length, agentPhase]);
 
   return (
-    <main class="message-list">
-      {messages.length === 0 && (
+    <main class="message-list" ref={listRef}>
+      {messages.length === 0 && agentPhase === "idle" && (
         <div class="empty-state">
-          <p>Send a message to start the conversation.</p>
-          <p class="hint">Use <code>/clear</code>, <code>/compact</code>, or <code>/exit</code> for commands.</p>
+          <div class="empty-state__logo">⚡</div>
+          <h2 class="empty-state__title">ZoomClient</h2>
+          <p class="empty-state__desc">Send a message to start the conversation.</p>
+          <div class="empty-state__hints">
+            <span class="hint-tag"><code>/clear</code> Clear history</span>
+            <span class="hint-tag"><code>/compact</code> Compact context</span>
+            <span class="hint-tag"><code>/exit</code> Exit session</span>
+          </div>
         </div>
       )}
-      {messages.map((msg, i) => renderMessage(msg, i))}
+      {messages.map((msg) => renderMessage(msg))}
+      <AgentStatus phase={agentPhase} toolName={toolName} />
       <div ref={endRef} />
     </main>
   );

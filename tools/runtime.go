@@ -206,8 +206,8 @@ func (queue *QueuedContextModifiers) ApplyInOrder(originalOrder []*TrackedTool, 
 	}
 }
 
-// ExecuteToolCalls 工具执行运行时的顶层入口。
-// 完整流程：分批 → 按批次执行（并发/串行） → 按原始顺序收集结果。
+// ExecuteToolCalls 工具执行运行时的顶层入口
+// 完整流程：分批 → 按批次执行（并发/串行） → 按原始顺序收集结果
 func ExecuteToolCalls(toolCalls []ToolCall, registry *Registry, toolCtx *ToolContext) []ToolResult {
 	// 按并发安全性将工具调用分批
 	batches := PartitionToolCalls(toolCalls)

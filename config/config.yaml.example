@@ -42,9 +42,10 @@ gemini:
 
 # subagent config
 subagent:
-  defaultMaxTurns: 10
+  defaultMaxTurns: 20
   defaultSystemPrompt : "You are a focused subagent running inside an isolated context. Use the provided tools to complete the user's subtask, then return ONE concise summary (a single sentence or short paragraph) as your final answer. Do NOT paste tool call transcripts into the final answer; only return the essential result that the parent agent needs."
   forkSubtaskPromptPrefix: "<subagent-fork> Focus ONLY on the following subtask based on the prior context. Complete it using the provided tools, then return ONE concise summary as your final answer. Subtask: "
+  temperature: 0.3
 
 # tool config
 tools:

@@ -17,7 +17,7 @@ function groupByDate(sessions: SessionMeta[]) {
 
   const groups: { label: string; items: SessionMeta[] }[] = [
     { label: "today", items: [] },
-    { label: "testerdat", items: [] },
+    { label: "yesterday", items: [] },
     { label: "earlier", items: [] },
   ];
 

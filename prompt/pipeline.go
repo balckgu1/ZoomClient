@@ -64,3 +64,10 @@ func (p *MessagePipeline) UpdateModelName(model string) {
 		p.builder.UpdateModel(model)
 	}
 }
+
+// UpdateWorkDir 热更新 Pipeline 使用的工作目录
+func (p *MessagePipeline) UpdateWorkDir(workDir string) {
+	if p.builder != nil {
+		p.builder.UpdateWorkDir(workDir)
+	}
+}

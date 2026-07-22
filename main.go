@@ -32,6 +32,7 @@ import (
 	"zoomClient/utils"
 	"zoomClient/web"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -309,20 +310,20 @@ func parseFlags() cliFlags {
 }
 
 // initEmitter creates the appropriate emitter and optional session based on output mode.
-func initEmitter(outputMode string) (emitter.Emitter, *ui.Renderer, *web.Session) {
+func initEmitter(outputMode string) (emitter.Emitter, *web.Session) {
 	log := logger.Log
 	switch strings.ToLower(outputMode) {
 	case "api":
-		return emitter.NewApiEmitter(os.Stdout), nil, nil
+		return emitter.NewApiEmitter(os.Stdout), nil
 	case "web":
 		sess := web.NewSession(uuid.NewString(), "")
-		return web.NewSseEmitter(sess), nil, sess
+		return web.NewSseEmitter(sess), sess
 	case "cli", "":
-		v := ui.New()
-		return v, v, nil
+		// CLI mode: emitter is set later by runCLIREPL (TuiEmitter)
+		return nil, nil
 	default:
 		log.Fatal("Unsupported output mode", zap.String("--mode", outputMode))
-		return nil, nil, nil
+		return nil, nil
 	}
 }
 
@@ -336,7 +337,9 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
 		if apiKey == "" {
-			em.EmitError("config", "Please set the API key")
+			if em != nil {
+				em.EmitError("config", "Please set the API key")
+			}
 			log.Fatal("No API key OPENAI_API_KEY")
 		}
 		baseURL := cfg.OpenAI.BaseURL
@@ -366,7 +369,9 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 			apiKey = os.Getenv("ANTHROPIC_API_KEY")
 		}
 		if apiKey == "" {
-			em.EmitError("config", "Please set the API key ANTHROPIC_API_KEY")
+			if em != nil {
+				em.EmitError("config", "Please set the API key ANTHROPIC_API_KEY")
+			}
 			log.Fatal("No API key ANTHROPIC_API_KEY")
 		}
 		client := clients.NewAnthropicClient(apiKey)
@@ -382,7 +387,9 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 			apiKey = os.Getenv("GEMINI_API_KEY")
 		}
 		if apiKey == "" {
-			em.EmitError("config", "Please set the API key GEMINI_API_KEY")
+			if em != nil {
+				em.EmitError("config", "Please set the API key GEMINI_API_KEY")
+			}
 			log.Fatal("No API key GEMINI_API_KEY")
 		}
 		client := clients.NewGeminiClient(apiKey)
@@ -393,7 +400,9 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 		log.Info("Gemini backend has been selected", zap.String("model", modelname))
 		return client, modelname
 	default:
-		em.EmitError("config", "Unsupported model backend types: "+modelType)
+		if em != nil {
+			em.EmitError("config", "Unsupported model backend types: "+modelType)
+		}
 		log.Fatal("Unsupported model backend types", zap.String("-m", modelType))
 		return nil, ""
 	}
@@ -478,7 +487,7 @@ func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Se
 	)
 }
 
-// handleSessionCommand handles commands shared across API and Web REPL modes.
+// handleSessionCommand handles commands shared across Web REPL modes.
 // Returns true if the command signals session exit.
 func handleSessionCommand(action string, s *AgentSession) bool {
 	switch action {
@@ -762,58 +771,6 @@ func handleSessionCmd(args []string, s *AgentSession) {
 	}
 }
 
-// runAPIREPL runs the API mode REPL loop, reading NDJSON commands from stdin.
-func runAPIREPL(ctx context.Context, s *AgentSession, webPort int) {
-	log := logger.Log
-	apiAsker := permission.NewApiAsker(os.Stdout)
-	concurrentReader := emitter.NewConcurrentReader(os.Stdin, apiAsker)
-	defer concurrentReader.Stop()
-	go startHeartbeat(ctx, s.Em)
-
-	for {
-		cmd := concurrentReader.Next()
-		if cmd == nil {
-			log.Info("API mode stdin closed")
-			break
-		}
-		// Validate payload before ACK
-		var ackStatus string
-		if cmd.Action == "chat" {
-			payload, perr := emitter.ParseChatPayload(cmd)
-			if perr != nil || payload.Message == "" {
-				ackStatus = "rejected"
-				if cmd.ID != "" {
-					s.Em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "rejected", "reason": "invalid or empty message"})
-				}
-				continue
-			}
-		}
-		// Send ACK
-		if cmd.ID != "" && ackStatus == "" {
-			s.Em.EmitSystem("ack", map[string]string{"id": cmd.ID, "status": "accepted"})
-		}
-		switch cmd.Action {
-		case "chat":
-			payload, _ := emitter.ParseChatPayload(cmd) // already validated above
-			s.Em.EmitEmotion("thinking", nil)
-			s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: payload.Message})
-			agentLoop(s, nil)
-		case "config":
-			cfgPayload, _ := emitter.ParseConfigPayload(cmd)
-			if cfgPayload.ModelType != "" {
-				s.Em.EmitInfo("model_type change not supported at runtime, restart required")
-			}
-		default:
-			if handleSessionCommand(cmd.Action, s) {
-				return
-			}
-			if cmd.Action != "clear" && cmd.Action != "compact" {
-				s.Em.EmitInfo("unknown action: " + cmd.Action)
-			}
-		}
-	}
-}
-
 // runWebREPL starts the web server and runs the web mode REPL loop.
 func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webPort int, sessMgr *session.Manager) {
 	log := logger.Log
@@ -939,65 +896,92 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 	}
 }
 
-// runCLIREPL runs the CLI mode REPL loop, reading input from stdin.
-func runCLIREPL(s *AgentSession, view *ui.Renderer) {
-	for {
-		input, ok := view.PromptUser()
-		if !ok {
-			s.Em.EmitInfo("EOF, exiting...")
-			break
-		}
-		if input == "" {
-			continue
-		}
-		// Slash command handling
-		if strings.HasPrefix(input, "/") {
-			if handleSlashCommand(input, s) {
-				break // /exit
-			}
-			continue
-		}
-		// Append user message and run agentLoop
-		s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: input})
-		agentLoop(s, nil)
+// runCLIREPL runs the CLI mode using bubbletea full-screen TUI.
+func runCLIREPL(s *AgentSession) {
+	eventCh := make(chan ui.UIEvent, 64)
 
-		// Save session after each turn
-		if s.SessionMgr != nil {
-			record := &session.SessionRecord{
-				ID:        s.SessionRecordID,
-				Title:     "NewSession",
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
-				Model:     s.ModelName,
-				TurnCount: s.State.TurnCount,
-				Messages:  s.State.Messages,
-			}
-			if err := s.SessionMgr.Save(record); err != nil {
-				logger.Log.Warn("save session failed", zap.Error(err))
-			}
-			// Generate title for new sessions (async)
-			if s.IsNewSession {
-				s.IsNewSession = false
-				go func() {
-					generatedTitle, err := s.SessionMgr.GenerateTitle(record)
-					if err != nil {
-						logger.Log.Warn("generate title failed", zap.Error(err))
-						return
-					}
-					if generatedTitle != "" {
-						record.Title = generatedTitle
-						if serr := s.SessionMgr.Save(record); serr != nil {
-							logger.Log.Warn("save title failed", zap.Error(serr))
-						}
-						s.Em.EmitInfo(fmt.Sprintf("Session title: %s", generatedTitle))
-					}
-				}()
-			}
-		}
+	// Create TuiEmitter that bridges agentLoop -> bubbletea
+	tuiEmitter := ui.NewTuiEmitter(eventCh)
+	s.Em = tuiEmitter
 
-		s.Em.EmitTurnSeparator()
+	// Build bubbletea Model
+	model := ui.NewTUIModel(eventCh, s)
+
+	// Start bubbletea program (this takes over the terminal)
+	p := tea.NewProgram(
+		model,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+
+	if _, err := p.Run(); err != nil {
+		logger.Log.Fatal("TUI crashed", zap.Error(err))
 	}
 }
+
+// RunAgentLoop runs agentLoop in a goroutine and sends EventAgentDone when finished.
+func (s *AgentSession) RunAgentLoop(eventCh chan ui.UIEvent, userMessage string) {
+	// Append user message to state
+	s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: userMessage})
+	agentLoop(s, nil)
+	eventCh <- ui.UIEvent{Type: ui.EventAgentDone}
+
+	// Save session after each turn
+	if s.SessionMgr != nil {
+		record := &session.SessionRecord{
+			ID:        s.SessionRecordID,
+			Title:     "NewSession",
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Model:     s.ModelName,
+			TurnCount: s.State.TurnCount,
+			Messages:  s.State.Messages,
+		}
+		if err := s.SessionMgr.Save(record); err != nil {
+			logger.Log.Warn("save session failed", zap.Error(err))
+		}
+		// Generate title for new sessions (async)
+		if s.IsNewSession {
+			s.IsNewSession = false
+			go func() {
+				generatedTitle, err := s.SessionMgr.GenerateTitle(record)
+				if err != nil {
+					logger.Log.Warn("generate title failed", zap.Error(err))
+					return
+				}
+				if generatedTitle != "" {
+					record.Title = generatedTitle
+					if serr := s.SessionMgr.Save(record); serr != nil {
+						logger.Log.Warn("save title failed", zap.Error(serr))
+					}
+					eventCh <- ui.UIEvent{Type: ui.EventInfo, Data: fmt.Sprintf("Session title: %s", generatedTitle)}
+				}
+			}()
+		}
+	}
+
+	eventCh <- ui.UIEvent{Type: ui.EventTurnSeparator}
+}
+
+// SlashCommand handles a slash command input and returns "exit" if the program should quit.
+func (s *AgentSession) SlashCommand(input string) string {
+	if handleSlashCommand(input, s) {
+		return "exit"
+	}
+	return ""
+}
+
+// ModelName returns the current model name.
+func (s *AgentSession) GetModelName() string { return s.ModelName }
+
+// WorkDir returns the current working directory.
+func (s *AgentSession) WorkDir() string { return s.ToolCtx.WorkPath }
+
+// LogPath returns the log file path.
+func (s *AgentSession) LogPath() string { return logger.LogFilePath }
+
+// TurnCount returns the current turn count.
+func (s *AgentSession) TurnCount() int { return s.State.TurnCount }
 
 func main() {
 	// Parse flags
@@ -1017,7 +1001,7 @@ func main() {
 	defer cancel()
 
 	// Initialize emitter & UI
-	em, view, webSess := initEmitter(flags.OutputMode)
+	em, webSess := initEmitter(flags.OutputMode)
 
 	// Initialize model client
 	client, modelname := initClient(flags.ModelType, cfg, em)
@@ -1121,7 +1105,9 @@ func main() {
 	}
 
 	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
-	em.EmitSessionStart(modelname, logger.LogFilePath)
+	if em != nil {
+		em.EmitSessionStart(modelname, logger.LogFilePath)
+	}
 	log.Info("Agent REPL start")
 
 	// Initialize session manager (all modes)
@@ -1143,35 +1129,18 @@ func main() {
 
 	// Run REPL by mode
 	switch flags.OutputMode {
-	case "api":
-		runAPIREPL(ctx, sess, flags.WebPort)
 	case "web":
 		runWebREPL(ctx, sess, webSess, flags.WebPort, sessMgr)
 	default:
-		runCLIREPL(sess, view)
+		runCLIREPL(sess)
 	}
 
 	// Session cleanup
 	log.Info("Agent REPL End", zap.Int("total_turns", state.TurnCount))
-	em.EmitSessionEnd(state.TurnCount)
-	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
-}
-
-// startHeartbeat 周期性地输出心跳事件，用于前端检测 sidecar 存活状态。
-// 该 goroutine 独立于 agentLoop，即使 LLM 调用阻塞也不会中断心跳。
-func startHeartbeat(ctx context.Context, em emitter.Emitter) {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			em.EmitSystem("heartbeat", map[string]string{
-				"ts": fmt.Sprintf("%d", time.Now().Unix()),
-			})
-		}
+	if em != nil {
+		em.EmitSessionEnd(state.TurnCount)
 	}
+	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
 }
 
 // messageContentToString safely converts fsm.Message.Content (interface{}) to a readable string.
@@ -1222,7 +1191,6 @@ func buildPermissionRules(rawRules []utils.PermissionRuleConfig) []permission.Ru
 }
 
 // buildAsker selects the interaction method when ask is triggered based on config.
-//   - interactive=true + API mode   → ApiAsker（通过 NDJSON 协议与前端交互）
 //   - interactive=true + CLI mode   → StdinAsker（终端文本交互）
 //   - interactive=false             → DenyAsker（安全默认值）
 func buildAsker(interactive bool, apiMode bool, w io.Writer) permission.Asker {

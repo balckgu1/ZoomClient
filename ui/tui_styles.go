@@ -162,6 +162,12 @@ var (
 				BorderForeground(cYellow).
 				Padding(0, 1)
 
+	// 工具卡片 — 错误态（红色边框）
+	StyleCardToolError = lipgloss.NewStyle().
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(cRed).
+				Padding(0, 1)
+
 	// reasoning 卡片 — 折叠态（淡紫边框）
 	StyleCardReasonCollapsed = lipgloss.NewStyle().
 					BorderStyle(lipgloss.RoundedBorder()).

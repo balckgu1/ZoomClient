@@ -54,6 +54,7 @@ type AgentSession struct {
 	SessionMgr      *session.Manager // 会话持久化管理器
 	SessionRecordID string           // 当前会话记录 ID
 	IsNewSession    bool             // 是否为新建会话（用于触发自动命名）
+	cachedTitle     string           // 缓存的会话标题，避免每帧读磁盘
 }
 
 // SwitchModel 热切换到指定模型预设，保留对话历史。
@@ -724,6 +725,7 @@ func handleSessionCmd(args []string, s *AgentSession) {
 		s.State.TurnCount = record.TurnCount
 		s.SessionRecordID = record.ID
 		s.IsNewSession = false
+		s.cachedTitle = record.Title
 		s.Em.EmitInfo(fmt.Sprintf("Loaded session: %s (%d messages, %d turns)",
 			record.Title, len(record.Messages), record.TurnCount))
 
@@ -733,6 +735,7 @@ func handleSessionCmd(args []string, s *AgentSession) {
 		s.State.TurnCount = 0
 		s.SessionRecordID = record.ID
 		s.IsNewSession = true
+		s.cachedTitle = ""
 		s.Em.EmitInfo(fmt.Sprintf("New session created: %s", record.ID[:8]+"..."))
 
 	case "delete":
@@ -758,6 +761,9 @@ func handleSessionCmd(args []string, s *AgentSession) {
 		if err := s.SessionMgr.Rename(id, newTitle); err != nil {
 			s.Em.EmitError("session", fmt.Sprintf("rename failed: %s", err.Error()))
 			return
+		}
+		if id == s.SessionRecordID {
+			s.cachedTitle = newTitle
 		}
 		s.Em.EmitInfo(fmt.Sprintf("Session renamed to: %s", newTitle))
 
@@ -951,6 +957,7 @@ func (s *AgentSession) RunAgentLoop(eventCh chan ui.UIEvent, userMessage string)
 				}
 				if generatedTitle != "" {
 					record.Title = generatedTitle
+					s.cachedTitle = generatedTitle
 					if serr := s.SessionMgr.Save(record); serr != nil {
 						logger.Log.Warn("save title failed", zap.Error(serr))
 					}
@@ -982,6 +989,31 @@ func (s *AgentSession) LogPath() string { return logger.LogFilePath }
 
 // TurnCount returns the current turn count.
 func (s *AgentSession) TurnCount() int { return s.State.TurnCount }
+
+// SessionTitle returns the current session title (cached).
+func (s *AgentSession) SessionTitle() string {
+	if s.cachedTitle != "" {
+		return s.cachedTitle
+	}
+	return "-"
+}
+
+// TokenEstimate returns a rough token estimate for the current conversation.
+func (s *AgentSession) TokenEstimate() int {
+	totalChars := 0
+	for _, msg := range s.State.Messages {
+		totalChars += len(messageContentToString(msg.Content))
+		totalChars += len(msg.ReasoningContent)
+		for _, tc := range msg.ToolCalls {
+			totalChars += len(tc.Function.Name)
+			for _, v := range tc.Function.Arguments {
+				totalChars += len(fmt.Sprintf("%v", v))
+			}
+		}
+	}
+	// 粗略估算：4 字符 ≈ 1 token
+	return totalChars / 4
+}
 
 func main() {
 	// Parse flags

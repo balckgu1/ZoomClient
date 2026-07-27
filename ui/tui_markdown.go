@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2/formatters"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -17,6 +20,7 @@ const (
 	stateNormal     parseState = iota
 	stateCodeBlock             // 围栏代码块内
 	stateBlockquote            // 引用块内
+	stateTable                 // 表格内
 )
 
 // RenderMarkdown 将 markdown 文本转为 lipgloss 样式字符串。
@@ -42,15 +46,38 @@ func RenderMarkdown(text string, width int) string {
 		}
 		body := strings.Join(codeLines, "\n")
 		// 截断过长代码
-		const maxCodeLen = 3000
+		const maxCodeLen = 5000
+		const maxCodeLines = 50
+		truncated := false
 		if len(body) > maxCodeLen {
-			body = body[:maxCodeLen] + "\n…(truncated)"
+			body = body[:maxCodeLen]
+			truncated = true
 		}
+		if len(codeLines) > maxCodeLines {
+			codeLines = codeLines[:maxCodeLines]
+			body = strings.Join(codeLines, "\n")
+			truncated = true
+		}
+
+		// 尝试语法高亮
+		highlighted := highlightCode(codeLang, body)
+
 		// 语言标签
+		var labelLine string
 		if codeLang != "" {
-			body = StyleSeparator.Render(codeLang) + "\n" + body
+			labelLine = StyleSeparator.Render(codeLang)
 		}
-		rendered := StyleCodeBlock.Width(contentW).Render(body)
+		if truncated {
+			if labelLine != "" {
+				labelLine += " "
+			}
+			labelLine += StyleSeparator.Render("(truncated)")
+		}
+
+		if labelLine != "" {
+			highlighted = labelLine + "\n" + highlighted
+		}
+		rendered := StyleCodeBlock.Width(contentW).Render(highlighted)
 		result.WriteString(rendered)
 		result.WriteString("\n")
 		codeLines = nil
@@ -91,6 +118,23 @@ func RenderMarkdown(text string, width int) string {
 		if state == stateCodeBlock {
 			codeLines = append(codeLines, line)
 			continue
+		}
+		
+		// 表格行（连续以 | 开头的行，在非引用/代码块内）
+		if state == stateTable || isTableRow(trimmed) {
+			if state != stateTable {
+				if state == stateBlockquote {
+					flushBlockquote()
+				}
+				state = stateTable
+			}
+			// 收集表格行，遇到非表格行时刷新
+			result.WriteString(renderTableRow(trimmed))
+			result.WriteString("\n")
+			continue
+		} else if state == stateTable {
+			// 退出表格，继续处理当前行
+			state = stateNormal
 		}
 
 		// 引用块
@@ -259,4 +303,100 @@ func renderInline(text string) string {
 	})
 
 	return result
+}
+
+// highlightCode 使用 chroma 对代码进行语法高亮。
+// 若语言无法识别则降级为纯文本输出。
+func highlightCode(lang, code string) string {
+	if lang == "" || code == "" {
+		return code
+	}
+
+	// 规范化语言名（chroma 支持别名）
+	lexer := lexers.Get(lang)
+	if lexer == nil {
+		// 尝试分析内容自动检测语言
+		lexer = lexers.Analyse(code)
+	}
+	if lexer == nil {
+		// 无法识别，降级为纯文本
+		return code
+	}
+
+	// 使用终端友好的 formatter（256色）
+	formatter := formatters.Get("terminal256")
+	if formatter == nil {
+		return code
+	}
+
+	// 使用 Catppuccin Mocha 风格（与 TUI 配色一致）
+	style := styles.Get("monokai")
+	if style == nil {
+		style = styles.Fallback
+	}
+
+	// 词法分析
+	iterator, err := lexer.Tokenise(nil, code)
+	if err != nil {
+		return code
+	}
+
+	var sb strings.Builder
+	err = formatter.Format(&sb, style, iterator)
+	if err != nil {
+		return code
+	}
+
+	return sb.String()
+}
+
+// isTableRow 判断是否为 Markdown 表格行（包含 | 且不是引用块）。
+func isTableRow(line string) bool {
+	return strings.Contains(line, "|") && !strings.HasPrefix(strings.TrimSpace(line), ">")
+}
+
+// renderTableRow 渲染单行表格数据，按列对齐。
+func renderTableRow(line string) string {
+	// 去除首尾的 |
+	trimmed := strings.Trim(line, "| ")
+	if trimmed == "" {
+		return ""
+	}
+
+	cells := strings.Split(trimmed, "|")
+	var rendered strings.Builder
+	sepStyle := lipgloss.NewStyle().Foreground(cOverlay)
+	rendered.WriteString(sepStyle.Render("│"))
+
+	for i, cell := range cells {
+		cell = strings.TrimSpace(cell)
+		// 如果是分隔行 (---, :---, ---:, :---:)，渲染为分隔线
+		if isTableSeparator(cell) {
+			rendered.WriteString(sepStyle.Render(strings.Repeat("─", max(6, len([]rune(cell))))))
+		} else {
+			rendered.WriteString(renderInline(cell))
+		}
+		if i < len(cells)-1 {
+			rendered.WriteString(sepStyle.Render("│"))
+		}
+	}
+	rendered.WriteString(sepStyle.Render("│"))
+	return rendered.String()
+}
+
+// isTableSeparator 判断是否为表格分隔行（如 ---, :---, ---:, :---:）。
+func isTableSeparator(cell string) bool {
+	trimmed := strings.TrimSpace(cell)
+	if trimmed == "" {
+		return false
+	}
+	// 去除首尾的冒号
+	trimmed = strings.Trim(trimmed, ":")
+	// 检查是否全部由 - 组成
+	for _, ch := range trimmed {
+		if ch != '-' {
+			return false
+		}
+	}
+	return len(trimmed) > 0
 }

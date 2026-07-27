@@ -18,6 +18,10 @@ type ConversationView struct {
 	content      strings.Builder
 	cards        []CollapsibleCard
 	followBottom bool // 是否自动跟随底部（新消息时自动滚到底）
+
+	// 渲染缓存：避免每帧完整重建内容
+	contentCache string
+	dirty        bool
 }
 
 // NewConversationView 创建一个新的对话流视图。
@@ -27,6 +31,7 @@ func NewConversationView() *ConversationView {
 	return &ConversationView{
 		vp:           vp,
 		followBottom: true,
+		dirty:        true, // 初始需要构建内容
 	}
 }
 
@@ -35,23 +40,28 @@ func (c *ConversationView) View(width, height int) string {
 	c.vp.Width = width
 	c.vp.Height = height
 
-	// 构建完整内容：文本 + 卡片
-	var full strings.Builder
-	full.WriteString(c.content.String())
+	// 仅在内容变化时重建缓存（脏标记机制）
+	if c.dirty {
+		var full strings.Builder
+		full.WriteString(c.content.String())
 
-	// 渲染卡片内嵌在对话流末尾
-	if len(c.cards) > 0 {
-		if full.Len() > 0 {
-			full.WriteString("\n")
+		// 渲染卡片内嵌在对话流末尾
+		if len(c.cards) > 0 {
+			if full.Len() > 0 {
+				full.WriteString("\n")
+			}
+			for i := range c.cards {
+				card := &c.cards[i]
+				full.WriteString(renderCard(card, width))
+				full.WriteString("\n")
+			}
 		}
-		for i := range c.cards {
-			card := &c.cards[i]
-			full.WriteString(renderCard(card, width))
-			full.WriteString("\n")
-		}
+
+		c.contentCache = full.String()
+		c.dirty = false
 	}
 
-	c.vp.SetContent(full.String())
+	c.vp.SetContent(c.contentCache)
 
 	// 仅当 followBottom 时自动滚到底部
 	if c.followBottom {
@@ -163,11 +173,12 @@ func renderToolCard(card *CollapsibleCard, width int) string {
 	if card.Focused {
 		borderStyle = StyleCardFocused
 	}
+	// 错误卡片：边框变红
+	if card.IsError {
+		borderStyle = StyleCardToolError
+	}
 
 	header := StyleToolCall.Render(headerIcon + " " + card.ToolName)
-	if card.Args != "" {
-		header += "  " + StyleToolArgs.Render(card.Args)
-	}
 
 	if !card.Expanded {
 		return borderStyle.Width(width).Render(header)
@@ -249,6 +260,7 @@ func renderReasoningCard(card *CollapsibleCard, width int) string {
 func (c *ConversationView) appendLine(line string) {
 	c.content.WriteString(line)
 	c.content.WriteString("\n")
+	c.dirty = true // 内容变化，标记缓存失效
 }
 
 // AppendAssistant 追加助手回复（Markdown 渲染）。
@@ -327,6 +339,7 @@ func (c *ConversationView) AppendSeparator() {
 func (c *ConversationView) Clear() {
 	c.content.Reset()
 	c.cards = nil
+	c.dirty = true // 内容变化，标记缓存失效
 }
 
 // Update 处理 viewport 的更新（如鼠标滚动、键盘滚动）。
@@ -410,6 +423,7 @@ func (c *ConversationView) AppendToolCard(data ToolCallData) {
 		Args:     data.Args,
 		Expanded: false,
 	})
+	c.dirty = true // 卡片变化，标记缓存失效
 }
 
 // CompleteToolCard 填入工具结果并自动展开。
@@ -426,6 +440,7 @@ func (c *ConversationView) CompleteToolCard(data ToolResultData) {
 					c.cards[j].Expanded = false
 				}
 			}
+			c.dirty = true // 卡片变化，标记缓存失效
 			return
 		}
 	}
@@ -442,6 +457,7 @@ func (c *ConversationView) AppendReasoningCard(text string) {
 		Thinking: text,
 		Expanded: false,
 	})
+	c.dirty = true // 卡片变化，标记缓存失效
 }
 
 // CollapseAllCards 折叠所有卡片。
@@ -450,6 +466,7 @@ func (c *ConversationView) CollapseAllCards() {
 		c.cards[i].Expanded = false
 		c.cards[i].Focused = false
 	}
+	c.dirty = true // 卡片状态变化，标记缓存失效
 }
 
 // ToggleCard 切换当前聚焦卡片的展开/折叠。
@@ -457,6 +474,7 @@ func (c *ConversationView) ToggleCard() {
 	for i := range c.cards {
 		if c.cards[i].Focused {
 			c.cards[i].Expanded = !c.cards[i].Expanded
+			c.dirty = true // 卡片状态变化，标记缓存失效
 			return
 		}
 	}
@@ -502,4 +520,5 @@ func (c *ConversationView) FocusCard(delta int) {
 		newFocus = 0
 	}
 	c.cards[newFocus].Focused = true
+	c.dirty = true // 卡片焦点变化，标记缓存失效
 }

@@ -19,23 +19,49 @@ func NewStatusBar() *StatusBar {
 }
 
 // View 渲染状态栏。
-func (s *StatusBar) View(width int, model string, turn int, workDir, logPath string) string {
-	// 截断过长的工作目录
-	if len(workDir) > 30 {
-		workDir = "…" + workDir[len(workDir)-29:]
+func (s *StatusBar) View(width int, model string, turn int, sessionTitle string, tokenEst int, workDir, logPath string) string {
+	// 窄终端(≤50)切换为缩略模式，仅显示 model + turn
+	if width <= 50 {
+		text := fmt.Sprintf("%s %s  %s %d",
+			StyleStatusLabel.Render("model:"),
+			StyleStatusModel.Render(model),
+			StyleStatusLabel.Render("turn:"),
+			turn)
+		return StyleStatusBar.Width(width).Render(text)
+	}
+
+	// 截断过长的工作目录和会话标题
+	if len(workDir) > 25 {
+		workDir = "…" + workDir[len(workDir)-24:]
+	}
+	if len(sessionTitle) > 20 {
+		sessionTitle = sessionTitle[:17] + "…"
+	}
+	if sessionTitle == "" {
+		sessionTitle = "-"
+	}
+
+	// token 格式化
+	tokenStr := fmt.Sprintf("%dk", tokenEst/1000)
+	if tokenEst < 1000 {
+		tokenStr = fmt.Sprintf("%d", tokenEst)
 	}
 
 	left := fmt.Sprintf("%s %s",
 		StyleStatusLabel.Render("model:"),
 		StyleStatusModel.Render(model))
 
-	mid := fmt.Sprintf("%s %s  %s %s",
+	mid := fmt.Sprintf("%s %s  %s %d  %s %s",
+		StyleStatusLabel.Render("session:"),
+		StyleStatusValue.Render(sessionTitle),
 		StyleStatusLabel.Render("turn:"),
-		StyleStatusValue.Render(fmt.Sprintf("%d", turn)),
-		StyleStatusLabel.Render("ws:"),
-		StyleStatusValue.Render(workDir))
+		turn,
+		StyleStatusLabel.Render("tokens:"),
+		StyleStatusValue.Render(tokenStr))
 
-	right := fmt.Sprintf("%s%s",
+	right := fmt.Sprintf("%s %s  %s %s",
+		StyleStatusLabel.Render("ws:"),
+		StyleStatusValue.Render(workDir),
 		StyleStatusLabel.Render("logs:"),
 		StyleStatusValue.Render(logPath))
 
@@ -45,21 +71,37 @@ func (s *StatusBar) View(width int, model string, turn int, workDir, logPath str
 	leftW := lipgloss.Width(left)
 
 	// 计算间距
-	gap1 := (width - leftW - midW - rightW) / 2
+	available := width - leftW - midW - rightW
+	if available < 2 {
+		// 空间不足，简化中间区域
+		mid = fmt.Sprintf("%s %d  %s %s",
+			StyleStatusLabel.Render("turn:"),
+			turn,
+			StyleStatusLabel.Render("tokens:"),
+			StyleStatusValue.Render(tokenStr))
+		midW = lipgloss.Width(mid)
+		available = width - leftW - midW - rightW
+	}
+	if available < 0 {
+		// 仍不够，仅显示核心信息
+		text := fmt.Sprintf("%s %s  %s %d",
+			StyleStatusLabel.Render("model:"),
+			StyleStatusModel.Render(model),
+			StyleStatusLabel.Render("turn:"),
+			turn)
+		return StyleStatusBar.Width(width).Render(text)
+	}
+
+	gap1 := available / 2
 	if gap1 < 1 {
 		gap1 = 1
 	}
-	gap2 := width - leftW - midW - rightW - gap1
+	gap2 := available - gap1
 	if gap2 < 1 {
 		gap2 = 1
 	}
 
 	text := left + strings.Repeat(" ", gap1) + mid + strings.Repeat(" ", gap2) + right
-
-	// 截断到宽度
-	if lipgloss.Width(text) > width {
-		text = text[:width]
-	}
 
 	return StyleStatusBar.Width(width).Render(text)
 }

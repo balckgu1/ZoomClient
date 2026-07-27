@@ -17,6 +17,7 @@ type TUIModel struct {
 	inputArea    *InputArea
 	statusBar    *StatusBar
 	slashOverlay *SlashOverlay
+	helpOverlay  *HelpOverlay
 
 	width, height int
 
@@ -38,6 +39,8 @@ type AgentSessionBridge interface {
 	WorkDir() string
 	LogPath() string
 	TurnCount() int
+	SessionTitle() string   // 当前会话标题
+	TokenEstimate() int     // 累计对话 token 估算
 }
 
 // listenEvents 返回一个 tea.Cmd，在 goroutine 中监听 eventCh 并转发为 tea.Msg。
@@ -58,6 +61,7 @@ func NewTUIModel(eventCh chan UIEvent, bridge AgentSessionBridge) TUIModel {
 		inputArea:    NewInputArea(),
 		statusBar:    NewStatusBar(),
 		slashOverlay: NewSlashOverlay(),
+		helpOverlay:  NewHelpOverlay(),
 
 		showLogo:     true,
 		logoShownAt:  time.Now(),
@@ -162,11 +166,12 @@ func (m TUIModel) View() string {
 		return LogoScreen(m.width)
 	}
 
-	// 高度预算：状态栏(1) + 输入区(border2+textarea2+hint1=5) + 面板边框(2) = 8
-	inputH := 5
+	// 动态布局计算：根据终端宽度自适应
+	inputH := calcInputHeight(m.width)
 	convH := m.height - inputH - 1 - 2 // -1 状态栏, -2 面板边框
-	if convH < 5 {
-		convH = 5
+	minConvH := 8
+	if convH < minConvH {
+		convH = minConvH
 	}
 
 	// 对话流（全宽），传递实际可用宽度
@@ -179,14 +184,34 @@ func (m TUIModel) View() string {
 		slashView = m.slashOverlay.View(m.width)
 	}
 
+	// 帮助浮层（覆盖在对话流上方）
+	var helpView string
+	if m.helpOverlay.Visible() {
+		helpView = m.helpOverlay.View(m.width)
+	}
+
 	// 输入区
 	inputView := m.inputArea.View(m.width, inputH)
 
 	// 状态栏
 	bar := m.statusBar.View(m.width, m.agentSession.GetModelName(),
-		m.agentSession.TurnCount(), m.agentSession.WorkDir(), m.agentSession.LogPath())
+		m.agentSession.TurnCount(), m.agentSession.SessionTitle(),
+		m.agentSession.TokenEstimate(), m.agentSession.WorkDir(), m.agentSession.LogPath())
 
-	return lipgloss.JoinVertical(lipgloss.Top, convPanel, slashView, inputView, bar)
+	return lipgloss.JoinVertical(lipgloss.Top, convPanel, slashView, helpView, inputView, bar)
+}
+
+// calcInputHeight 根据终端宽度计算输入区高度。
+// 窄终端(≤60)给更多行数方便编辑，宽终端(≥120)可适度扩展。
+func calcInputHeight(width int) int {
+	switch {
+	case width <= 60:
+		return 7 // 窄屏：textarea 4行 + border 2 + hint 1
+	case width <= 100:
+		return 5 // 中屏：textarea 2行 + border 2 + hint 1
+	default:
+		return 6 // 宽屏：textarea 3行 + border 2 + hint 1
+	}
 }
 
 // handleKey 处理键盘事件。
@@ -214,8 +239,21 @@ func (m TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// 其他按键正常传给 textarea
 	}
 
+	// Help overlay 按键拦截（Esc 关闭）
+	if m.helpOverlay.Visible() {
+		if key == "esc" {
+			m.helpOverlay.Hide()
+			return m, nil
+		}
+		// 帮助面板打开时，其他按键关闭面板并正常处理
+		m.helpOverlay.Hide()
+	}
+
 	// 全局快捷键
 	switch key {
+	case "?", "ctrl+h":
+		m.helpOverlay.Toggle()
+		return m, nil
 	case "ctrl+q":
 		m.quit = true
 		return m, tea.Quit
@@ -250,6 +288,16 @@ func (m TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// agentLoop 运行中，输入框不响应（但滚动仍然可用，上面已处理）
 	if m.isAgentRunning {
+		return m, nil
+	}
+
+	// 输入历史导航（↑↓），仅在无卡片焦点且无 slash 浮层时生效
+	if key == "up" && !m.conversation.HasFocusedCard() {
+		m.inputArea.HistoryUp()
+		return m, nil
+	}
+	if key == "down" && !m.conversation.HasFocusedCard() {
+		m.inputArea.HistoryDown()
 		return m, nil
 	}
 
@@ -293,8 +341,12 @@ func (m TUIModel) submitInput() (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.inputArea.Reset()
+		m.inputArea.ResetHistoryNav()
 		return m, nil
 	}
+
+	// 保存到输入历史
+	m.inputArea.AddHistory()
 
 	// 启动 agentLoop
 	m.isAgentRunning = true

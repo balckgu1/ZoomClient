@@ -3,7 +3,7 @@
 **中文 | [English](README.md)**
 
 ZoomClient 是一个基于 Go 语言的 AI Agent 框架，实现具备 Tool-Use 能力的自主任务执行系统。
-项目采用模块化架构，涵盖多后端模型客户端、工具控制平面、并发执行运行时、Subagent、Skill 按需加载、会话计划管理、上下文压缩、Hook 系统、权限系统、交互式 CLI 等核心子系统。
+项目采用模块化架构，涵盖多后端模型客户端、工具控制平面、并发执行运行时、Subagent、Skill 按需加载、会话管理、上下文压缩、提示词管道、Hook 系统、权限系统、跨会话记忆、事件发射器、TUI/Web 前端等核心子系统。
 
 ---
 
@@ -23,8 +23,7 @@ ZoomClient 是一个基于 Go 语言的 AI Agent 框架，实现具备 Tool-Use 
 
 - **🔁 Agent Loop**：驱动模型交互的主循环，支持系统提示注入、消息历史维护与多轮次工具调用，最大轮次由 `config.yaml` 中的 `agentloop.maxTurns` 配置（默认 25）。
 - **🔌 多后端 ChatClient 抽象**：统一 `clients.ChatClient` 接口，内置 **OpenAI 兼容**（DeepSeek / Kimi / Qwen / OpenAI）、**Ollama**（NDJSON 流式协议）、**Anthropic**（Claude）与 **Gemini** 四种实现，支持通过命令行 `-m` 参数切换。
-- **🧠 Thinking 模式支持**：完整透传 `reasoning_content` 字段，多轮对话中原样回传，避免服务端以 `invalid_request_error` 拒绝请求。
-- **🔧 工具控制平面（Tool Control Plane）**：统一的工具注册表 `tools.Registry`，支持工具发现、注册与按名称动态调度执行，内置权限闸门（`PermissionDecider`）实现执行前准入控制。
+- **🔧 工具控制平面（Tool Control Plane）**：统一的工具注册表 `tools.Registry`，支持工具发现、注册与按名称动态调度执行，内置权限门控（`PermissionDecider`）实现执行前准入控制。
 - **⚡ 并发安全调度**：工具调用按读写属性自动分批，只读工具（如 `read_file`）可并发执行，写操作类工具串行执行，兼顾效率与安全性。
 - **🧬 子智能体（Subagent）**：通过 `sub_task` 工具将子任务委托给独立上下文的子智能体；支持空白上下文模式与 `fork=true` 继承父消息上下文模式，子智能体拥有独立工具白名单避免副作用穿透。
 - **📖 Skills 按需加载**：扫描 `.skills/` 目录下的 `SKILL.md`（含 YAML frontmatter），仅将目录清单注入 system prompt，完整正文通过 `load_skill` 工具按需加载，降低上下文成本。
@@ -32,205 +31,176 @@ ZoomClient 是一个基于 Go 语言的 AI Agent 框架，实现具备 Tool-Use 
 - **🗜️ 上下文压缩（Context Compact）**：三层压缩策略——大工具结果落盘替换为预览、旧工具结果微压缩为占位符、整体历史过长时调模型生成连续性摘要，有效控制上下文膨胀。
 - **🪝 Hook 系统**：事件驱动钩子框架，支持 `SessionStart`、`PreToolUse`、`PostToolUse`、`ToolError`、`SessionEnd` 五个事件点，内置危险命令拦截、敏感文件保护、速率限制、审计日志、错误恢复等处理器。
 - **🛡️ 权限系统**：基于规则引擎的细粒度权限控制，支持 `default`（未命中问用户）、`plan`（只读模式）、`auto`（只读自动放行）三种模式，可配置 allow/deny 规则并支持正则匹配。
-- **🛡️ 路径沙箱防护**：文件类工具执行前需通过路径沙箱校验（基于 `ToolContext.WorkPath`），禁止路径穿越与工作目录逃逸。
+- **🛡️ 路径沙箱保护**：文件类工具执行前需通过路径沙箱校验（基于 `ToolContext.WorkPath`），禁止路径穿越与工作目录逃逸。
 - **🚫 危险命令拦截**：`run_bash` 工具内置命令黑名单检测，拦截高危操作指令。
-- **🖥️ 交互式 CLI**：基于 `lipgloss` 的终端渲染器，支持 REPL 风格多轮人机交互，提供 `/exit`、`/clear`、`/compact`、`/help` 斜杠命令。
-- **🪵 结构化日志**：基于 Uber Zap 日志库，输出彩色、带时间戳的日志，支持开发与生产多环境配置。
-- **🗂️ YAML 配置化启动**：通过 `config/config.yaml` 管理 API Key、最大轮次、Skills 目录、Subagent 默认 prompt、权限规则、压缩阈值等参数，避免密钥硬编码。
+- **🧠 Thinking 模式支持**：完整透传 `reasoning_content` 字段，多轮对话中原样回传，避免服务端以 `invalid_request_error` 拒绝请求。
+- **🧠 模型注册表与预设（Model Registry）**：集中管理模型预设（客户端类型、地址、模型名）的 `model.Registry`，支持运行时热切换后端而不丢失对话历史（`SwitchModel` API）。
+- **🗄️ 会话管理（Session Management）**：基于 JSON 文件持久化的会话 CRUD（`session.Manager`），支持自动命名、元数据索引与生命周期追踪，实现会话恢复、跨进程共享与历史浏览。
+- **🧩 FSM（有限状态机）**：封装 Agent 会话状态，包含消息历史、轮次计数与转移原因，提供与业务逻辑解耦的干净状态抽象。
+- **📦 提示词管道（Prompt Pipeline）**：多阶段提示词构建系统（`prompt.MessagePipeline`），依次向 system prompt 注入技能目录、记忆摘要、动态指令、计划提醒与文件附件，最后按目标模型协议归一化输出。
+- **💭 跨会话记忆系统（`memory/`）**：支持四种记忆类型（user / feedback / project / reference），提供 `save_memory`、`search_memory`、`delete_memory`、`update_memory` 工具。记忆以 Markdown + YAML frontmatter 格式存储，自动注入 system prompt。
+- **🔄 事件发射器（`emitter/`）**：统一的 Agent 可见事件输出抽象（会话生命周期、助手输出、工具调用/结果、子智能体、Hook、错误、计划更新、压缩等），提供三种实现：CLI TUI 渲染器、API NDJSON 发射器、Web SSE 发射器。
+- **🌐 Web UI（`web/`）**：内置 Web 服务器，支持 SSE 实时流式传输、RESTful 会话 API、HTML 前端（通过 `go:embed` 嵌入）、基于 Web 的权限询问器，可作为 CLI TUI 的替代方案。
+- **🖥️ 交互式 CLI（TUI）**：基于 `bubbletea`/`lipgloss` 的终端渲染器，支持 REPL 风格多轮交互与 `/exit`、`/clear`、`/compact`、`/help` 斜杠命令，包含 Markdown 渲染与状态栏。
+- **📂 工作目录管理**：支持在运行时指定与切换 `WorkPath`，控制文件工具的沙箱根目录。
+- **🪵 结构化日志**：基于 Uber Zap，输出带颜色与时间戳的日志，支持开发与生产配置。
+- **🗂️ YAML 驱动配置**：通过 `config/config.yaml` 管理 API Key、最大轮次、技能目录、子智能体默认提示词、权限规则、压缩阈值等，避免硬编码密钥。
 
 ---
 
 ## 🏗️ 架构设计说明
 
-项目整体采用分层架构，自上而下分为 Agent Loop 层、能力扩展层、工具管理层、状态机控制层与运行时支撑层：
+项目采用分层架构设计，从上到下依次为：Agent 循环层、能力扩展层、工具管理层、状态机控制层、表现层、运行时支持层：
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   🔁 Agent Loop 层                      │
-│                (main.go → agentLoop)                    │
-├─────────────────────────────────────────────────────────┤
-│                  🧬 能力扩展层                           │
-│  (subagent/  ·  skills/  ·  tools/todo_manager          │
-│   · compact/  ·  hook/  ·  permission/)                 │
-├─────────────────────────────────────────────────────────┤
-│                  🔧 工具管理层                           │
-│     (tools/tools.go · tools/runtime.go · 各具体工具)    │
-├─────────────────────────────────────────────────────────┤
-│                  📊 状态机控制层                         │
-│                    (fsm/states.go)                      │
-├─────────────────────────────────────────────────────────┤
-│                  🧱 运行时支撑层                         │
-│  (clients/ · logger/logger.go · utils/loadconfig.go     │
-│   · ui/renderer.go)                                     │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      🔁 Agent 循环层                             │
+│                    (main.go → agentLoop)                        │
+├──────────────────────────────────────────────────────────────────┤
+│                   🧬 能力扩展层                                  │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│   │subagent/ │  │ skills/  │  │  hooks/  │  │ session/ │       │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│   │ memory/  │  │ compact/ │  │ prompt/  │  │ model/   │       │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+├──────────────────────────────────────────────────────────────────┤
+│                    🔧 工具管理层                                 │
+│   (tools/registry · tools/runtime · concrete tool impls)        │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│   │ readfile │  │ writefile│  │ run_bash │  │glob_search│       │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐                      │
+│   │edit_file │  │list_dir  │  │todo_mgr  │                      │
+│   └──────────┘  └──────────┘  └──────────┘                      │
+├──────────────────────────────────────────────────────────────────┤
+│                  ⚙️ 状态机控制层                                 │
+│            (fsm/ · permission/ · emitter/)                      │
+│         ┌──────────┐  ┌──────────┐  ┌──────────┐               │
+│         │  FSM     │  │Permission│  │ Emitter  │               │
+│         └──────────┘  └──────────┘  └──────────┘               │
+├──────────────────────────────────────────────────────────────────┤
+│                    🖥️ 表现层                                    │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│   │  CLI (TUI)   │  │  API/NDJSON  │  │  Web UI      │         │
+│   └──────────────┘  └──────────────┘  └──────────────┘         │
+├──────────────────────────────────────────────────────────────────┤
+│                 🛠️ 运行时支持层                                  │
+│    (utils/config · logger/ · web/ · workdir/)                   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-一次请求生命周期如下：
+### 分层说明
 
-1. **🚀 初始化阶段**：加载 `config/config.yaml`，根据 `-m` 参数创建对应的 `ChatClient`（OpenAI 兼容 / Ollama / Anthropic / Gemini）；构建工具注册表、技能注册表、计划管理器、上下文压缩管理器、Hook 调度器、权限管理器、子智能体与会话状态。
-2. **💬 模型交互阶段**：将系统提示（含 Skills 目录清单）、用户输入与消息历史发送至 LLM API，请求模型生成响应，`reasoning_content` 字段原样保留。
-3. **🔧 工具调用阶段**：若模型返回工具调用请求，Agent Loop 先触发 `EventPreToolUse` Hook，再调用 `PartitionToolCalls` 按并发安全性分批，并发批次使用 goroutine 并行执行，串行批次逐个执行。
-4. **📥 结果回写阶段**：所有工具执行结果按原始调用顺序写回消息历史，保持模型对执行结果理解的确定性；每条 `tool` 消息携带 `ToolCallID` 以兼容 OpenAI 协议。大结果自动落盘替换为预览。
-5. **🪝 Hook 后处理阶段**：触发 `EventPostToolUse` / `EventToolError` Hook，执行审计日志、错误恢复注入等后处理。
-6. **📝 计划维护阶段**：检查本轮是否使用了 `todo` 工具，若连续多轮未更新，将提醒注入到消息历史中，促使模型刷新计划。
-7. **🗜️ 上下文压缩阶段**：检查是否触发三层压缩（手动请求或自动阈值），若触发则调模型生成连续性摘要并替换消息历史。
-8. **🔁 循环终止条件**：当模型不再请求工具调用，或达到 `agentloop.maxTurns` 配置上限时，循环终止。
+| 层级 | 模块 | 职责 |
+|------|------|------|
+| **Agent 循环层** | `main.go` | 编排模型交互循环，管理轮次生命周期 |
+| **能力扩展层** | `subagent/`, `skills/`, `hooks/`, `session/`, `memory/`, `compact/`, `prompt/`, `model/` | 可插拔扩展，增加推理、持久化与智能能力 |
+| **工具管理层** | `tools/` | 工具注册表、读写调度、具体工具实现 |
+| **状态机控制层** | `fsm/`, `permission/`, `emitter/` | 状态持久化、准入控制、事件输出抽象 |
+| **表现层** | `ui/` (TUI), `emitter/api_emitter` (API), `web/` (Web) | 面向不同部署场景的多前端 |
+| **运行时支持层** | `utils/`, `logger/`, `web/`, `workdir/` | 配置加载、结构化日志、HTTP 服务器、文件沙箱 |
 
 ---
 
 ## 🧩 主要组件介绍
 
-### 1. 🚪 `main.go` — Agent 主循环入口
+### 核心模块
 
-定义 `agentLoop` 函数，负责编排一次完整的 Agent 会话。核心职责包括：
-- 管理消息历史（`fsm.State.Messages`），自动追加系统提示、用户输入、助手响应（含 `reasoning_content`）与工具结果。
-- 调用 `tools.PartitionToolCalls` 与 `tools.ExecuteBatches` 完成工具调度并打印分批信息。
-- 与 `TodoManager` 协作，维护计划更新与提醒机制。
-- 解析 `-m` 命令行参数，按需构造 OpenAI 兼容 / Ollama / Anthropic / Gemini 客户端。
-- 装配 Skills 目录清单到 system prompt，注册工具（含 `load_skill`、`sub_task`、`todo`、`compact` 等）。
-- 集成上下文压缩管理器、Hook 调度器、权限管理器，实现完整的生命周期控制。
+| 模块 | 包路径 | 说明 |
+|------|--------|------|
+| **Agent Loop** | `main.go:agentLoop` | 主交互循环；调用 LLM、派发工具调用、管理轮次 |
+| **ChatClient** | `clients/` | 统一的 ChatClient 接口，支持 OpenAI / Ollama / Anthropic / Gemini |
+| **模型注册表** | `model/` | 模型预设定义、选择与运行时热切换 |
+| **工具注册表** | `tools/` | 工具注册、发现、派发、并发调度 |
+| **子智能体** | `subagent/` | 独立上下文的子智能体执行，隔离上下文与工具 |
+| **技能系统** | `skills/` | 从 SKILL.md 文件按需加载技能 |
+| **会话管理** | `session/` | 会话 CRUD、JSON 文件持久化、自动命名、历史浏览 |
+| **FSM** | `fsm/` | 会话状态封装（消息、轮次、转移） |
+| **上下文压缩** | `compact/` | 三层压缩策略（落盘、微压缩、摘要） |
+| **Hook 系统** | `hook/` | 事件驱动插件框架，用于工具前后执行 |
+| **权限系统** | `permission/` | 基于规则的访问控制、路径沙箱、命令黑名单 |
+| **提示词管道** | `prompt/` | 多阶段提示词构建（技能 + 记忆 + 提醒 + 附件） |
+| **记忆系统** | `memory/` | 跨会话长期记忆（保存/搜索/删除/更新） |
+| **事件发射器** | `emitter/` | 统一输出接口，适配 CLI / API / Web 前端 |
+| **交互式 CLI** | `ui/` | Bubble Tea TUI，支持 Markdown 渲染、斜杠命令、状态栏 |
+| **Web 服务器** | `web/` | HTTP 服务器，支持 SSE 流式传输、RESTful API、嵌入前端 |
+| **结构化日志** | `logger/` | 基于 Zap 的带颜色时间戳日志 |
+| **配置加载** | `utils/` | YAML 配置加载，支持默认值与校验 |
 
-### 2. 🔌 `clients/` — 多后端模型客户端适配层
+### 具体工具
 
-| 文件 | 说明 |
-|------|------|
-| `client.go` | 定义 `ChatClient` 统一接口，抽象出 `Chat(model, messages, tools, options)` 能力，屏蔽不同服务商协议差异。 |
-| `openai_chat.go` | OpenAI 兼容协议客户端，支持 DeepSeek、Kimi、Qwen、OpenAI 等所有 OpenAI 兼容格式的后端。处理 `tool_calls.arguments` JSON 字符串互转、`reasoning_content` 透传、`tool_call_id` 回填等关键协议细节。 |
-| `ollama.go` | 定义 `OllamaClient` 结构体、`OllamaTool` / `OllamaFunction` 数据模型，以及 `BuildOllamaTools` 工具格式转换函数。 |
-| `ollama_chat.go` | Ollama 协议实现，负责构造 HTTP POST 请求发送至 `/api/chat`，并解析 NDJSON 流式响应，拼接完整内容与工具调用。 |
-| `anthropic.go` | Anthropic Claude 客户端，使用官方 `anthropic-sdk-go`，处理 system 消息提取为顶层参数、ToolUseBlock / ToolResultBlock 转换等协议细节。 |
-| `gemini.go` | Google Gemini 客户端，使用官方 `google.golang.org/genai` SDK，处理 FunctionCall / FunctionResponse 转换、system instruction 注入等协议细节。 |
-
-### 3. 🔧 `tools/` — 工具控制平面与执行运行时
-
-| 文件 | 说明 |
-|------|------|
-| `tools.go` | 定义核心抽象：`Tool` 接口、`ToolContext`（工具执行上下文，含 `Ctx` / `Logger` / `SessionID` / `AppState` 等运行时字段）、`ToolResult`（执行结果）、`Registry`（工具注册表，支持权限闸门注入）、`ToolCall` / `ToolCallFunction`（工具调用结构）。 |
-| `runtime.go` | 实现工具执行运行时，包含 `PartitionToolCalls`（分批）、`ExecuteBatches`（调度执行）、`ExecuteToolCalls`（顶层编排）、`runConcurrently`（并发执行）、`runSerially`（串行执行）与 `QueuedContextModifiers`（上下文修改器队列）。 |
-| `readfile.go` | 📖 `ReadFileTool` — 读取指定文件内容，标记为并发安全。 |
-| `writefile.go` | 📄 `WriteFileTool` — 创建新文件并写入内容，含路径沙箱校验与父目录自动创建。 |
-| `editfile.go` | ✏️ `EditFileTool` — 覆盖编辑已有文件内容。 |
-| `runbash.go` | 💻 `RunBashTool` — 执行 Bash 命令，含危险命令拦截与跨平台兼容（Windows / Linux / macOS）。 |
-| `todo_manager.go` | 📝 `TodoManager` — 会话级计划管理器，实现 `Tool` 接口，支持计划更新、状态校验（最多一个 `in_progress`）、渲染与提醒。 |
-
-### 4. 🧬 `subagent/` — 子智能体
-
-| 文件 | 说明 |
-|------|------|
-| `subagent.go` | 定义 `SubAgent` 结构体，提供两种执行入口：`Run`（空白上下文）与 `RunWithFork`（继承父消息上下文，自动裁剪触发本次调用的 assistant 消息以避免协议违规）。`BuildSubAgentRegistry` 构建子智能体的工具白名单（仅允许 `read_file` / `run_bash`，禁止递归派生与写操作）。 |
-| `subtask_tool.go` | 定义 `TaskTool`（工具名 `sub_task`），实现 `Tool` 接口；支持 `prompt` 与 `fork` 两个参数，`fork=true` 时通过 `ParentMessagesProvider` 闭包获取最新父消息快照。 |
-
-### 5. 🗜️ `compact/` — 上下文压缩
-
-| 文件 | 说明 |
-|------|------|
-| `compact.go` | `CompactManager` — 三层压缩管理器：第 1 层大工具结果落盘（`PersistLargeOutput`）、第 2 层旧工具结果微压缩（`MicroCompact`）、第 3 层整体历史摘要（`CompactHistory` / `summarize`）。支持手动触发（`/compact` 命令或 `compact` 工具）与自动阈值触发。 |
-| `compact_tool.go` | `CompactTool` — 供模型主动调用的压缩工具，标记 pending 后由 agentLoop 在合适时机执行完整压缩。 |
-
-### 6. 🪝 `hook/` — Hook 系统
-
-| 文件 | 说明 |
-|------|------|
-| `hook.go` | 定义 `Runner`（事件调度器）、`Handler`（处理器函数签名）与 `HookResult`（含 `ExitCode`：`Continue` / `Block` / `Inject` / `Retry`）。支持同一事件挂载多个 handler，按注册顺序执行，首个非零退出码即短路返回。 |
-| `handlers.go` | 内置处理器集合：`OnSessionStart`（会话开始日志）、`PreToolBlockDangerous`（危险命令拦截）、`PreToolRateLimit`（单轮工具数限制）、`PreToolSensitiveFileGuard`（敏感文件访问拦截）、`PostToolAuditLog`（审计日志）、`OnToolErrorRecovery`（错误恢复注入）、`OnSessionEnd`（会话结束日志）。 |
-
-### 7. 🛡️ `permission/` — 权限系统
-
-| 文件 | 说明 |
-|------|------|
-| `permission.go` | `Manager` — 权限管理器，支持 `default` / `plan` / `auto` 三种模式，基于 `DenyRules` / `AllowRules` 进行工具名、路径、内容三维匹配（支持正则），并集成 bash 危险命令兜底检查。 |
-| `asker.go` | `Asker` 接口及实现：`StdinAsker`（交互式询问）与 `DenyAsker`（非交互场景默认拒绝）。 |
-| `bash.go` | `isDangerousBash` — bash 命令危险模式检测（如 `rm -rf /`、`mkfs`、`dd if=` 等）。 |
-
-### 8. 📖 `skills/` — 技能（Skill）子系统
-
-| 文件 | 说明 |
-|------|------|
-| `skill.go` | 定义 `SkillManifest`（轻量元信息）与 `SkillDocument`（含完整正文）两级抽象，配合"目录先行、正文按需"的分层加载策略。 |
-| `registry.go` | `SkillRegistry` 扫描指定目录下所有 `SKILL.md`，支持 `DescribeAvailable`（生成 system prompt 注入内容）、`LoadFullText`（按名称加载完整正文）、`Names`、`Count` 等能力。 |
-| `frontmatter.go` | 解析 SKILL.md 文件顶部的 YAML 风格 frontmatter（`---` 分隔），提取 `name` 与 `description` 元数据。 |
-| `load_skill_tool.go` | `LoadSkillTool`（工具名 `load_skill`），实现 `Tool` 接口，按名称加载技能正文并以 `<skill name="...">...</skill>` 包裹返回。 |
-
-### 9. 📊 `fsm/states.go` — 状态机控制
-
-定义会话的核心状态结构：
-- `State`：包含消息列表（`Messages`）、轮次计数（`TurnCount`）与状态转移原因（`TransitionReason`）。
-- `Message`：表示单条消息，支持角色（`role`）、内容（`content`）、工具调用（`tool_calls`）、工具调用 ID（`tool_call_id`）与推理内容（`reasoning_content`）字段。
-
-### 10. ⚙️ `utils/loadconfig.go` — 配置加载
-
-基于 `spf13/viper` 实现 YAML 配置文件加载。定义 `Config` 结构体，涵盖 `api_key`、`openai`、`subagent`、`skills`、`agentloop`、`compact`、`permission`、`tools` 等分组，通过 `InitConfig()` 完成初始化，`GetConfig()` 获取全局单例。
-
-### 11. 🗂️ `config/` — 配置文件
-
-- `config.yaml.example`：配置模板，包含 OpenAI 兼容后端、Anthropic、Gemini 的 API Key 占位，以及子智能体、压缩、权限、Agent Loop 等完整配置示例。
-- `config.yaml`：实际生效的配置（已加入 `.gitignore`，避免密钥提交）。
-
-### 12. 🪵 `logger/logger.go` — 日志记录
-
-基于 `go.uber.org/zap` 实现全局日志实例：
-- `Init()`：初始化开发模式配置，输出彩色日志级别与精确时间戳。
-- `Sync()`：程序退出前刷新日志缓冲区。
-
-### 13. 🖥️ `ui/` — 终端渲染器
-
-| 文件 | 说明 |
-|------|------|
-| `renderer.go` | `Renderer` — 基于 `lipgloss` 的 CLI 前端渲染器，提供会话横幅、用户输入提示、助手文本、reasoning 内容、工具调用与结果、子智能体、计划面板、压缩信息、Hook 拦截、错误与信息提示等全量渲染方法。 |
-| `styles.go` | 定义所有 `lipgloss.Style` 样式常量（颜色、边框、对齐等）。 |
+| 工具 | 包路径 | 说明 |
+|------|--------|------|
+| **read_file** | `tools/` | 读取文件内容 |
+| **write_file** | `tools/` | 写入文件 |
+| **edit_file** | `tools/` | 搜索替换方式编辑文件 |
+| **run_bash** | `tools/` | 执行 shell 命令（含黑名单保护） |
+| **glob_search** | `tools/` | 基于模式的文件搜索 |
+| **list_directory** | `tools/` | 列出目录内容 |
+| **todo_manager** | `tools/` | 多步骤任务计划管理（创建/更新/标记） |
+| **sub_task** | `subagent/` | 将工作委托给子智能体 |
+| **load_skill** | `skills/` | 按需加载完整技能内容 |
+| **save_memory** | `memory/` | 持久化新记忆条目 |
+| **search_memory** | `memory/` | 搜索已存储的记忆 |
+| **delete_memory** | `memory/` | 删除记忆条目 |
+| **update_memory** | `memory/` | 修改已有记忆条目 |
+| **compact_history** | `compact/` | 手动触发上下文压缩 |
 
 ---
 
 ## ⚙️ 安装与配置
 
-### 📋 环境要求
+### 前置条件
 
-- Go 1.24.4 或更高版本
-- 若使用 **Ollama** 后端：本地运行 Ollama 服务（默认地址：`http://127.0.0.1:11434`），并下载支持工具调用的模型（如 `modelscope.cn/Qwen/Qwen3-8B-GGUF:latest`）。
-- 若使用 **OpenAI 兼容后端**（DeepSeek / Kimi / Qwen / OpenAI）：准备有效的 API Key。
-- 若使用 **Anthropic** 后端：准备有效的 Anthropic API Key。
-- 若使用 **Gemini** 后端：准备有效的 Gemini API Key。
+- Go 1.21+
+- （可选，用于 Ollama）本地 Ollama 服务
+- API 密钥（通过环境变量或 `config/config.yaml` 设置）
 
-### 📦 安装步骤
-
-1. 克隆项目到本地：
+### 安装
 
 ```bash
-git clone <repository-url>
-cd cc-learn
+git clone https://github.com/balckgu1/ZoomClient.git
+cd ZoomClient
+go build -o zoomclient .
 ```
 
-2. 安装依赖：
+### 配置
 
-```bash
-go mod tidy
-```
+编辑 `config/config.yaml` 设置 API 密钥与运行参数：
 
-3. 准备配置文件（首次使用时）：
+```yaml
+apikeys:
+  openai: "sk-xxx"           # OpenAI / 兼容服务
+  anthropic: "sk-ant-xxx"    # Anthropic Claude
+  gemini: "..."
+  # 为空时自动回退到环境变量
 
-```bash
-cp config/config.yaml.example config/config.yaml
-```
+agentloop:
+  maxTurns: 25
+  todoRoundsThreshold: 9
+  maxTools: 5
+  sensitiveFiles: [".env", "id_rsa"]
 
-编辑 `config/config.yaml`，填入你的 API Key 与其他参数；也可通过对应环境变量注入（如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`）。
+compact:
+  persistThreshold: 4000
+  previewBytes: 1000
+  keepRecentToolResults: 4
+  contextLimit: 60000
+  persistDir: ".task_outputs/tool-results"
 
-4. （可选）若使用 Ollama，确认服务已启动：
+subagent:
+  defaultMaxTurns: 10
+  defaultSystemPrompt: "..."
 
-```bash
-ollama serve
-```
+skills:
+  dir: "./.skills"
 
-5. 运行项目：
-
-```bash
-# 默认使用 OpenAI 兼容后端（config.yaml 中配置的默认模型）
-go run main.go
-
-# 显式指定后端
-go run main.go -m openai    # OpenAI 兼容后端
-go run main.go -m ollama    # 本地 Ollama
-go run main.go -m anthropic # Anthropic Claude
-go run main.go -m gemini    # Google Gemini
+permission:
+  mode: "auto"              # default | plan | auto
+  interactive: true
+  denyRules: [...]
+  allowRules: [...]
 ```
 
 ---
@@ -239,21 +209,38 @@ go run main.go -m gemini    # Google Gemini
 
 ### 🎛️ 切换模型后端
 
-通过 `-m` 命令行参数选择后端：
+使用 `-m` 命令行参数选择后端：
 
 ```bash
-go run main.go -m openai     # 使用 OpenAI 兼容后端（默认）
-go run main.go -m ollama     # 使用本地 Ollama
-go run main.go -m anthropic  # 使用 Anthropic Claude
-go run main.go -m gemini     # 使用 Google Gemini
+go run main.go -m openai     # OpenAI 兼容（默认）
+go run main.go -m ollama     # 本地 Ollama
+go run main.go -m anthropic  # Anthropic Claude
+go run main.go -m gemini     # Google Gemini
 ```
+
+### 🌐 启动 Web 服务器
+
+启动 Web UI 模式替代 CLI TUI：
+
+```bash
+go run main.go -m openai -web
+```
+
+这将启动 HTTP 服务器（默认端口在 `web/server.go` 中定义），提供完整的 HTML 前端，支持 SSE 实时流式传输、会话浏览和模型切换。
+
+### 🗄️ 会话管理
+
+会话会自动持久化为 JSON 文件。通过 API 或会话管理器可以列出、加载或创建会话。自动命名功能根据对话内容为每个会话生成描述性标题。
+
+### 🧠 运行时模型切换
+
+使用 Web UI 时，可通过 `SwitchModel` API 在运行时热切换模型，不会丢失对话历史。
 
 ### ✍️ 修改用户任务与系统提示
 
 在 `main()` 函数中调整以下变量即可自定义行为：
 
 ```go
-// 在 main() 中编辑 systemPrompt 变量
 systemPrompt := fmt.Sprintf(
     "You are a helpful assistant running on %s. "+
         "Use the todo tool to plan multi-step work. "+
@@ -297,39 +284,6 @@ description: 一句话描述该技能用途
 - 默认 `fork=false`：子智能体以空白上下文执行，prompt 需自包含。
 - 设置 `fork=true`：子智能体继承父消息历史，适合"基于当前对话做进一步分析"的场景。
 
-### ⚙️ 调整运行参数
-
-编辑 `config/config.yaml`：
-
-```yaml
-agentloop:
-  maxTurns: 25              # 主循环最大轮次
-  todoRoundsThreshold: 9    # 计划提醒阈值
-  maxTools: 5               # 单轮最大工具调用数
-  sensitiveFiles: [".env", "id_rsa"]  # 敏感文件列表
-
-subagent:
-  defaultMaxTurns: 10       # 子智能体最大轮次
-  defaultSystemPrompt: "..."
-  forkSubtaskPromptPrefix: "..."
-
-skills:
-  dir: "./.skills"          # Skills 扫描目录
-
-compact:
-  persistThreshold: 4000    # 大结果落盘阈值（字节）
-  previewBytes: 1000        # 落盘保留预览字节数
-  keepRecentToolResults: 4  # 微压缩保留最近条数
-  contextLimit: 60000       # 整体压缩触发阈值（字节）
-  persistDir: ".task_outputs/tool-results"  # 落盘目录
-
-permission:
-  mode: "auto"              # default | plan | auto
-  interactive: true         # 命中 ask 时是否询问用户
-  denyRules: [...]          # 拒绝规则
-  allowRules: [...]         # 放行规则
-```
-
 ---
 
 ## 🛠️ 开发指南
@@ -358,6 +312,14 @@ permission:
 
 无需写代码，直接在 `.skills/` 下新建子目录并放入 `SKILL.md`（参考 `.skills/skill-function-test/SKILL.md`），重启后即可被 `SkillRegistry` 自动发现。
 
+### 🧠 添加模型预设
+
+在 `model/registry.go` 的 presets 映射中添加新条目（客户端类型、地址、模型名），即可通过 `-m` 参数选择并支持运行时热切换。
+
+### 🔄 添加新 Emitter 实现
+
+实现 `emitter.Emitter` 接口，在 `main.go` 中注册。当前实现包括：`ui.Renderer`（CLI TUI）、`emitter.ApiEmitter`（NDJSON stdout）、`web.SSEEmitter`（Web SSE 事件）。
+
 ### 🧪 单元测试
 
 项目各核心模块均配有 `*_test.go` 测试文件。运行全部测试：
@@ -372,6 +334,13 @@ go test ./...
 go test ./tools/...
 go test ./subagent/...
 go test ./skills/...
+go test ./session/...
+go test ./memory/...
+go test ./prompt/...
+go test ./model/...
+go test ./compact/...
+go test ./hook/...
+go test ./permission/...
 ```
 
 ### 🐞 日志调试
@@ -385,10 +354,11 @@ go test ./skills/...
 | 模块 | 说明 |
 |------|------|
 | **🔗 MCP 集成** | 利用 `ToolContext.McpClients` 预留字段，接入 Model Context Protocol（MCP）外部工具生态，实现跨进程工具调用。 |
-| **💾 持久化存储** | 会话状态、消息历史与计划数据的持久化，支持会话恢复、跨进程共享与审计追踪。 |
 | **🧪 只读 Bash 沙箱** | 为子智能体提供受限版的 `run_bash`，仅允许纯查询类命令，进一步降低副作用风险。 |
 | **📈 执行指标与可观测性** | 工具调用次数、耗时、失败率等指标采集，辅助性能调优与问题定位。 |
-| **🧠 记忆系统增强** | 扩展 `memory/` 模块，实现跨会话的长期记忆存储与检索。 |
+| **🧠 记忆排序增强** | 引入相关性评分、时间衰减与跨会话去重，优化记忆检索质量。 |
+| **🔌 插件 / MCP 客户端 SDK** | 正式发布 MCP 客户端集成 SDK，供第三方工具提供商接入。 |
+| **🔄 多用户与协作** | 支持多用户会话、共享工作区与协同 Agent 工作流。 |
 
 ---
 

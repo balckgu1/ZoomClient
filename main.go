@@ -904,7 +904,8 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 
 // runCLIREPL runs the CLI mode using bubbletea full-screen TUI.
 func runCLIREPL(s *AgentSession) {
-	eventCh := make(chan ui.UIEvent, 64)
+	// 使用较大的缓冲区，防止 agentLoop 密集输出工具调用时阻塞事件通道
+	eventCh := make(chan ui.UIEvent, 512)
 
 	// Create TuiEmitter that bridges agentLoop -> bubbletea
 	tuiEmitter := ui.NewTuiEmitter(eventCh)

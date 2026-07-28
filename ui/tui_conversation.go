@@ -12,6 +12,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// 对话内容的字符数上限，防止无限增长导致 viewport 渲染异常
+const maxContentChars = 100000
+
 // ConversationView 管理对话流的 viewport 和内容。
 type ConversationView struct {
 	vp           viewport.Model
@@ -22,6 +25,10 @@ type ConversationView struct {
 	// 渲染缓存：避免每帧完整重建内容
 	contentCache string
 	dirty        bool
+
+	// 内容截断标记
+	truncated    bool
+	truncatedAt  int // 截断位置（字节偏移），用于增量修剪
 }
 
 // NewConversationView 创建一个新的对话流视图。
@@ -43,6 +50,13 @@ func (c *ConversationView) View(width, height int) string {
 	// 仅在内容变化时重建缓存（脏标记机制）
 	if c.dirty {
 		var full strings.Builder
+
+		// 如果内容曾被裁剪，在顶部添加提示
+		if c.truncated {
+			full.WriteString(StyleSeparator.Render("… (earlier content trimmed) …"))
+			full.WriteString("\n\n")
+		}
+
 		full.WriteString(c.content.String())
 
 		// 渲染卡片内嵌在对话流末尾
@@ -61,7 +75,26 @@ func (c *ConversationView) View(width, height int) string {
 		c.dirty = false
 	}
 
+	// 先以完整宽度设置内容，计算行数判断是否需要滚动条
+	c.vp.Width = width
 	c.vp.SetContent(c.contentCache)
+	c.vp.Height = height
+
+	totalLines := c.vp.TotalLineCount()
+	visibleLines := c.vp.VisibleLineCount()
+	hasScrollbar := totalLines > visibleLines && visibleLines > 0
+
+	// 如果有滚动条，需要以更窄的宽度重新渲染，为滚动条留空间
+	if hasScrollbar {
+		scrollbarWidth := 2
+		c.vp.Width = width - scrollbarWidth
+		if c.vp.Width < 10 {
+			c.vp.Width = 10
+		}
+		c.vp.SetContent(c.contentCache)
+		totalLines = c.vp.TotalLineCount()
+		visibleLines = c.vp.VisibleLineCount()
+	}
 
 	// 仅当 followBottom 时自动滚到底部
 	if c.followBottom {
@@ -72,9 +105,7 @@ func (c *ConversationView) View(width, height int) string {
 	vpView := c.vp.View()
 
 	// 如果内容超出可视区，叠加滚动条
-	totalLines := c.vp.TotalLineCount()
-	visibleLines := c.vp.VisibleLineCount()
-	if totalLines > visibleLines && visibleLines > 0 {
+	if hasScrollbar {
 		return c.renderWithScrollbar(vpView, width, height, totalLines, visibleLines)
 	}
 
@@ -89,7 +120,10 @@ func (c *ConversationView) renderWithScrollbar(vpView string, width, height, tot
 	if thumbH < 1 {
 		thumbH = 1
 	}
-	thumbTop := offset * (visibleLines - thumbH) / (totalLines - visibleLines)
+	thumbTop := 0
+	if totalLines > visibleLines {
+		thumbTop = offset * (visibleLines - thumbH) / (totalLines - visibleLines)
+	}
 	if thumbTop < 0 {
 		thumbTop = 0
 	}
@@ -127,7 +161,8 @@ func (c *ConversationView) renderWithScrollbar(vpView string, width, height, tot
 		// 用空格补齐到 contentW
 		padding := contentW - lineW
 		if padding < 0 {
-			// 截断（ANSI 安全：在末尾追加截断标记）
+			// 行内容超出宽度，需要截断（ANSI 安全截断）
+			line = truncateLineANSI(line, contentW)
 			padding = 0
 		}
 
@@ -146,6 +181,39 @@ func (c *ConversationView) renderWithScrollbar(vpView string, width, height, tot
 	}
 
 	return sb.String()
+}
+
+// truncateLineANSI 安全截断包含 ANSI 转义序列的行到指定显示宽度。
+func truncateLineANSI(line string, maxWidth int) string {
+	runes := []rune(line)
+	var result []rune
+	visible := 0
+	inEscape := false
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+		if ch == '\x1b' {
+			inEscape = true
+			result = append(result, ch)
+			continue
+		}
+		if inEscape {
+			result = append(result, ch)
+			if ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' {
+				inEscape = false
+			}
+			continue
+		}
+		if visible >= maxWidth {
+			break
+		}
+		result = append(result, ch)
+		visible++
+	}
+	// 如果确实发生了截断，追加截断标记
+	if visible >= maxWidth && len(runes) > len(result) {
+		result = append(result, []rune("…")...)
+	}
+	return string(result)
 }
 func renderCard(card *CollapsibleCard, width int) string {
 	contentW := width - 4
@@ -256,10 +324,30 @@ func renderReasoningCard(card *CollapsibleCard, width int) string {
 	return borderStyle.Width(width).Render(sb.String())
 }
 
-// appendLine 追加一行到内容末尾。
+// appendLine 追加一行到内容末尾，超出上限时从头部裁剪。
 func (c *ConversationView) appendLine(line string) {
 	c.content.WriteString(line)
 	c.content.WriteString("\n")
+
+	// 内容超出上限时，从头部裁剪一半，保留尾部最新对话
+	if c.content.Len() > maxContentChars {
+		full := c.content.String()
+		// 找到中段附近的行边界，避免截断在行中间
+		trimPos := len(full) - maxContentChars/2
+		// 向后寻找最近的换行符
+		newlineIdx := strings.Index(full[trimPos:], "\n")
+		if newlineIdx >= 0 {
+			trimPos += newlineIdx + 1
+		}
+		// 跳过开头可能残留的不完整行
+		if trimPos < len(full) {
+			trimmed := full[trimPos:]
+			c.content.Reset()
+			c.content.WriteString(trimmed)
+			c.truncated = true
+			c.truncatedAt = trimPos
+		}
+	}
 	c.dirty = true // 内容变化，标记缓存失效
 }
 
@@ -339,6 +427,8 @@ func (c *ConversationView) AppendSeparator() {
 func (c *ConversationView) Clear() {
 	c.content.Reset()
 	c.cards = nil
+	c.truncated = false
+	c.truncatedAt = 0
 	c.dirty = true // 内容变化，标记缓存失效
 }
 

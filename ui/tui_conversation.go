@@ -86,7 +86,7 @@ func (c *ConversationView) View(width, height int) string {
 
 	// 如果有滚动条，需要以更窄的宽度重新渲染，为滚动条留空间
 	if hasScrollbar {
-		scrollbarWidth := 2
+		scrollbarWidth := 1 // 从 2 改为 1，更精致
 		c.vp.Width = width - scrollbarWidth
 		if c.vp.Width < 10 {
 			c.vp.Width = 10
@@ -96,12 +96,24 @@ func (c *ConversationView) View(width, height int) string {
 		visibleLines = c.vp.VisibleLineCount()
 	}
 
+	// 确保 YOffset 在有效范围内
+	if c.vp.YOffset < 0 {
+		c.vp.YOffset = 0
+	}
+	maxOffset := totalLines - visibleLines
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if c.vp.YOffset > maxOffset {
+		c.vp.YOffset = maxOffset
+	}
+
 	// 仅当 followBottom 时自动滚到底部
 	if c.followBottom {
 		c.vp.GotoBottom()
 	}
 
-	// 渲染 viewport
+	// 渲染 viewport（viewport.View() 会根据 Height 自动截断）
 	vpView := c.vp.View()
 
 	// 如果内容超出可视区，叠加滚动条
@@ -134,7 +146,10 @@ func (c *ConversationView) renderWithScrollbar(vpView string, width, height, tot
 	// 拆分 viewport 的每一行
 	lines := strings.Split(vpView, "\n")
 
-	// 确保行数匹配 visibleLines
+	// 确保行数完全匹配 visibleLines（截断或补齐）
+	if len(lines) > visibleLines {
+		lines = lines[:visibleLines]
+	}
 	for len(lines) < visibleLines {
 		lines = append(lines, "")
 	}
@@ -147,24 +162,22 @@ func (c *ConversationView) renderWithScrollbar(vpView string, width, height, tot
 
 	var sb strings.Builder
 	for i := 0; i < visibleLines; i++ {
-		line := ""
-		if i < len(lines) {
-			line = lines[i]
-		}
-		// 截断或补全到 width-2（为滚动条留 2 列空间）
-		lineW := lipgloss.Width(line)
-		contentW := width - 2
+		line := lines[i]
+		
+		// 内容宽度 = 总宽度 - 滚动条宽度(1)
+		contentW := width - 1
 		if contentW < 10 {
 			contentW = 10
 		}
 
-		// 用空格补齐到 contentW
-		padding := contentW - lineW
-		if padding < 0 {
+		// 截断或补全到 contentW
+		lineW := lipgloss.Width(line)
+		if lineW > contentW {
 			// 行内容超出宽度，需要截断（ANSI 安全截断）
 			line = truncateLineANSI(line, contentW)
-			padding = 0
+			lineW = contentW
 		}
+		padding := contentW - lineW
 
 		// 滚动条字符
 		var barChar string
@@ -177,7 +190,9 @@ func (c *ConversationView) renderWithScrollbar(vpView string, width, height, tot
 		sb.WriteString(line)
 		sb.WriteString(strings.Repeat(" ", padding))
 		sb.WriteString(barChar)
-		sb.WriteString("\n")
+		if i < visibleLines-1 {
+			sb.WriteString("\n")
+		}
 	}
 
 	return sb.String()
@@ -230,33 +245,32 @@ func renderCard(card *CollapsibleCard, width int) string {
 	return ""
 }
 
-// renderToolCard 渲染工具调用卡片。
+// renderToolCard 渲染工具调用卡片（简化版，无边框）。
 func renderToolCard(card *CollapsibleCard, width int) string {
 	headerIcon := "▸"
-	borderStyle := StyleCardToolCollapsed
 	if card.Expanded {
 		headerIcon = "▾"
-		borderStyle = StyleCardToolExpanded
-	}
-	if card.Focused {
-		borderStyle = StyleCardFocused
-	}
-	// 错误卡片：边框变红
-	if card.IsError {
-		borderStyle = StyleCardToolError
 	}
 
-	header := StyleToolCall.Render(headerIcon + " " + card.ToolName)
+	// 根据状态选择样式
+	var headerStyle lipgloss.Style
+	if card.IsError {
+		headerStyle = StyleError
+	} else if card.Focused {
+		headerStyle = StyleCardFocusedSimple
+	} else {
+		headerStyle = StyleToolCall
+	}
+
+	header := headerStyle.Render(headerIcon + " " + card.ToolName)
 
 	if !card.Expanded {
-		return borderStyle.Width(width).Render(header)
+		return header
 	}
 
-	// 展开态：参数 + 结果 + 状态
+	// 展开态：参数 + 结果 + 状态（使用缩进区分层次）
 	var sb strings.Builder
 	sb.WriteString(header)
-	sb.WriteString("\n")
-	sb.WriteString(StyleCardDivider.Render(strings.Repeat("─", width-2)))
 	sb.WriteString("\n")
 
 	// 参数
@@ -277,15 +291,13 @@ func renderToolCard(card *CollapsibleCard, width int) string {
 			resultText = resultText[:maxResultLen] + "\n…(truncated)"
 		}
 		if card.IsError {
-			sb.WriteString(StyleError.Render(resultText))
+			sb.WriteString(StyleError.Render("  " + resultText))
 		} else {
-			sb.WriteString(StyleToolResult.Render(resultText))
+			sb.WriteString(StyleToolResult.Render("  " + resultText))
 		}
 		sb.WriteString("\n\n")
 
 		// 状态
-		sb.WriteString(StyleCardDivider.Render(strings.Repeat("─", width-2)))
-		sb.WriteString("\n")
 		if card.IsError {
 			sb.WriteString(StyleError.Render("  ✗ Failed"))
 		} else {
@@ -293,35 +305,33 @@ func renderToolCard(card *CollapsibleCard, width int) string {
 		}
 	}
 
-	return borderStyle.Width(width).Render(sb.String())
+	return sb.String()
 }
 
-// renderReasoningCard 渲染 reasoning 折叠卡片。
+// renderReasoningCard 渲染 reasoning 折叠卡片（简化版，无边框）。
 func renderReasoningCard(card *CollapsibleCard, width int) string {
-	borderStyle := StyleCardReasonCollapsed
-	if card.Expanded {
-		borderStyle = StyleCardReasonExpanded
-	}
-	if card.Focused {
-		borderStyle = StyleCardFocused
-	}
-
 	charCount := len(card.Thinking)
-	header := StyleReasoningLabel.Render(fmt.Sprintf("💭 Thinking · %d chars", charCount))
+	
+	var headerStyle lipgloss.Style
+	if card.Focused {
+		headerStyle = StyleCardFocusedSimple
+	} else {
+		headerStyle = StyleReasoningLabel
+	}
+	
+	header := headerStyle.Render(fmt.Sprintf("💭 Thinking · %d chars", charCount))
 
 	if !card.Expanded {
-		return borderStyle.Width(width).Render(header)
+		return header
 	}
 
-	// 展开态：完整 reasoning 文本
+	// 展开态：完整 reasoning 文本（使用缩进）
 	var sb strings.Builder
 	sb.WriteString(header)
 	sb.WriteString("\n")
-	sb.WriteString(StyleCardDivider.Render(strings.Repeat("─", width-2)))
-	sb.WriteString("\n")
-	sb.WriteString(StyleReasoning.Width(width - 2).Render(card.Thinking))
+	sb.WriteString(StyleReasoning.Render("  " + card.Thinking))
 
-	return borderStyle.Width(width).Render(sb.String())
+	return sb.String()
 }
 
 // appendLine 追加一行到内容末尾，超出上限时从头部裁剪。
@@ -363,6 +373,7 @@ func (c *ConversationView) AppendAssistant(text string) {
 		w = 80
 	}
 	rendered := RenderMarkdown(text, w-4) // 减去 padding
+	c.appendLine("") // 在助手回复前添加空行
 	c.appendLine(StyleAssistantLabel.Render("🤖 Assistant"))
 	c.appendLine(rendered)
 }
@@ -373,6 +384,7 @@ func (c *ConversationView) AppendUser(text string) {
 	if text == "" {
 		return
 	}
+	c.appendLine("") // 在用户消息前添加空行
 	c.appendLine(StyleUserLabel.Render("👤 You"))
 	c.appendLine(StyleUser.Render(text))
 }

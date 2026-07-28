@@ -51,10 +51,11 @@ type AgentSession struct {
 	CompactManager  *compact.CompactManager
 	HookRunner      *hook.Runner
 	Em              emitter.Emitter
-	SessionMgr      *session.Manager // 会话持久化管理器
-	SessionRecordID string           // 当前会话记录 ID
-	IsNewSession    bool             // 是否为新建会话（用于触发自动命名）
-	cachedTitle     string           // 缓存的会话标题，避免每帧读磁盘
+	PermissionMgr   *permission.Manager // 权限管理器（TUI 模式会替换其 Asker）
+	SessionMgr      *session.Manager    // 会话持久化管理器
+	SessionRecordID string              // 当前会话记录 ID
+	IsNewSession    bool                // 是否为新建会话（用于触发自动命名）
+	cachedTitle     string              // 缓存的会话标题，避免每帧读磁盘
 }
 
 // SwitchModel 热切换到指定模型预设，保留对话历史。
@@ -470,6 +471,7 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 }
 
 // initPermissionManager creates the permission manager based on output mode.
+// 注意：CLI/TUI 模式下 asker 后续会被 runCLIREPL 替换为 TuiAsker。
 func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Session) *permission.Manager {
 	var asker permission.Asker
 	switch outputMode {
@@ -478,7 +480,8 @@ func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Se
 	case "web":
 		asker = web.NewWebAsker(webSess)
 	default:
-		asker = buildAsker(cfg.Permission.Interactive, false, nil)
+		// CLI/TUI 模式先用 StdinAsker 占位，启动 bubbletea 后会被替换为 TuiAsker。
+		asker = permission.NewStdinAsker()
 	}
 	return permission.NewManager(
 		permission.Mode(cfg.Permission.Mode),
@@ -911,6 +914,11 @@ func runCLIREPL(s *AgentSession) {
 	tuiEmitter := ui.NewTuiEmitter(eventCh)
 	s.Em = tuiEmitter
 
+	// Replace permission asker with TUI-specific event-driven asker
+	if s.PermissionMgr != nil {
+		s.PermissionMgr.Asker = ui.NewTuiAsker(eventCh)
+	}
+
 	// Build bubbletea Model
 	model := ui.NewTUIModel(eventCh, s)
 
@@ -924,6 +932,11 @@ func runCLIREPL(s *AgentSession) {
 	if _, err := p.Run(); err != nil {
 		logger.Log.Fatal("TUI crashed", zap.Error(err))
 	}
+}
+
+// GetPermissionManager 返回当前权限管理器（实现 AgentSessionBridge 接口）。
+func (s *AgentSession) GetPermissionManager() *permission.Manager {
+	return s.PermissionMgr
 }
 
 // RunAgentLoop runs agentLoop in a goroutine and sends EventAgentDone when finished.
@@ -1134,7 +1147,7 @@ func main() {
 		ModelRegistry: modelRegistry,
 		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
 		TodoManager: todoManager, CompactManager: compactManager,
-		HookRunner: hookRunner, Em: em,
+		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
 	}
 
 	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})

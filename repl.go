@@ -1,7 +1,7 @@
 package main
 
 // 本文件实现各输出模式（web / cli）的 REPL 运行循环：
-// runWebREPL 驱动 web 服务与消息分发，runCLIREPL 驱动 bubbletea TUI。
+// runWebREPL 驱动 web 服务与消息分发，runCLIREPL 驱动逐行 CLI 前端。
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"zoomClient/fsm"
@@ -17,7 +18,6 @@ import (
 	"zoomClient/ui"
 	"zoomClient/web"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"go.uber.org/zap"
 )
 
@@ -158,31 +158,62 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 	}
 }
 
-// runCLIREPL runs the CLI mode using bubbletea full-screen TUI.
-func runCLIREPL(s *AgentSession) {
-	// 使用较大的缓冲区，防止 agentLoop 密集输出工具调用时阻塞事件通道
-	eventCh := make(chan ui.UIEvent, 512)
+// runCLIREPL runs the CLI mode REPL loop, reading input from stdin.
+func runCLIREPL(s *AgentSession, view *ui.Renderer) {
+	for {
+		input, ok := view.PromptUser()
+		if !ok {
+			s.Em.EmitInfo("EOF, exiting...")
+			break
+		}
+		if input == "" {
+			continue
+		}
+		// Slash command handling
+		if strings.HasPrefix(input, "/") {
+			if handleSlashCommand(input, s) {
+				break // /exit
+			}
+			continue
+		}
+		// Append user message and run agentLoop
+		s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: input})
+		agentLoop(s, nil)
 
-	// Create TuiEmitter that bridges agentLoop -> bubbletea
-	tuiEmitter := ui.NewTuiEmitter(eventCh)
-	s.Em = tuiEmitter
+		// Save session after each turn
+		if s.SessionMgr != nil {
+			record := &session.SessionRecord{
+				ID:        s.SessionRecordID,
+				Title:     "NewSession",
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Model:     s.ModelName,
+				TurnCount: s.State.TurnCount,
+				Messages:  s.State.Messages,
+			}
+			if err := s.SessionMgr.Save(record); err != nil {
+				logger.Log.Warn("save session failed", zap.Error(err))
+			}
+			// Generate title for new sessions (async)
+			if s.IsNewSession {
+				s.IsNewSession = false
+				go func() {
+					generatedTitle, err := s.SessionMgr.GenerateTitle(record)
+					if err != nil {
+						logger.Log.Warn("generate title failed", zap.Error(err))
+						return
+					}
+					if generatedTitle != "" {
+						record.Title = generatedTitle
+						if serr := s.SessionMgr.Save(record); serr != nil {
+							logger.Log.Warn("save title failed", zap.Error(serr))
+						}
+						s.Em.EmitInfo(fmt.Sprintf("Session title: %s", generatedTitle))
+					}
+				}()
+			}
+		}
 
-	// Replace permission asker with TUI-specific event-driven asker
-	if s.PermissionMgr != nil {
-		s.PermissionMgr.Asker = ui.NewTuiAsker(eventCh)
-	}
-
-	// Build bubbletea Model
-	model := ui.NewTUIModel(eventCh, s)
-
-	// Start bubbletea program (this takes over the terminal)
-	p := tea.NewProgram(
-		model,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
-
-	if _, err := p.Run(); err != nil {
-		logger.Log.Fatal("TUI crashed", zap.Error(err))
+		s.Em.EmitTurnSeparator()
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"zoomClient/skills"
 	"zoomClient/subagent"
 	"zoomClient/tools"
+	"zoomClient/ui"
 	"zoomClient/utils"
 	"zoomClient/web"
 
@@ -45,20 +46,21 @@ func parseFlags() cliFlags {
 }
 
 // initEmitter creates the appropriate emitter and optional session based on output mode.
-func initEmitter(outputMode string) (emitter.Emitter, *web.Session) {
+// CLI 模式返回 ui.Renderer（同时充当 emitter），供 runCLIREPL 渲染与读取输入。
+func initEmitter(outputMode string) (emitter.Emitter, *ui.Renderer, *web.Session) {
 	log := logger.Log
 	switch strings.ToLower(outputMode) {
 	case "api":
-		return emitter.NewApiEmitter(os.Stdout), nil
+		return emitter.NewApiEmitter(os.Stdout), nil, nil
 	case "web":
 		sess := web.NewSession(uuid.NewString(), "")
-		return web.NewSseEmitter(sess), sess
+		return web.NewSseEmitter(sess), nil, sess
 	case "cli", "":
-		// CLI mode: emitter is set later by runCLIREPL (TuiEmitter)
-		return nil, nil
+		view := ui.New()
+		return view, view, nil
 	default:
 		log.Fatal("Unsupported output mode", zap.String("--mode", outputMode))
-		return nil, nil
+		return nil, nil, nil
 	}
 }
 
@@ -210,7 +212,7 @@ func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Se
 	case "web":
 		asker = web.NewWebAsker(webSess)
 	default:
-		// CLI/TUI 模式先用 StdinAsker 占位，启动 bubbletea 后会被替换为 TuiAsker。
+		// CLI 模式使用 StdinAsker 进行终端文本交互
 		asker = permission.NewStdinAsker()
 	}
 	return permission.NewManager(

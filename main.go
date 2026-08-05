@@ -39,7 +39,7 @@ func main() {
 	defer cancel()
 
 	// Initialize emitter & UI
-	em, webSess := initEmitter(flags.OutputMode)
+	em, view, webSess := initEmitter(flags.OutputMode)
 
 	// Initialize model client
 	client, modelname := initClient(flags.ModelType, cfg, em)
@@ -172,7 +172,7 @@ func main() {
 	case "web":
 		runWebREPL(ctx, sess, webSess, flags.WebPort, sessMgr)
 	default:
-		runCLIREPL(sess)
+		runCLIREPL(sess, view)
 	}
 
 	// Session cleanup

@@ -15,6 +15,8 @@ type ToolContext struct {
 	Logger             *zap.Logger     // 结构化日志
 	SessionID          string          // 当前会话标识
 	AppState           map[string]any  //应用状态
+	Messages           []any           // 当前消息列表
+	Notifications      []any           // 通知队列
 }
 
 type ToolResult struct {

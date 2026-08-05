@@ -98,8 +98,8 @@ func convertToAnthropicMessages(messages []fsm.Message) ([]anthropic.MessagePara
 					OfToolUse: &anthropic.ToolUseBlockParam{
 						Type:  "tool_use",
 						ID:    tc.ID,
-						Name:  tc.Function.Name,
-						Input: tc.Function.Arguments,
+						Name:  tc.Name,
+						Input: tc.Arguments,
 					},
 				})
 			}
@@ -180,11 +180,9 @@ func (c *AnthropicClient) Chat(model string, messages []fsm.Message, toolList []
 				_ = json.Unmarshal(inputJSON, &argsMap)
 			}
 			toolCalls = append(toolCalls, tools.ToolCall{
-				ID: b.ID,
-				Function: tools.ToolCallFunction{
-					Name:      b.Name,
-					Arguments: argsMap,
-				},
+				ID:        b.ID,
+				Name:      b.Name,
+				Arguments: argsMap,
 			})
 		}
 	}

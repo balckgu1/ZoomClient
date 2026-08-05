@@ -103,7 +103,7 @@ func buildIDToNameMap(messages []fsm.Message) map[string]string {
 	for _, msg := range messages {
 		if msg.Role == "assistant" {
 			for _, tc := range msg.ToolCalls {
-				m[tc.ID] = tc.Function.Name
+				m[tc.ID] = tc.Name
 			}
 		}
 	}
@@ -146,8 +146,8 @@ func convertToGeminiContents(messages []fsm.Message) ([]*genai.Content, string) 
 			for _, tc := range msg.ToolCalls {
 				parts = append(parts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{
-						Name: tc.Function.Name,
-						Args: tc.Function.Arguments,
+						Name: tc.Name,
+						Args: tc.Arguments,
 					},
 				})
 			}
@@ -243,11 +243,9 @@ func (c *GeminiClient) Chat(model string, messages []fsm.Message, toolList []too
 			if part.FunctionCall != nil {
 				toolCalls = append(toolCalls, tools.ToolCall{
 					// Gemini 不返回工具调用 ID，使用函数名+序号构造唯一 ID
-					ID: fmt.Sprintf("gemini-%s-%d", part.FunctionCall.Name, len(toolCalls)),
-					Function: tools.ToolCallFunction{
-						Name:      part.FunctionCall.Name,
-						Arguments: part.FunctionCall.Args,
-					},
+					ID:        fmt.Sprintf("gemini-%s-%d", part.FunctionCall.Name, len(toolCalls)),
+					Name:      part.FunctionCall.Name,
+					Arguments: part.FunctionCall.Args,
 				})
 			}
 		}

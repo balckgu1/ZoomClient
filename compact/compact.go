@@ -168,8 +168,8 @@ func (m *CompactManager) EstimateSize(messages []fsm.Message) int {
 		total += len(msg.ReasoningContent)
 		total += len(msg.ToolCallID)
 		for _, tc := range msg.ToolCalls {
-			total += len(tc.Function.Name)
-			b, _ := json.Marshal(tc.Function.Arguments)
+			total += len(tc.Name)
+			b, _ := json.Marshal(tc.Arguments)
 			total += len(b)
 		}
 	}
@@ -281,8 +281,8 @@ func renderForSummary(messages []fsm.Message) string {
 		}
 		for _, tc := range msg.ToolCalls {
 			sb.WriteString("\n  -> tool_call: ")
-			sb.WriteString(tc.Function.Name)
-			args, _ := json.Marshal(tc.Function.Arguments)
+			sb.WriteString(tc.Name)
+			args, _ := json.Marshal(tc.Arguments)
 			sb.WriteString(" args=")
 			sb.Write(args)
 		}

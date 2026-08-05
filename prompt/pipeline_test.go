@@ -117,7 +117,7 @@ func TestAssemblePayload_EmptyMessages(t *testing.T) {
 func TestNormalize_PreservesToolCallsWithEmptyContent(t *testing.T) {
 	p := newTestPipeline()
 	msgs := []fsm.Message{
-		{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "1", Function: tools.ToolCallFunction{Name: "test"}}}},
+		{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "1", Name: "test"}}},
 	}
 
 	payload := p.AssemblePayload(msgs)

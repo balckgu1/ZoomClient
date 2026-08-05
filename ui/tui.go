@@ -9,15 +9,17 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"zoomClient/permission"
 )
 
 // TUIModel 是 bubbletea 的核心 Model，持有所有子组件和运行时状态。
 type TUIModel struct {
-	conversation *ConversationView
-	inputArea    *InputArea
-	statusBar    *StatusBar
-	slashOverlay *SlashOverlay
-	helpOverlay  *HelpOverlay
+	conversation      *ConversationView
+	inputArea         *InputArea
+	statusBar         *StatusBar
+	slashOverlay      *SlashOverlay
+	helpOverlay       *HelpOverlay
+	permissionOverlay *PermissionOverlay
 
 	width, height int
 
@@ -39,8 +41,9 @@ type AgentSessionBridge interface {
 	WorkDir() string
 	LogPath() string
 	TurnCount() int
-	SessionTitle() string   // 当前会话标题
-	TokenEstimate() int     // 累计对话 token 估算
+	SessionTitle() string        // 当前会话标题
+	TokenEstimate() int          // 累计对话 token 估算
+	GetPermissionManager() *permission.Manager // 权限管理器（TUI 模式替换 Asker）
 }
 
 // listenEvents 返回一个 tea.Cmd，在 goroutine 中监听 eventCh 并转发为 tea.Msg。
@@ -57,11 +60,12 @@ func listenEvents(ch chan UIEvent) tea.Cmd {
 // NewTUIModel 创建一个新的 TUIModel。
 func NewTUIModel(eventCh chan UIEvent, bridge AgentSessionBridge) TUIModel {
 	return TUIModel{
-		conversation: NewConversationView(),
-		inputArea:    NewInputArea(),
-		statusBar:    NewStatusBar(),
-		slashOverlay: NewSlashOverlay(),
-		helpOverlay:  NewHelpOverlay(),
+		conversation:      NewConversationView(),
+		inputArea:         NewInputArea(),
+		statusBar:         NewStatusBar(),
+		slashOverlay:      NewSlashOverlay(),
+		helpOverlay:       NewHelpOverlay(),
+		permissionOverlay: NewPermissionOverlay(),
 
 		showLogo:     true,
 		logoShownAt:  time.Now(),
@@ -71,7 +75,7 @@ func NewTUIModel(eventCh chan UIEvent, bridge AgentSessionBridge) TUIModel {
 }
 
 // logoDisplayDuration 启动 LOGO 显示时长。
-const logoDisplayDuration = 1200 * time.Millisecond
+const logoDisplayDuration = 800 * time.Millisecond
 
 // Init 是 bubbletea 的初始化 Cmd。
 func (m TUIModel) Init() tea.Cmd {
@@ -138,6 +142,10 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// resize 时重置 viewport 状态，防止布局错乱
+		if m.conversation != nil {
+			m.conversation.vp.YOffset = 0
+		}
 		return m, tea.Batch(cmds...)
 
 	case UIEvent:
@@ -161,6 +169,11 @@ func (m TUIModel) View() string {
 		return "Initializing..."
 	}
 
+	// 终端尺寸过小，显示简化布局
+	if m.width < 40 {
+		return "Terminal too small (min 40 columns)"
+	}
+
 	// 启动 LOGO 画面
 	if m.showLogo {
 		return LogoScreen(m.width)
@@ -168,15 +181,15 @@ func (m TUIModel) View() string {
 
 	// 动态布局计算：根据终端宽度自适应
 	inputH := calcInputHeight(m.width)
-	convH := m.height - inputH - 1 - 2 // -1 状态栏, -2 面板边框
+	// 去掉对话流外边框，不再需要 -2 面板边框
+	convH := m.height - inputH - 1 // -1 状态栏
 	minConvH := 8
 	if convH < minConvH {
 		convH = minConvH
 	}
 
-	// 对话流（全宽），传递实际可用宽度
+	// 对话流（全宽无边框），传递实际可用宽度
 	convView := m.conversation.View(m.width, convH)
-	convPanel := StylePanelBorder.Width(m.width - 2).Render(convView)
 
 	// Slash 下拉浮层（仅在激活时渲染，浮于对话流上方）
 	var slashView string
@@ -198,7 +211,81 @@ func (m TUIModel) View() string {
 		m.agentSession.TurnCount(), m.agentSession.SessionTitle(),
 		m.agentSession.TokenEstimate(), m.agentSession.WorkDir(), m.agentSession.LogPath())
 
-	return lipgloss.JoinVertical(lipgloss.Top, convPanel, slashView, helpView, inputView, bar)
+	// 主界面（对话流 + 浮层 + 输入区 + 状态栏）
+	mainView := lipgloss.JoinVertical(lipgloss.Top, convView, slashView, helpView, inputView, bar)
+
+	// 权限确认浮层（最高优先级，居中模态显示）
+	if m.permissionOverlay.Visible() {
+		permView := m.permissionOverlay.View(m.width)
+		// 使用 Place 将浮层居中显示
+		overlay := lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			permView,
+			lipgloss.WithWhitespaceChars(" "),
+		)
+		// 将主界面和浮层叠加
+		return overlayMainView(mainView, overlay, m.width, m.height)
+	}
+
+	return mainView
+}
+
+// overlayMainView 将浮层叠加到主界面上（保留主界面内容作为背景）。
+func overlayMainView(mainView, overlay string, width, height int) string {
+	mainLines := strings.Split(mainView, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	// 确保主界面行数正确
+	for len(mainLines) < height {
+		mainLines = append(mainLines, strings.Repeat(" ", width))
+	}
+	if len(mainLines) > height {
+		mainLines = mainLines[:height]
+	}
+
+	// 计算浮层在主界面上的起始行（居中）
+	overlayH := len(overlayLines)
+	startY := (height - overlayH) / 2
+	if startY < 0 {
+		startY = 0
+	}
+
+	var sb strings.Builder
+	for i := 0; i < height; i++ {
+		if i >= startY && i < startY+overlayH {
+			overlayLine := overlayLines[i-startY]
+			overlayW := lipgloss.Width(overlayLine)
+			mainLine := mainLines[i]
+			mainLineW := lipgloss.Width(mainLine)
+
+			// 计算浮层在当前行的起始列（居中）
+			startX := (width - overlayW) / 2
+			if startX < 0 {
+				startX = 0
+			}
+
+			// 将浮层叠加到主界面上
+			if startX >= mainLineW {
+				sb.WriteString(mainLine)
+				sb.WriteString(strings.Repeat(" ", startX-mainLineW))
+				sb.WriteString(overlayLine)
+			} else {
+				// 截断主界面内容，为浮层腾出空间
+				prefix := truncateLineANSI(mainLine, startX)
+				sb.WriteString(prefix)
+				sb.WriteString(overlayLine)
+			}
+		} else {
+			sb.WriteString(mainLines[i])
+		}
+
+		if i < height-1 {
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
 }
 
 // calcInputHeight 根据终端宽度计算输入区高度。
@@ -217,6 +304,12 @@ func calcInputHeight(width int) int {
 // handleKey 处理键盘事件。
 func (m TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// 权限浮层按键拦截（最高优先级）
+	if m.permissionOverlay.Visible() {
+		m.permissionOverlay.HandleKey(key)
+		return m, nil
+	}
 
 	// Slash overlay 按键拦截
 	if m.slashOverlay.Visible() {
@@ -252,12 +345,21 @@ func (m TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 全局快捷键
 	switch key {
 	case "?", "ctrl+h":
+		// 权限浮层打开时，忽略帮助快捷键
+		if m.permissionOverlay.Visible() {
+			return m, nil
+		}
 		m.helpOverlay.Toggle()
 		return m, nil
 	case "ctrl+q":
 		m.quit = true
 		return m, tea.Quit
 	case "ctrl+c":
+		if m.permissionOverlay.Visible() {
+			// Esc / N 行为：拒绝权限请求
+			m.permissionOverlay.HandleKey("esc")
+			return m, nil
+		}
 		if m.isAgentRunning {
 			m.isAgentRunning = false
 			m.conversation.AppendInfo("Generation stopped by user")
@@ -266,24 +368,30 @@ func (m TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case "ctrl+l":
+		// 权限浮层打开时，忽略清空快捷键
+		if m.permissionOverlay.Visible() {
+			return m, nil
+		}
 		m.conversation.Clear()
 		return m, nil
 	}
 
-	// 滚动快捷键（agentLoop 运行中也允许）
-	switch key {
-	case "pgup", "ctrl+up":
-		m.conversation.ScrollUp()
-		return m, nil
-	case "pgdown", "ctrl+down":
-		m.conversation.ScrollDown()
-		return m, nil
-	case "home":
-		m.conversation.ScrollToTop()
-		return m, nil
-	case "end":
-		m.conversation.ScrollToBottom()
-		return m, nil
+	// 滚动快捷键（agentLoop 运行中也允许；权限浮层打开时忽略）
+	if !m.permissionOverlay.Visible() {
+		switch key {
+		case "pgup", "ctrl+up":
+			m.conversation.ScrollUp()
+			return m, nil
+		case "pgdown", "ctrl+down":
+			m.conversation.ScrollDown()
+			return m, nil
+		case "home":
+			m.conversation.ScrollToTop()
+			return m, nil
+		case "end":
+			m.conversation.ScrollToBottom()
+			return m, nil
+		}
 	}
 
 	// agentLoop 运行中，输入框不响应（但滚动仍然可用，上面已处理）
@@ -291,14 +399,16 @@ func (m TUIModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// 输入历史导航（↑↓），仅在无卡片焦点且无 slash 浮层时生效
-	if key == "up" && !m.conversation.HasFocusedCard() {
-		m.inputArea.HistoryUp()
-		return m, nil
-	}
-	if key == "down" && !m.conversation.HasFocusedCard() {
-		m.inputArea.HistoryDown()
-		return m, nil
+	// 输入历史导航（↑↓），仅在无卡片焦点且无 slash/权限浮层时生效
+	if !m.permissionOverlay.Visible() && !m.conversation.HasFocusedCard() {
+		if key == "up" {
+			m.inputArea.HistoryUp()
+			return m, nil
+		}
+		if key == "down" {
+			m.inputArea.HistoryDown()
+			return m, nil
+		}
 	}
 
 	// 卡片导航（← → 切换焦点）
@@ -443,6 +553,17 @@ func (m TUIModel) handleUIEvent(ev UIEvent) (tea.Model, tea.Cmd) {
 		m.inputArea.SetThinking(false)
 		// 恢复 slash 检测
 		m.updateSlashOverlay()
+
+	case EventPermissionAsk:
+		if data, ok := ev.Data.(PermissionAskData); ok {
+			// 从 TuiAsker 获取回复通道
+			if pm := m.agentSession.GetPermissionManager(); pm != nil {
+				if asker, ok := pm.Asker.(*TuiAsker); ok {
+					replyCh := asker.GetReplyChannel(data.ID)
+					m.permissionOverlay.Show(data.ID, data.Tool, data.Args, data.Reason, replyCh)
+				}
+			}
+		}
 	}
 
 	// 继续监听事件

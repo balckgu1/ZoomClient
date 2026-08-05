@@ -43,8 +43,8 @@ func (m mockEditTool) Call(args map[string]any, ctx *ToolContext) ToolResult {
 }
 
 // newTestRegistry 创建包含模拟工具的测试注册表
-func newTestRegistry() *Registry {
-	registry := NewRegistry()
+func newTestRegistry() *ToolRegister {
+	registry := NewToolRegister()
 	registry.Register(mockReadTool{})
 	registry.Register(mockWriteTool{})
 	registry.Register(mockEditTool{})
@@ -54,10 +54,8 @@ func newTestRegistry() *Registry {
 // makeToolCall 便捷创建 ToolCall 的辅助函数
 func makeToolCall(name string, args map[string]any) ToolCall {
 	return ToolCall{
-		Function: ToolCallFunction{
-			Name:      name,
-			Arguments: args,
-		},
+		Name:      name,
+		Arguments: args,
 	}
 }
 

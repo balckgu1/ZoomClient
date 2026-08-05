@@ -45,16 +45,17 @@ type AgentSession struct {
 	ModelName       string
 	ModelRegistry   *model.Registry
 	Pipeline        *prompt.MessagePipeline
-	Registry        *tools.Registry
+	Registry        *tools.ToolRegister
 	ToolCtx         *tools.ToolContext
 	TodoManager     *tools.TodoManager
 	CompactManager  *compact.CompactManager
 	HookRunner      *hook.Runner
 	Em              emitter.Emitter
-	SessionMgr      *session.Manager // 会话持久化管理器
-	SessionRecordID string           // 当前会话记录 ID
-	IsNewSession    bool             // 是否为新建会话（用于触发自动命名）
-	cachedTitle     string           // 缓存的会话标题，避免每帧读磁盘
+	PermissionMgr   *permission.Manager // 权限管理器（TUI 模式会替换其 Asker）
+	SessionMgr      *session.Manager    // 会话持久化管理器
+	SessionRecordID string              // 当前会话记录 ID
+	IsNewSession    bool                // 是否为新建会话（用于触发自动命名）
+	cachedTitle     string              // 缓存的会话标题，避免每帧读磁盘
 }
 
 // SwitchModel 热切换到指定模型预设，保留对话历史。
@@ -157,18 +158,18 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 		// Render all tool calls
 		for _, tc := range toolCalls {
-			if tc.Function.Name == "sub_task" {
-				prompt, _ := tc.Function.Arguments["prompt"].(string)
+			if tc.Name == "sub_task" {
+				prompt, _ := tc.Arguments["prompt"].(string)
 				em.EmitSubAgent(prompt)
 				continue
 			}
-			em.EmitToolCall(tc.Function.Name, formatArgsPreview(tc.Function.Arguments))
+			em.EmitToolCall(tc.Name, formatArgsPreview(tc.Arguments))
 		}
 
 		// Check if the Todo tool was called in this round
 		usedTodo := false
 		for _, tc := range toolCalls {
-			if tc.Function.Name == "todo" {
+			if tc.Name == "todo" {
 				usedTodo = true
 				break
 			}
@@ -178,8 +179,8 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		preDecisions := make([]hook.HookResult, len(toolCalls))
 		for i, tc := range toolCalls {
 			preDecisions[i] = hookRunner.Run(hook.EventPreToolUse, map[string]any{
-				"tool_name":       tc.Function.Name,
-				"input":           tc.Function.Arguments,
+				"tool_name":       tc.Name,
+				"input":           tc.Arguments,
 				"call_index":      i,
 				"max_tools":       cfg.AgentLoop.MaxTools,
 				"tool_ctx":        toolCtx,
@@ -193,7 +194,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 				})
 			}
 			if preDecisions[i].ExitCode == hook.ExitBlock {
-				em.EmitHookBlocked(tc.Function.Name, preDecisions[i].Message)
+				em.EmitHookBlocked(tc.Name, preDecisions[i].Message)
 			}
 		}
 
@@ -206,18 +207,18 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		// Write Tool Result back to state.messages in the order of call
 		for resultIndex, result := range results {
 			log.Info("tool call finished",
-				zap.String("tool name", toolCalls[resultIndex].Function.Name),
-				zap.String("args", formatArgsPreview(toolCalls[resultIndex].Function.Arguments)),
+				zap.String("tool name", toolCalls[resultIndex].Name),
+				zap.String("args", formatArgsPreview(toolCalls[resultIndex].Arguments)),
 				zap.String("result", result.Content),
 			)
 
 			// Render tool result summary
 			if preDecisions[resultIndex].ExitCode != hook.ExitBlock {
-				em.EmitToolResult(toolCalls[resultIndex].Function.Name, result.Content, result.IsError)
+				em.EmitToolResult(toolCalls[resultIndex].Name, result.Content, result.IsError)
 			}
 
 			// If todo tool was called and succeeded, render the latest plan panel to user
-			if toolCalls[resultIndex].Function.Name == "todo" && result.Ok {
+			if toolCalls[resultIndex].Name == "todo" && result.Ok {
 				em.EmitTodoPanel(todoManager.Render())
 			}
 
@@ -225,7 +226,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
 			if persistedContent != result.Content {
 				log.Info("tool result content too large, persisted to disk and replaced with preview",
-					zap.String("tool name", toolCalls[resultIndex].Function.Name),
+					zap.String("tool name", toolCalls[resultIndex].Name),
 					zap.Int("origin bytes", len(result.Content)),
 				)
 			}
@@ -412,10 +413,10 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 // initTools creates the tool registry and registers all tools.
 func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	skillregistry *skills.SkillRegistry, toolCtx *tools.ToolContext, state *fsm.State,
-	permitMgr *permission.Manager) (*tools.Registry, *tools.TodoManager, *compact.CompactManager) {
+	permitMgr *permission.Manager) (*tools.ToolRegister, *tools.TodoManager, *compact.CompactManager) {
 	log := logger.Log
 
-	registry := tools.NewRegistry()
+	registry := tools.NewToolRegister()
 
 	// Register basic tools
 	registry.Register(tools.WriteFileTool{})
@@ -473,17 +474,16 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Session) *permission.Manager {
 	var asker permission.Asker
 	switch outputMode {
-	case "api":
-		asker = permission.NewApiAsker(os.Stdout)
 	case "web":
 		asker = web.NewWebAsker(webSess)
 	default:
-		asker = buildAsker(cfg.Permission.Interactive, false, nil)
+		// CLI/TUI 模式先用 StdinAsker 占位，启动 bubbletea 后会被替换为 TuiAsker。
+		asker = permission.NewStdinAsker()
 	}
 	return permission.NewManager(
 		permission.Mode(cfg.Permission.Mode),
-		buildPermissionRules(cfg.Permission.DenyRules),
-		buildPermissionRules(cfg.Permission.AllowRules),
+		permission.BuildPermissionRules(cfg.Permission.DenyRules),
+		permission.BuildPermissionRules(cfg.Permission.AllowRules),
 		asker,
 	)
 }
@@ -904,11 +904,17 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 
 // runCLIREPL runs the CLI mode using bubbletea full-screen TUI.
 func runCLIREPL(s *AgentSession) {
-	eventCh := make(chan ui.UIEvent, 64)
+	// 使用较大的缓冲区，防止 agentLoop 密集输出工具调用时阻塞事件通道
+	eventCh := make(chan ui.UIEvent, 512)
 
 	// Create TuiEmitter that bridges agentLoop -> bubbletea
 	tuiEmitter := ui.NewTuiEmitter(eventCh)
 	s.Em = tuiEmitter
+
+	// Replace permission asker with TUI-specific event-driven asker
+	if s.PermissionMgr != nil {
+		s.PermissionMgr.Asker = ui.NewTuiAsker(eventCh)
+	}
 
 	// Build bubbletea Model
 	model := ui.NewTUIModel(eventCh, s)
@@ -923,6 +929,11 @@ func runCLIREPL(s *AgentSession) {
 	if _, err := p.Run(); err != nil {
 		logger.Log.Fatal("TUI crashed", zap.Error(err))
 	}
+}
+
+// GetPermissionManager 返回当前权限管理器（实现 AgentSessionBridge 接口）。
+func (s *AgentSession) GetPermissionManager() *permission.Manager {
+	return s.PermissionMgr
 }
 
 // RunAgentLoop runs agentLoop in a goroutine and sends EventAgentDone when finished.
@@ -1005,8 +1016,8 @@ func (s *AgentSession) TokenEstimate() int {
 		totalChars += len(messageContentToString(msg.Content))
 		totalChars += len(msg.ReasoningContent)
 		for _, tc := range msg.ToolCalls {
-			totalChars += len(tc.Function.Name)
-			for _, v := range tc.Function.Arguments {
+			totalChars += len(tc.Name)
+			for _, v := range tc.Arguments {
 				totalChars += len(fmt.Sprintf("%v", v))
 			}
 		}
@@ -1047,7 +1058,8 @@ func main() {
 		configDir = "./config"
 	}
 	modelRegistry := model.NewRegistry(configDir + "/models.yaml")
-	// Register default presets from config.yaml (openai and ollama only)
+
+	// Register default presets from config.yaml
 	if cfg.OpenAI.ApiKey != "" || cfg.OpenAI.BaseURL != "" {
 		modelRegistry.RegisterDefault(&model.Preset{
 			Name:      "openai",
@@ -1065,6 +1077,7 @@ func main() {
 			ModelName: cfg.Ollama.ModelName,
 		})
 	}
+
 	// Set active preset to current model type
 	modelRegistry.SetActive(flags.ModelType)
 
@@ -1133,7 +1146,7 @@ func main() {
 		ModelRegistry: modelRegistry,
 		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
 		TodoManager: todoManager, CompactManager: compactManager,
-		HookRunner: hookRunner, Em: em,
+		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
 	}
 
 	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
@@ -1208,29 +1221,12 @@ func formatArgsPreview(args map[string]interface{}) string {
 	return s
 }
 
-// buildPermissionRules converts the PermissionRuleConfig list in config to permission.Rule.
-func buildPermissionRules(rawRules []utils.PermissionRuleConfig) []permission.Rule {
-	rules := make([]permission.Rule, 0, len(rawRules))
-	for _, raw := range rawRules {
-		rules = append(rules, permission.Rule{
-			Tool:     raw.Tool,
-			Behavior: permission.Behavior(raw.Behavior),
-			Path:     raw.Path,
-			Content:  raw.Content,
-		})
-	}
-	return rules
-}
-
 // buildAsker selects the interaction method when ask is triggered based on config.
 //   - interactive=true + CLI mode   → StdinAsker（终端文本交互）
 //   - interactive=false             → DenyAsker（安全默认值）
 func buildAsker(interactive bool, apiMode bool, w io.Writer) permission.Asker {
 	if !interactive {
 		return permission.DenyAsker{}
-	}
-	if apiMode {
-		return permission.NewApiAsker(w)
 	}
 	return permission.NewStdinAsker()
 }
@@ -1291,8 +1287,8 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 	for i, tc := range toolCalls {
 		if results[i].IsError {
 			errordecision := runner.Run(hook.EventToolError, map[string]any{
-				"tool_name": tc.Function.Name,
-				"input":     tc.Function.Arguments,
+				"tool_name": tc.Name,
+				"input":     tc.Arguments,
 				"output":    results[i].Content,
 			})
 			if errordecision.ExitCode == hook.ExitInject && errordecision.Message != "" {
@@ -1304,8 +1300,8 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 			}
 		}
 		runner.Run(hook.EventPostToolUse, map[string]any{
-			"tool_name": tc.Function.Name,
-			"input":     tc.Function.Arguments,
+			"tool_name": tc.Name,
+			"input":     tc.Arguments,
 			"output":    results[i].Content,
 		})
 	}

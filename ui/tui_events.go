@@ -20,7 +20,8 @@ const (
 	EventInfo
 	EventTurnSeparator
 	EventSessionEnd
-	EventAgentDone // agentLoop 本轮结束，UI 恢复输入焦点
+	EventAgentDone      // agentLoop 本轮结束，UI 恢复输入焦点
+	EventPermissionAsk  // 权限确认请求
 )
 
 // UIEvent 是 agentLoop 推送给 bubbletea 的统一事件体。
@@ -40,4 +41,12 @@ type ToolResultData struct {
 	Name    string
 	Content string
 	IsError bool
+}
+
+// PermissionAskData 携带权限确认请求信息。
+type PermissionAskData struct {
+	ID     string // 权限请求唯一标识
+	Tool   string // 工具名称
+	Args   string // 工具参数（JSON 字符串）
+	Reason string // 请求原因
 }

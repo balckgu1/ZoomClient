@@ -88,7 +88,7 @@ func (o *SlashOverlay) GetSelected() string {
 	return ""
 }
 
-// View 渲染斜杠命令浮层。
+// View 渲染斜杠命令浮层（简化版，无边框）。
 func (o *SlashOverlay) View(width int) string {
 	if !o.visible || len(o.filtered) == 0 {
 		return ""
@@ -119,7 +119,7 @@ func (o *SlashOverlay) View(width int) string {
 		style := StyleSeparator
 		if i == o.selected {
 			marker = "▸ "
-			style = StyleToolCall
+			style = StyleSlashSelected
 		}
 		line := fmt.Sprintf("%-16s %s", marker+cmd.Name, cmd.Description)
 		sb.WriteString(style.Render(line))
@@ -131,5 +131,5 @@ func (o *SlashOverlay) View(width int) string {
 	sb.WriteString("\n")
 	sb.WriteString(StyleSeparator.Render("  ↑↓ select  ·  Tab complete  ·  Esc close"))
 
-	return StyleCardToolCollapsed.Width(maxW + 2).Render(sb.String())
+	return sb.String()
 }

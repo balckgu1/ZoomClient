@@ -24,14 +24,14 @@ func Init() {
 	encoderCfg.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05.000")
 	encoder := zapcore.NewConsoleEncoder(encoderCfg)
 
-	// 文件 sink：全量 DEBUG 起
+	// 文件 sink
 	file, err := os.OpenFile(LogFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		panic("failed to open log file: " + err.Error())
 	}
 	fileCore := zapcore.NewCore(encoder, zapcore.AddSync(file), zap.DebugLevel)
 
-	// stderr 兜底 sink：仅 ERROR 及以上，方便致命错误时仍能看到
+	// stderr 兜底 sink
 	stderrEncoderCfg := zap.NewDevelopmentEncoderConfig()
 	stderrEncoderCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	stderrEncoderCfg.EncodeTime = zapcore.TimeEncoderOfLayout("15:04:05.000")

@@ -186,6 +186,18 @@ var (
 				BorderForeground(cSky).
 				Padding(0, 1)
 
+	// 卡片焦点态（简化版，无边框，使用背景色）
+	StyleCardFocusedSimple = lipgloss.NewStyle().
+				Background(cSurface).
+				Foreground(cSky).
+				Bold(true)
+
+	// Slash 命令选中态（背景色高亮）
+	StyleSlashSelected = lipgloss.NewStyle().
+				Background(cSurface).
+				Foreground(cYellow).
+				Bold(true)
+
 	// 卡片分隔线
 	StyleCardDivider = lipgloss.NewStyle().
 				Foreground(cOverlay)

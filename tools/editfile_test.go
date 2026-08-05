@@ -363,7 +363,7 @@ func TestEditFileTool_Call_LargeContent(t *testing.T) {
 // TestEditFileTool_ViaRegistry verifies execution through the Registry.
 func TestEditFileTool_ViaRegistry(t *testing.T) {
 	workDir := t.TempDir()
-	registry := NewRegistry()
+	registry := NewToolRegister()
 	registry.Register(EditFileTool{})
 	ctx := &ToolContext{WorkPath: workDir}
 

@@ -107,8 +107,8 @@ func TestBuildIDToNameMap(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
-				{ID: "call_1", Function: tools.ToolCallFunction{Name: "read_file"}},
-				{ID: "call_2", Function: tools.ToolCallFunction{Name: "write_file"}},
+				{ID: "call_1", Name: "read_file"},
+				{ID: "call_2", Name: "write_file"},
 			},
 		},
 	}
@@ -207,11 +207,9 @@ func TestConvertToGeminiContents_AssistantWithToolCalls(t *testing.T) {
 			Content: "I'll read them",
 			ToolCalls: []tools.ToolCall{
 				{
-					ID: "call_1",
-					Function: tools.ToolCallFunction{
-						Name:      "read_file",
-						Arguments: map[string]interface{}{"path": "/tmp/a.txt"},
-					},
+					ID:        "call_1",
+					Name:      "read_file",
+					Arguments: map[string]interface{}{"path": "/tmp/a.txt"},
 				},
 			},
 		},
@@ -237,7 +235,7 @@ func TestConvertToGeminiContents_ToolResults(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
-				{ID: "call_1", Function: tools.ToolCallFunction{Name: "read_file"}},
+				{ID: "call_1", Name: "read_file"},
 			},
 		},
 		{Role: "tool", Content: "file content", ToolCallID: "call_1"},
@@ -266,8 +264,8 @@ func TestConvertToGeminiContents_MultipleToolResults(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
-				{ID: "call_1", Function: tools.ToolCallFunction{Name: "read_file"}},
-				{ID: "call_2", Function: tools.ToolCallFunction{Name: "write_file"}},
+				{ID: "call_1", Name: "read_file"},
+				{ID: "call_2", Name: "write_file"},
 			},
 		},
 		{Role: "tool", Content: "content a", ToolCallID: "call_1"},

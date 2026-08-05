@@ -410,7 +410,7 @@ func TestWriteFileTool_Call_UnicodeContent(t *testing.T) {
 // TestWriteFileTool_ViaRegistry 测试通过 Registry 注册并执行 WriteFileTool
 func TestWriteFileTool_ViaRegistry(t *testing.T) {
 	workDir := t.TempDir()
-	registry := NewRegistry()
+	registry := NewToolRegister()
 	registry.Register(WriteFileTool{})
 	ctx := newTestContext(workDir)
 
@@ -430,6 +430,6 @@ func TestWriteFileTool_ViaRegistry(t *testing.T) {
 		t.Fatalf("Testing Error: %v", err)
 	}
 	if string(data) != "via registry" {
-		t.Errorf("Testing Error, expect: %q，actual: %q", "via registry", string(data))
+		t.Errorf("Testing Error, expect: %q, actual: %q", "via registry", string(data))
 	}
 }

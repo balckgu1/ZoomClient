@@ -68,11 +68,9 @@ func TestConvertToOpenAIMessages(t *testing.T) {
 			Content: "Let me help",
 			ToolCalls: []tools.ToolCall{
 				{
-					ID: "call_123",
-					Function: tools.ToolCallFunction{
-						Name:      "read_file",
-						Arguments: map[string]interface{}{"path": "/tmp/test.txt"},
-					},
+					ID:        "call_123",
+					Name:      "read_file",
+					Arguments: map[string]interface{}{"path": "/tmp/test.txt"},
 				},
 			},
 		},
@@ -159,14 +157,14 @@ func TestConvertFromOpenAIToolCalls(t *testing.T) {
 	if result[0].ID != "call_456" {
 		t.Errorf("expected id 'call_456', got %s", result[0].ID)
 	}
-	if result[0].Function.Name != "write_file" {
-		t.Errorf("expected name 'write_file', got %s", result[0].Function.Name)
+	if result[0].Name != "write_file" {
+		t.Errorf("expected name 'write_file', got %s", result[0].Name)
 	}
-	if result[0].Function.Arguments["path"] != "/tmp/out.txt" {
-		t.Errorf("expected path '/tmp/out.txt', got %v", result[0].Function.Arguments["path"])
+	if result[0].Arguments["path"] != "/tmp/out.txt" {
+		t.Errorf("expected path '/tmp/out.txt', got %v", result[0].Arguments["path"])
 	}
-	if result[0].Function.Arguments["content"] != "hello" {
-		t.Errorf("expected content 'hello', got %v", result[0].Function.Arguments["content"])
+	if result[0].Arguments["content"] != "hello" {
+		t.Errorf("expected content 'hello', got %v", result[0].Arguments["content"])
 	}
 }
 
@@ -186,7 +184,7 @@ func TestConvertFromOpenAIToolCalls_EmptyArguments(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(result))
 	}
-	if result[0].Function.Arguments == nil {
+	if result[0].Arguments == nil {
 		t.Error("expected empty map for empty arguments, got nil")
 	}
 }
@@ -291,11 +289,11 @@ func TestOpenAIClient_Chat_WithToolCalls(t *testing.T) {
 	if len(resp.Message.ToolCalls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(resp.Message.ToolCalls))
 	}
-	if resp.Message.ToolCalls[0].Function.Name != "read_file" {
-		t.Errorf("expected function name 'read_file', got %s", resp.Message.ToolCalls[0].Function.Name)
+	if resp.Message.ToolCalls[0].Name != "read_file" {
+		t.Errorf("expected function name 'read_file', got %s", resp.Message.ToolCalls[0].Name)
 	}
-	if resp.Message.ToolCalls[0].Function.Arguments["path"] != "/tmp/test.txt" {
-		t.Errorf("expected path '/tmp/test.txt', got %v", resp.Message.ToolCalls[0].Function.Arguments["path"])
+	if resp.Message.ToolCalls[0].Arguments["path"] != "/tmp/test.txt" {
+		t.Errorf("expected path '/tmp/test.txt', got %v", resp.Message.ToolCalls[0].Arguments["path"])
 	}
 }
 

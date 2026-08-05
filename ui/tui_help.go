@@ -90,7 +90,7 @@ func (h *HelpOverlay) Toggle() { h.visible = !h.visible }
 // Hide 隐藏浮层。
 func (h *HelpOverlay) Hide() { h.visible = false }
 
-// View 渲染帮助浮层。
+// View 渲染帮助浮层（简化版，无边框）。
 func (h *HelpOverlay) View(width int) string {
 	if !h.visible {
 		return ""
@@ -149,5 +149,5 @@ func (h *HelpOverlay) View(width int) string {
 	sb.WriteString("\n")
 	sb.WriteString(StyleSeparator.Render("  Esc close"))
 
-	return StyleCardToolCollapsed.Width(overlayW).Render(sb.String())
+	return sb.String()
 }

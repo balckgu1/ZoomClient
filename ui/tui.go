@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"zoomClient/permission"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"zoomClient/permission"
 )
 
 // TUIModel 是 bubbletea 的核心 Model，持有所有子组件和运行时状态。
@@ -41,8 +42,8 @@ type AgentSessionBridge interface {
 	WorkDir() string
 	LogPath() string
 	TurnCount() int
-	SessionTitle() string        // 当前会话标题
-	TokenEstimate() int          // 累计对话 token 估算
+	SessionTitle() string                      // 当前会话标题
+	TokenEstimate() int                        // 累计对话 token 估算
 	GetPermissionManager() *permission.Manager // 权限管理器（TUI 模式替换 Asker）
 }
 

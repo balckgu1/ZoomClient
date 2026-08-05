@@ -60,11 +60,9 @@ func toolCallResponse(toolName string, args map[string]interface{}, id string) *
 			Content: "",
 			ToolCalls: []tools.ToolCall{
 				{
-					ID: id,
-					Function: tools.ToolCallFunction{
-						Name:      toolName,
-						Arguments: args,
-					},
+					ID:        id,
+					Name:      toolName,
+					Arguments: args,
 				},
 			},
 		},
@@ -645,7 +643,7 @@ func TestDeepCopyMessage_ToolCallsIsolation(t *testing.T) {
 		Role:    "assistant",
 		Content: "",
 		ToolCalls: []tools.ToolCall{
-			{ID: "call_1", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"filename": "a.txt"}}},
+			{ID: "call_1", Name: "read_file", Arguments: map[string]interface{}{"filename": "a.txt"}},
 		},
 	}
 
@@ -681,7 +679,7 @@ func TestDeepCopyMessage_SliceContentIsolation(t *testing.T) {
 	// 原始不应被影响
 	origSlice := original.Content.([]interface{})
 	if origSlice[0] != "text part" {
-		t.Errorf("原始 Content 切片被修改：got %v, want 'text part'", origSlice[0])
+		t.Errorf("原始 Content 切片被修改: got %v, want 'text part'", origSlice[0])
 	}
 }
 
@@ -701,4 +699,3 @@ func TestDeepCopyMessage_StringContentPreserved(t *testing.T) {
 		t.Errorf("Role 应被保留，实际：%s", copied.Role)
 	}
 }
-

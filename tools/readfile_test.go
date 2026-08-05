@@ -242,7 +242,7 @@ func TestReadFileTool_Call_LargeFile(t *testing.T) {
 // TestReadFileTool_ViaRegistry verifies execution through the Registry.
 func TestReadFileTool_ViaRegistry(t *testing.T) {
 	workDir := t.TempDir()
-	registry := NewRegistry()
+	registry := NewToolRegister()
 	registry.Register(ReadFileTool{})
 	ctx := &ToolContext{WorkPath: workDir}
 

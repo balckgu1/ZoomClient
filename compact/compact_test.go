@@ -300,11 +300,9 @@ func TestEstimateSize_IncludesAllFields(t *testing.T) {
 			ReasoningContent: "think",
 			ToolCalls: []tools.ToolCall{
 				{
-					ID: "c1",
-					Function: tools.ToolCallFunction{
-						Name:      "read_file",
-						Arguments: map[string]interface{}{"filename": "a.txt"},
-					},
+					ID:        "c1",
+					Name:      "read_file",
+					Arguments: map[string]interface{}{"filename": "a.txt"},
 				},
 			},
 		},
@@ -464,8 +462,8 @@ func TestCompactHistory_PreservesPendingToolCalls(t *testing.T) {
 		{Role: "tool", Content: "old result", ToolCallID: "c0"},
 		// 尾部：assistant 发起 tool_calls，紧跟两条 tool 结果
 		{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{
-			{ID: "c1", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"filename": "main.go"}}},
-			{ID: "c2", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"filename": "util.go"}}},
+			{ID: "c1", Name: "read_file", Arguments: map[string]interface{}{"filename": "main.go"}},
+			{ID: "c2", Name: "read_file", Arguments: map[string]interface{}{"filename": "util.go"}},
 		}},
 		{Role: "tool", Content: "main.go content", ToolCallID: "c1"},
 		{Role: "tool", Content: "util.go content", ToolCallID: "c2"},

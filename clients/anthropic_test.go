@@ -78,10 +78,9 @@ func TestConvertToAnthropicMessages_AssistantWithToolCalls(t *testing.T) {
 			ToolCalls: []tools.ToolCall{
 				{
 					ID: "toolu_01",
-					Function: tools.ToolCallFunction{
-						Name:      "read_file",
-						Arguments: map[string]interface{}{"path": "/tmp/a.txt"},
-					},
+
+					Name:      "read_file",
+					Arguments: map[string]interface{}{"path": "/tmp/a.txt"},
 				},
 			},
 		},
@@ -108,7 +107,7 @@ func TestConvertToAnthropicMessages_ToolResults(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
-				{ID: "toolu_01", Function: tools.ToolCallFunction{Name: "read_file"}},
+				{ID: "toolu_01", Name: "read_file"},
 			},
 		},
 		{Role: "tool", Content: "content of a.txt", ToolCallID: "toolu_01"},
@@ -132,8 +131,8 @@ func TestConvertToAnthropicMessages_MultipleToolResults(t *testing.T) {
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
-				{ID: "toolu_01", Function: tools.ToolCallFunction{Name: "read_file"}},
-				{ID: "toolu_02", Function: tools.ToolCallFunction{Name: "read_file"}},
+				{ID: "toolu_01", Name: "read_file"},
+				{ID: "toolu_02", Name: "read_file"},
 			},
 		},
 		{Role: "tool", Content: "content a", ToolCallID: "toolu_01"},

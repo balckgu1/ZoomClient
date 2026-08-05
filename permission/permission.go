@@ -25,23 +25,6 @@ const (
 	BehaviorAsk   Behavior = "ask"
 )
 
-// Rule 一条权限规则。
-//
-//   - Tool     ：针对哪个工具（"" 或 "*" 表示任意工具）
-//   - Behavior ：命中后的处理方式（allow / deny / ask）
-//   - Path     ：可选；命中工具的 filename / path / file 参数子串
-//   - Content  ：可选；命中工具的 command / content / prompt 参数子串
-//
-// Path / Content 支持两种写法：
-//   - 普通子串：直接 Contains 匹配（默认）
-//   - 正则：以 "re:" 开头，例如 "re:^git\\s+push"
-type Rule struct {
-	Tool     string   `mapstructure:"tool"     yaml:"tool"`
-	Behavior Behavior `mapstructure:"behavior" yaml:"behavior"`
-	Path     string   `mapstructure:"path"     yaml:"path"`
-	Content  string   `mapstructure:"content"  yaml:"content"`
-}
-
 // Decision 一次权限检查的结果。reason 用于日志和给用户的解释。
 type Decision struct {
 	Behavior Behavior
@@ -85,7 +68,7 @@ type Manager struct {
 }
 
 // NewManager 构造一个权限管理器，asker 为 nil 时使用 DenyAsker
-func NewManager(mode Mode, denyRules, allowRules []Rule, asker Asker) *Manager {
+func NewManager(mode Mode, denyRules []Rule, allowRules []Rule, asker Asker) *Manager {
 	m := &Manager{
 		DenyRules:  denyRules,
 		AllowRules: allowRules,
@@ -108,12 +91,15 @@ func (m *Manager) SetMode(mode Mode) {
 	}
 }
 
-// Mode 返回当前模式
-func (m *Manager) GetMode() Mode { return m.mode }
+// GetMode 返回当前模式
+func (m *Manager) GetMode() Mode {
+	return m.mode
+}
 
 // Check 执行权限检查
 func (m *Manager) Check(toolName string, args map[string]any) Decision {
-	// 1. deny rules 最高优先级
+
+	// 检查是否命中 deny rules
 	for _, rule := range m.DenyRules {
 		if matchesRule(rule, toolName, args) {
 			return Decision{
@@ -123,7 +109,7 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 		}
 	}
 
-	// 2. 模式硬约束
+	// 若当前模式为 ModePlan，则只允许读类型 tool
 	if m.mode == ModePlan && IsWrite(toolName) {
 		return Decision{
 			Behavior: BehaviorDeny,
@@ -131,19 +117,21 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 		}
 	}
 
-	// 3. bash 命令兜底安全检查
+	// run_bash tool 安全检查
 	if toolName == "run_bash" {
-		if cmd, ok := args["command"].(string); ok {
-			if dangerous, why := isDangerousBash(cmd); dangerous {
+		cmd, ok := args["command"].(string)
+		if ok {
+			dangerous, reason := isDangerousBash(cmd)
+			if dangerous {
 				return Decision{
 					Behavior: BehaviorDeny,
-					Reason:   "bash safety: " + why,
+					Reason:   "bash safety: " + reason,
 				}
 			}
 		}
 	}
 
-	// 4. allow rules
+	// 检查是否命中 allow rules
 	for _, rule := range m.AllowRules {
 		if matchesRule(rule, toolName, args) {
 			return Decision{
@@ -153,7 +141,7 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 		}
 	}
 
-	// auto 模式默认放行只读工具（放在 allow rules 之后，让用户配置仍能覆盖）
+	// auto 模式自动放行只读工具（放在 allow rules 之后，让用户配置仍能覆盖）
 	if m.mode == ModeAuto && IsReadOnly(toolName) {
 		return Decision{
 			Behavior: BehaviorAllow,
@@ -161,7 +149,7 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 		}
 	}
 
-	// 5. fallback：交给用户
+	// 都没命中，则交给用户决定
 	return Decision{
 		Behavior: BehaviorAsk,
 		Reason:   "no rule matched in mode " + string(m.mode),
@@ -173,7 +161,9 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 //   - allow=true  → RunTool 继续执行工具
 //   - allow=false → RunTool 直接返回 "Permission denied: <reason>"
 func (m *Manager) Decide(toolName string, args map[string]any) (bool, string) {
+	// 判断是否放行该命令
 	decision := m.Check(toolName, args)
+
 	switch decision.Behavior {
 	case BehaviorAllow:
 		return true, decision.Reason

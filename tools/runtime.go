@@ -68,13 +68,13 @@ func PartitionToolCalls(toolCalls []ToolCall) []*ToolExecutionBatch {
 	var currentBatch *ToolExecutionBatch
 
 	for index, call := range toolCalls {
-		safe := IsConcurrencySafe(call.Function.Name)
+		safe := IsConcurrencySafe(call.Name)
 
 		// 为每个工具调用创建 TrackedTool
 		tracked := &TrackedTool{
 			ID:                fmt.Sprintf("tool_%d", index),
-			Name:              call.Function.Name,
-			Args:              call.Function.Arguments,
+			Name:              call.Name,
+			Args:              call.Arguments,
 			Status:            ToolStatusQueued,
 			IsConcurrencySafe: safe,
 		}
@@ -97,7 +97,7 @@ func PartitionToolCalls(toolCalls []ToolCall) []*ToolExecutionBatch {
 // ExecuteBatches 按顺序执行所有批次。
 // 并发安全的批次使用 goroutine 并行执行，不安全的批次逐个串行执行。
 // 所有结果最终按原始工具顺序回写到 results 切片中。
-func ExecuteBatches(batches []*ToolExecutionBatch, registry *Registry, toolCtx *ToolContext) []ToolResult {
+func ExecuteBatches(batches []*ToolExecutionBatch, registry *ToolRegister, toolCtx *ToolContext) []ToolResult {
 	var allResults []ToolResult
 
 	for _, batch := range batches {
@@ -117,7 +117,7 @@ func ExecuteBatches(batches []*ToolExecutionBatch, registry *Registry, toolCtx *
 
 // runConcurrently 并发执行一批并发安全的工具。
 // 使用 goroutine 并行运行，但结果严格按原始顺序存放到切片中。
-func runConcurrently(trackedTools []*TrackedTool, registry *Registry, toolCtx *ToolContext) []ToolResult {
+func runConcurrently(trackedTools []*TrackedTool, registry *ToolRegister, toolCtx *ToolContext) []ToolResult {
 	results := make([]ToolResult, len(trackedTools))
 	var waitGroup sync.WaitGroup
 
@@ -148,7 +148,7 @@ func runConcurrently(trackedTools []*TrackedTool, registry *Registry, toolCtx *T
 
 // runSerially 串行执行一批需要独占的工具。
 // 逐个执行并收集结果，保证写操作之间不会相互干扰。
-func runSerially(trackedTools []*TrackedTool, registry *Registry, toolCtx *ToolContext) []ToolResult {
+func runSerially(trackedTools []*TrackedTool, registry *ToolRegister, toolCtx *ToolContext) []ToolResult {
 	results := make([]ToolResult, 0, len(trackedTools))
 
 	for _, tracked := range trackedTools {
@@ -208,7 +208,7 @@ func (queue *QueuedContextModifiers) ApplyInOrder(originalOrder []*TrackedTool, 
 
 // ExecuteToolCalls 工具执行运行时的顶层入口
 // 完整流程：分批 → 按批次执行（并发/串行） → 按原始顺序收集结果
-func ExecuteToolCalls(toolCalls []ToolCall, registry *Registry, toolCtx *ToolContext) []ToolResult {
+func ExecuteToolCalls(toolCalls []ToolCall, registry *ToolRegister, toolCtx *ToolContext) []ToolResult {
 	// 按并发安全性将工具调用分批
 	batches := PartitionToolCalls(toolCalls)
 

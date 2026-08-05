@@ -142,7 +142,7 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 			Message: fsm.Message{
 				Role: "assistant",
 				ToolCalls: []tools.ToolCall{
-					{ID: "call_1", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"path": "/tmp/a.txt"}}},
+					{ID: "call_1", Name: "read_file", Arguments: map[string]interface{}{"path": "/tmp/a.txt"}},
 				},
 			},
 		},
@@ -151,7 +151,7 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 			Message: fsm.Message{
 				Role: "assistant",
 				ToolCalls: []tools.ToolCall{
-					{ID: "call_2", Function: tools.ToolCallFunction{Name: "read_file", Arguments: map[string]interface{}{"path": "/tmp/b.txt"}}},
+					{ID: "call_2", Name: "read_file", Arguments: map[string]interface{}{"path": "/tmp/b.txt"}},
 				},
 			},
 			Done: true,
@@ -179,11 +179,11 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 	if len(resp.Message.ToolCalls) != 2 {
 		t.Fatalf("expected 2 tool calls, got %d", len(resp.Message.ToolCalls))
 	}
-	if resp.Message.ToolCalls[0].Function.Name != "read_file" {
-		t.Errorf("expected first tool call 'read_file', got %s", resp.Message.ToolCalls[0].Function.Name)
+	if resp.Message.ToolCalls[0].Name != "read_file" {
+		t.Errorf("expected first tool call 'read_file', got %s", resp.Message.ToolCalls[0].Name)
 	}
-	if resp.Message.ToolCalls[1].Function.Name != "read_file" {
-		t.Errorf("expected second tool call 'read_file', got %s", resp.Message.ToolCalls[1].Function.Name)
+	if resp.Message.ToolCalls[1].Name != "read_file" {
+		t.Errorf("expected second tool call 'read_file', got %s", resp.Message.ToolCalls[1].Name)
 	}
 }
 

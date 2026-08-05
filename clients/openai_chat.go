@@ -131,7 +131,7 @@ func convertToOpenAIMessages(messages []fsm.Message) []OpenAIMessage {
 		if len(msg.ToolCalls) > 0 {
 			oiToolCalls := make([]OpenAIToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
-				argsBytes, err := json.Marshal(tc.Function.Arguments)
+				argsBytes, err := json.Marshal(tc.Arguments)
 				if err != nil {
 					// 序列化失败时退化为空对象，避免阻断整个请求
 					argsBytes = []byte("{}")
@@ -140,7 +140,7 @@ func convertToOpenAIMessages(messages []fsm.Message) []OpenAIMessage {
 					ID:   tc.ID,
 					Type: "function",
 					Function: OpenAIToolCallFunction{
-						Name:      tc.Function.Name,
+						Name:      tc.Name,
 						Arguments: string(argsBytes),
 					},
 				})
@@ -167,11 +167,9 @@ func convertFromOpenAIToolCalls(openaiToolCalls []OpenAIToolCall) []tools.ToolCa
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		}
 		result = append(result, tools.ToolCall{
-			ID: tc.ID,
-			Function: tools.ToolCallFunction{
-				Name:      tc.Function.Name,
-				Arguments: args,
-			},
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: args,
 		})
 	}
 	return result

@@ -308,7 +308,7 @@ func TestGlobSearch_ViaRegistry(t *testing.T) {
 	ctx, workDir := newTestGlobCtx(t)
 	createFiles(t, workDir, []string{"app.go"})
 
-	reg := NewRegistry()
+	reg := NewToolRegister()
 	reg.Register(&GlobSearch{})
 
 	result := reg.RunTool("glob_search", map[string]any{"pattern": "*.go"}, ctx)

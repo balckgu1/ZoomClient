@@ -30,7 +30,7 @@ type SubAgent struct {
 	Model                   string                 // 模型名
 	SystemPrompt            string                 // subagent 专用 system prompt
 	ForkSubtaskPromptPrefix string                 // fork 模式下注入到父消息末尾的子任务引导前缀
-	Registry                *tools.Registry        // subagent 可用工具
+	Registry                *tools.ToolRegister    // subagent 可用工具
 	ToolCtx                 *tools.ToolContext     // 工具执行上下文
 	MaxTurns                int                    // 最大轮数，<=0 时使用 DefaultMaxTurns
 	Options                 map[string]interface{} // 采样参数
@@ -38,7 +38,7 @@ type SubAgent struct {
 
 // NewSubAgent 初始化 subagent
 func NewSubAgent(client clients.ChatClient, model string, systemPrompt string, forkSubtaskPromptPrefix string,
-	registry *tools.Registry, toolCtx *tools.ToolContext, maxTurns int, options map[string]interface{}) *SubAgent {
+	registry *tools.ToolRegister, toolCtx *tools.ToolContext, maxTurns int, options map[string]interface{}) *SubAgent {
 	return &SubAgent{
 		Client:                  client,
 		Model:                   model,
@@ -229,8 +229,8 @@ func (subagent *SubAgent) subagentLoop(messages []fsm.Message) (string, error) {
 }
 
 // BuildSubAgentRegistry 构建子智能体工具注册表
-func BuildSubAgentRegistry() *tools.Registry {
-	reg := tools.NewRegistry()
+func BuildSubAgentRegistry() *tools.ToolRegister {
+	reg := tools.NewToolRegister()
 	reg.Register(tools.ReadFileTool{})
 	reg.Register(tools.ListDirectory{})
 	reg.Register(tools.RunBashTool{})

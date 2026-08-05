@@ -3,7 +3,7 @@
 **[中文文档](README_ZH.md) | English**
 
 ZoomClient is a Go-based AI Agent framework that implements an autonomous task execution system with Tool-Use capabilities.
-The project adopts a modular architecture, covering multi-backend model clients, tool control plane, concurrent execution runtime, subagents, on-demand skill loading, session plan management, context compaction, hook system, permission system, interactive CLI, and other core subsystems.
+The project adopts a modular architecture, covering multi-backend model clients, tool control plane, concurrent execution runtime, subagents, on-demand skill loading, session management, context compaction, prompt pipeline, hook system, permission system, cross-session memory, event emitter, TUI/Web frontends, and other core subsystems.
 
 ---
 
@@ -23,7 +23,6 @@ The project adopts a modular architecture, covering multi-backend model clients,
 
 - **🔁 Agent Loop**: The main loop driving model interactions, supporting system prompt injection, message history maintenance, and multi-turn tool calls. Maximum turns configured via `agentloop.maxTurns` in `config.yaml` (default 25).
 - **🔌 Multi-Backend ChatClient Abstraction**: Unified `clients.ChatClient` interface with built-in **OpenAI-compatible** (DeepSeek / Kimi / Qwen / OpenAI), **Ollama** (NDJSON streaming protocol), **Anthropic** (Claude), and **Gemini** implementations, switchable via the `-m` CLI flag.
-- **🧠 Thinking Mode Support**: Full passthrough of the `reasoning_content` field, preserving it as-is across multi-turn conversations to avoid `invalid_request_error` rejections from the server.
 - **🔧 Tool Control Plane**: Unified tool registry `tools.Registry` supporting tool discovery, registration, and dynamic dispatch by name, with a built-in permission gate (`PermissionDecider`) for pre-execution admission control.
 - **⚡ Concurrent-Safe Scheduling**: Tool calls are automatically batched by read/write attributes — read-only tools (e.g., `read_file`) execute concurrently, while write tools run serially, balancing efficiency and safety.
 - **🧬 Subagent**: Delegates subtasks to independently-contextualized subagents via the `sub_task` tool; supports blank-context mode and `fork=true` mode that inherits parent message context, with an independent tool whitelist to prevent side-effect leakage.
@@ -34,7 +33,16 @@ The project adopts a modular architecture, covering multi-backend model clients,
 - **🛡️ Permission System**: Fine-grained permission control based on a rule engine, supporting `default` (ask user on miss), `plan` (read-only mode), and `auto` (read-only auto-approve) modes, with configurable allow/deny rules and regex matching.
 - **🛡️ Path Sandbox Protection**: File tools must pass path sandbox validation (based on `ToolContext.WorkPath`) before execution, preventing path traversal and working directory escape.
 - **🚫 Dangerous Command Blocking**: The `run_bash` tool includes built-in command blacklist detection to intercept high-risk operations.
-- **🖥️ Interactive CLI**: A `lipgloss`-based terminal renderer supporting REPL-style multi-turn interaction with `/exit`, `/clear`, `/compact`, `/help` slash commands.
+- **🧠 Thinking Mode Support**: Full passthrough of the `reasoning_content` field, preserving it as-is across multi-turn conversations to avoid `invalid_request_error` rejections from the server.
+- **🧠 Model Registry & Presets**: Centralized `model.Registry` for managing model presets (client type, base URL, model name). Supports runtime hot-switching between backends without losing conversation history via the `SwitchModel` API.
+- **🗄️ Session Management**: Persistent session CRUD via `session.Manager` with JSON-file storage, automatic session naming, metadata indexing, and lifecycle tracking. Enables session recovery, cross-process sharing, and historical session browsing.
+- **🧩 FSM (Finite State Machine)**: Encapsulates agent session state including message history, turn count, and transition reasons. Provides a clean state abstraction decoupled from business logic.
+- **📦 Prompt Pipeline**: Multi-stage prompt construction system (`prompt.MessagePipeline`) that sequentially injects skill catalogs, memory summaries, dynamic instructions, plan reminders, and file attachments into the system prompt, then normalizes the result for the target model protocol.
+- **💭 Cross-Session Memory (`memory/`)**: Long-term memory system supporting four types (user, feedback, project, reference) with `save_memory`, `search_memory`, `delete_memory`, and `update_memory` tools. Memories are stored as Markdown files with YAML frontmatter and automatically injected into the system prompt.
+- **🔄 Event Emitter (`emitter/`)**: Unified output abstraction for all agent-visible events (session lifecycle, assistant output, tool calls, tool results, subagent activity, hooks, errors, plan updates, compaction). Supports three implementations: CLI TUI renderer, API NDJSON emitter, and Web SSE emitter.
+- **🌐 Web UI (`web/`)**: Built-in web server with SSE real-time streaming, RESTful session APIs, HTML frontend (embedded via `go:embed`), and web-based permission asker. Usable as an alternative to the CLI TUI.
+- **🖥️ Interactive CLI (TUI)**: A `bubbletea`/`lipgloss`-based terminal renderer supporting REPL-style multi-turn interaction with `/exit`, `/clear`, `/compact`, `/help` slash commands, plus markdown rendering and status bar.
+- **📂 Work Directory Management**: Supports specifying and switching the `WorkPath` at runtime, controlling the file sandbox root for file-based tools.
 - **🪵 Structured Logging**: Powered by Uber Zap, outputting colorful, timestamped logs with support for development and production configurations.
 - **🗂️ YAML-Driven Configuration**: Manages API keys, max turns, skill directories, subagent default prompts, permission rules, compaction thresholds, and more via `config/config.yaml`, avoiding hardcoded secrets.
 
@@ -45,192 +53,154 @@ The project adopts a modular architecture, covering multi-backend model clients,
 The project adopts a layered architecture, from top to bottom: Agent Loop Layer, Capability Extension Layer, Tool Management Layer, State Machine Control Layer, and Runtime Support Layer:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  🔁 Agent Loop Layer                    │
-│               (main.go → agentLoop)                     │
-├─────────────────────────────────────────────────────────┤
-│               🧬 Capability Extension Layer             │
-│ (subagent/ · skills/ · tools/todo_manager               │
-│  · compact/ · hook/ · permission/)                      │
-├─────────────────────────────────────────────────────────┤
-│               🔧 Tool Management Layer                  │
-│    (tools/tools.go · tools/runtime.go · concrete tools) │
-├─────────────────────────────────────────────────────────┤
-│               📊 State Machine Control Layer            │
-│                   (fsm/states.go)                       │
-├─────────────────────────────────────────────────────────┤
-│               🧱 Runtime Support Layer                  │
-│ (clients/ · logger/logger.go · utils/loadconfig.go      │
-│  · ui/renderer.go)                                      │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      🔁 Agent Loop Layer                        │
+│                    (main.go → agentLoop)                        │
+├──────────────────────────────────────────────────────────────────┤
+│                   🧬 Capability Extension Layer                  │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│   │subagent/ │  │ skills/  │  │  hooks/  │  │ session/ │       │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│   │ memory/  │  │ compact/ │  │ prompt/  │  │ model/   │       │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+├──────────────────────────────────────────────────────────────────┤
+│                    🔧 Tool Management Layer                      │
+│   (tools/registry · tools/runtime · concrete tool impls)        │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│   │ readfile │  │ writefile│  │ run_bash │  │glob_search│       │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐                      │
+│   │edit_file │  │list_dir  │  │todo_mgr  │                      │
+│   └──────────┘  └──────────┘  └──────────┘                      │
+├──────────────────────────────────────────────────────────────────┤
+│                  ⚙️ State Machine Control Layer                  │
+│            (fsm/ · permission/ · emitter/)                      │
+│         ┌──────────┐  ┌──────────┐  ┌──────────┐               │
+│         │  FSM     │  │Permission│  │ Emitter  │               │
+│         └──────────┘  └──────────┘  └──────────┘               │
+├──────────────────────────────────────────────────────────────────┤
+│                    🖥️ Presentation Layer                         │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│   │  CLI (TUI)   │  │  API/NDJSON  │  │  Web UI      │         │
+│   └──────────────┘  └──────────────┘  └──────────────┘         │
+├──────────────────────────────────────────────────────────────────┤
+│                 🛠️ Runtime Support Layer                         │
+│    (utils/config · logger/ · web/ · workdir/)                   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-A request lifecycle proceeds as follows:
+### Layer Breakdown
 
-1. **🚀 Initialization**: Loads `config/config.yaml`, creates the corresponding `ChatClient` (OpenAI-compatible / Ollama / Anthropic / Gemini) based on the `-m` flag; builds the tool registry, skill registry, plan manager, context compaction manager, hook dispatcher, permission manager, subagent, and session state.
-2. **💬 Model Interaction**: Sends the system prompt (including skill catalog), user input, and message history to the LLM API, requesting a model response with `reasoning_content` preserved as-is.
-3. **🔧 Tool Invocation**: If the model returns tool call requests, the Agent Loop first triggers the `EventPreToolUse` hook, then calls `PartitionToolCalls` to batch by concurrency safety. Concurrent batches execute in parallel via goroutines; serial batches execute one by one.
-4. **📥 Result Writeback**: All tool results are written back to message history in the original call order, maintaining deterministic understanding of results by the model. Each `tool` message carries a `ToolCallID` for OpenAI protocol compatibility. Large results are automatically persisted to disk and replaced with previews.
-5. **🪝 Hook Post-Processing**: Triggers `EventPostToolUse` / `EventToolError` hooks for audit logging, error recovery injection, and other post-processing.
-6. **📝 Plan Maintenance**: Checks whether the `todo` tool was used in the current turn; if not updated for multiple consecutive turns, a reminder is injected into the message history to prompt the model to refresh the plan.
-7. **🗜️ Context Compaction**: Checks whether three-tier compaction is triggered (manual request or automatic threshold); if so, invokes the model to generate a continuity summary and replaces the message history.
-8. **🔁 Loop Termination**: The loop terminates when the model no longer requests tool calls or when the `agentloop.maxTurns` limit is reached.
+| Layer | Modules | Responsibility |
+|-------|---------|----------------|
+| **Agent Loop Layer** | `main.go` | Orchestrates the model-interaction loop, manages turn lifecycle |
+| **Capability Extension Layer** | `subagent/`, `skills/`, `hooks/`, `session/`, `memory/`, `compact/`, `prompt/`, `model/` | Pluggable extensions that add reasoning, persistence, and intelligence capabilities |
+| **Tool Management Layer** | `tools/` | Tool registry, read/write scheduling, concrete tool implementations |
+| **State Machine Control Layer** | `fsm/`, `permission/`, `emitter/` | State persistence, admission control, event output abstraction |
+| **Presentation Layer** | `ui/` (TUI), `emitter/api_emitter` (API), `web/` (Web) | Multiple frontends for different deployment scenarios |
+| **Runtime Support Layer** | `utils/`, `logger/`, `web/`, `workdir/` | Config loading, structured logging, HTTP server, file sandbox |
 
 ---
 
 ## 🧩 Component Reference
 
-### 1. 🚪 `main.go` — Agent Main Loop Entry
+### Core Modules
 
-Defines the `agentLoop` function, orchestrating a complete Agent session. Key responsibilities:
-- Manages message history (`fsm.State.Messages`), automatically appending system prompts, user input, assistant responses (including `reasoning_content`), and tool results.
-- Calls `tools.PartitionToolCalls` and `tools.ExecuteBatches` for tool scheduling and prints batching info.
-- Collaborates with `TodoManager` to maintain plan updates and reminder mechanisms.
-- Parses `-m` CLI flag to construct the appropriate OpenAI-compatible / Ollama / Anthropic / Gemini client.
-- Assembles the skill catalog into the system prompt and registers tools (including `load_skill`, `sub_task`, `todo`, `compact`, etc.).
-- Integrates the context compaction manager, hook dispatcher, and permission manager for complete lifecycle control.
+| Module | Package | Description |
+|--------|---------|-------------|
+| **Agent Loop** | `main.go:agentLoop` | Main interaction loop; calls LLM, dispatches tool calls, manages turns |
+| **ChatClient** | `clients/` | Unified `ChatClient` interface for OpenAI, Ollama, Anthropic, Gemini |
+| **Model Registry** | `model/` | Model preset definition, selection, and runtime hot-switching |
+| **Tool Registry** | `tools/` | Tool registration, discovery, dispatch, concurrency scheduling |
+| **Subagent** | `subagent/` | Independent sub-agent execution with isolated context and tools |
+| **Skills** | `skills/` | On-demand skill loading from SKILL.md files with YAML frontmatter |
+| **Session Management** | `session/` | Session CRUD, JSON-file persistence, auto-naming, history browsing |
+| **FSM** | `fsm/` | Session state encapsulation (messages, turn count, transitions) |
+| **Context Compaction** | `compact/` | Three-tier context compression (persist, micro-compact, summarize) |
+| **Hook System** | `hook/` | Event-driven plugin framework for pre/post tool execution |
+| **Permission System** | `permission/` | Rule-based access control, path sandbox, bash blacklist |
+| **Prompt Pipeline** | `prompt/` | Multi-stage prompt construction (skills + memory + reminders + attachments) |
+| **Memory System** | `memory/` | Cross-session long-term memory (save/search/delete/update) |
+| **Event Emitter** | `emitter/` | Unified output interface for CLI, API, and Web frontends |
+| **Interactive CLI** | `ui/` | Bubble Tea TUI with markdown rendering, slash commands, status bar |
+| **Web Server** | `web/` | HTTP server with SSE streaming, RESTful APIs, embed frontend |
+| **Structured Logger** | `logger/` | Zap-based colorful, timestamped logging |
+| **Config Loader** | `utils/` | YAML config loading with defaults and validation |
 
-### 2. 🔌 `clients/` — Multi-Backend Model Client Adapters
+### Concrete Tools
 
-| File | Description |
-|------|-------------|
-| `client.go` | Defines the unified `ChatClient` interface, abstracting `Chat(model, messages, tools, options)` to shield provider protocol differences. |
-| `openai_chat.go` | OpenAI-compatible client supporting DeepSeek, Kimi, Qwen, OpenAI, and all OpenAI-compatible backends. Handles `tool_calls.arguments` JSON string conversion, `reasoning_content` passthrough, and `tool_call_id` backfill. |
-| `ollama.go` | Defines `OllamaClient` struct, `OllamaTool` / `OllamaFunction` data models, and `BuildOllamaTools` format conversion. |
-| `ollama_chat.go` | Ollama protocol implementation — constructs HTTP POST to `/api/chat` and parses NDJSON streaming responses, assembling complete content and tool calls. |
-| `anthropic.go` | Anthropic Claude client using the official `anthropic-sdk-go`, handling system message extraction to top-level parameters and ToolUseBlock / ToolResultBlock conversion. |
-| `gemini.go` | Google Gemini client using the official `google.golang.org/genai` SDK, handling FunctionCall / FunctionResponse conversion and system instruction injection. |
-
-### 3. 🔧 `tools/` — Tool Control Plane & Execution Runtime
-
-| File | Description |
-|------|-------------|
-| `tools.go` | Core abstractions: `Tool` interface, `ToolContext` (execution context with `Ctx` / `Logger` / `SessionID` / `AppState`), `ToolResult`, `Registry` (with permission gate injection), `ToolCall` / `ToolCallFunction`. |
-| `runtime.go` | Execution runtime: `PartitionToolCalls` (batching), `ExecuteBatches` (scheduling), `ExecuteToolCalls` (top-level orchestration), `runConcurrently`, `runSerially`, and `QueuedContextModifiers`. |
-| `readfile.go` | 📖 `ReadFileTool` — Reads file contents, marked as concurrency-safe. |
-| `writefile.go` | 📄 `WriteFileTool` — Creates new files with content, includes path sandbox validation and auto parent directory creation. |
-| `editfile.go` | ✏️ `EditFileTool` — Overwrites existing file contents. |
-| `runbash.go` | 💻 `RunBashTool` — Executes bash commands with dangerous command blocking and cross-platform compatibility (Windows / Linux / macOS). |
-| `todo_manager.go` | 📝 `TodoManager` — Session-level plan manager implementing the `Tool` interface, supporting plan updates, status validation (at most one `in_progress`), rendering, and reminders. |
-
-### 4. 🧬 `subagent/` — Subagent
-
-| File | Description |
-|------|-------------|
-| `subagent.go` | Defines `SubAgent` struct with two entry points: `Run` (blank context) and `RunWithFork` (inherits parent message context, auto-trims the triggering assistant message to avoid protocol violations). `BuildSubAgentRegistry` builds a tool whitelist (only `read_file` / `run_bash`, no recursive dispatch or writes). |
-| `subtask_tool.go` | Defines `TaskTool` (tool name `sub_task`) implementing the `Tool` interface; supports `prompt` and `fork` parameters, using a `ParentMessagesProvider` closure for latest parent message snapshots when `fork=true`. |
-
-### 5. 🗜️ `compact/` — Context Compaction
-
-| File | Description |
-|------|-------------|
-| `compact.go` | `CompactManager` — Three-tier compaction: Tier 1 persists large tool outputs (`PersistLargeOutput`), Tier 2 micro-compacts old results (`MicroCompact`), Tier 3 summarizes full history (`CompactHistory` / `summarize`). Supports manual (`/compact` command or `compact` tool) and automatic threshold triggers. |
-| `compact_tool.go` | `CompactTool` — A compaction tool for the model to invoke, marking pending and letting agentLoop execute full compaction at an appropriate time. |
-
-### 6. 🪝 `hook/` — Hook System
-
-| File | Description |
-|------|-------------|
-| `hook.go` | Defines `Runner` (event dispatcher), `Handler` (handler function signature), and `HookResult` (with `ExitCode`: `Continue` / `Block` / `Inject` / `Retry`). Multiple handlers per event, executed in registration order, short-circuiting on the first non-zero exit code. |
-| `handlers.go` | Built-in handlers: `OnSessionStart`, `PreToolBlockDangerous`, `PreToolRateLimit`, `PreToolSensitiveFileGuard`, `PostToolAuditLog`, `OnToolErrorRecovery`, `OnSessionEnd`. |
-
-### 7. 🛡️ `permission/` — Permission System
-
-| File | Description |
-|------|-------------|
-| `permission.go` | `Manager` — Supports `default` / `plan` / `auto` modes with `DenyRules` / `AllowRules` for tool name, path, and content matching (regex supported), plus bash dangerous command fallback checks. |
-| `asker.go` | `Asker` interface with `StdinAsker` (interactive prompt) and `DenyAsker` (default deny in non-interactive scenarios). |
-| `bash.go` | `isDangerousBash` — Detects dangerous command patterns (e.g., `rm -rf /`, `mkfs`, `dd if=`). |
-
-### 8. 📖 `skills/` — Skill Subsystem
-
-| File | Description |
-|------|-------------|
-| `skill.go` | Defines `SkillManifest` (lightweight metadata) and `SkillDocument` (full content) two-level abstraction with a "catalog-first, content-on-demand" loading strategy. |
-| `registry.go` | `SkillRegistry` scans all `SKILL.md` files in a directory, supporting `DescribeAvailable` (system prompt injection), `LoadFullText` (on-demand full content loading), `Names`, `Count`, etc. |
-| `frontmatter.go` | Parses YAML-style frontmatter (`---` delimited) from SKILL.md files, extracting `name` and `description` metadata. |
-| `load_skill_tool.go` | `LoadSkillTool` (tool name `load_skill`) implementing the `Tool` interface, loading skill content by name and wrapping it in `<skill name="...">...</skill>` tags. |
-
-### 9. 📊 `fsm/states.go` — State Machine Control
-
-Defines the core session state structure:
-- `State`: Contains message list (`Messages`), turn count (`TurnCount`), and transition reason (`TransitionReason`).
-- `Message`: Represents a single message with `role`, `content`, `tool_calls`, `tool_call_id`, and `reasoning_content` fields.
-
-### 10. ⚙️ `utils/loadconfig.go` — Configuration Loading
-
-Built on `spf13/viper` for YAML config file loading. Defines the `Config` struct covering `api_key`, `openai`, `subagent`, `skills`, `agentloop`, `compact`, `permission`, `tools` sections, initialized via `InitConfig()` with a global singleton via `GetConfig()`.
-
-### 11. 🗂️ `config/` — Configuration Files
-
-- `config.yaml.example`: Configuration template with API key placeholders for OpenAI-compatible, Anthropic, and Gemini backends, plus full examples for subagent, compaction, permission, and agent loop settings.
-- `config.yaml`: Active configuration (added to `.gitignore` to prevent secret commits).
-
-### 12. 🪵 `logger/logger.go` — Logging
-
-Built on `go.uber.org/zap` for a global logger instance:
-- `Init()`: Initializes development-mode config with colorful log levels and precise timestamps.
-- `Sync()`: Flushes log buffers before program exit.
-
-### 13. 🖥️ `ui/` — Terminal Renderer
-
-| File | Description |
-|------|-------------|
-| `renderer.go` | `Renderer` — A `lipgloss`-based CLI frontend renderer providing full rendering methods for session banners, user prompts, assistant text, reasoning content, tool calls and results, subagents, plan panels, compaction info, hook blocks, errors, and info messages. |
-| `styles.go` | Defines all `lipgloss.Style` constants (colors, borders, alignment, etc.). |
+| Tool | Package | Description |
+|------|---------|-------------|
+| **read_file** | `tools/` | Read file content from disk |
+| **write_file** | `tools/` | Write content to a file |
+| **edit_file** | `tools/` | Apply search/replace edits to files |
+| **run_bash** | `tools/` | Execute shell commands with blacklist protection |
+| **glob_search** | `tools/` | Pattern-based file search |
+| **list_directory** | `tools/` | List directory contents |
+| **todo_manager** | `tools/` | Multi-step task plan management (create/update/mark) |
+| **sub_task** | `subagent/` | Delegate work to a subagent |
+| **load_skill** | `skills/` | Load full skill content on-demand |
+| **save_memory** | `memory/` | Persist a new memory entry |
+| **search_memory** | `memory/` | Search across stored memories |
+| **delete_memory** | `memory/` | Remove a memory entry |
+| **update_memory** | `memory/` | Modify an existing memory entry |
+| **compact_history** | `compact/` | Trigger context compaction manually |
 
 ---
 
 ## ⚙️ Installation & Configuration
 
-### 📋 Prerequisites
+### Prerequisites
 
-- Go 1.24.4 or higher
-- For **Ollama** backend: Ollama running locally (default: `http://127.0.0.1:11434`) with a tool-calling-capable model (e.g., `modelscope.cn/Qwen/Qwen3-8B-GGUF:latest`).
-- For **OpenAI-compatible** backend (DeepSeek / Kimi / Qwen / OpenAI): A valid API key.
-- For **Anthropic** backend: A valid Anthropic API key.
-- For **Gemini** backend: A valid Gemini API key.
+- Go 1.21+
+- (Optional for Ollama) Local Ollama server
+- API keys (set via environment variables or `config/config.yaml`)
 
-### 📦 Installation
-
-1. Clone the repository:
+### Installation
 
 ```bash
-git clone <repository-url>
-cd cc-learn
+git clone https://github.com/balckgu1/ZoomClient.git
+cd ZoomClient
+go build -o zoomclient .
 ```
 
-2. Install dependencies:
+### Configuration
 
-```bash
-go mod tidy
-```
+Edit `config/config.yaml` to set API keys and runtime parameters:
 
-3. Prepare the configuration file (first time):
+```yaml
+apikeys:
+  openai: "sk-xxx"           # OpenAI / compatible
+  anthropic: "sk-ant-xxx"    # Anthropic Claude
+  gemini: "..."
+  # Keys fall back to environment variables when empty
 
-```bash
-cp config/config.yaml.example config/config.yaml
-```
+agentloop:
+  maxTurns: 25
+  todoRoundsThreshold: 9
+  maxTools: 5
+  sensitiveFiles: [".env", "id_rsa"]
 
-Edit `config/config.yaml` with your API keys and other parameters. You can also inject via environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`).
+compact:
+  persistThreshold: 4000
+  previewBytes: 1000
+  keepRecentToolResults: 4
+  contextLimit: 60000
+  persistDir: ".task_outputs/tool-results"
 
-4. (Optional) If using Ollama, ensure the service is running:
+subagent:
+  defaultMaxTurns: 10
+  defaultSystemPrompt: "..."
 
-```bash
-ollama serve
-```
+skills:
+  dir: "./.skills"
 
-5. Run the project:
-
-```bash
-# Default: OpenAI-compatible backend (configured in config.yaml)
-go run main.go
-
-# Explicitly specify backend
-go run main.go -m openai    # OpenAI-compatible
-go run main.go -m ollama    # Local Ollama
-go run main.go -m anthropic # Anthropic Claude
-go run main.go -m gemini    # Google Gemini
+permission:
+  mode: "auto"              # default | plan | auto
+  interactive: true
+  denyRules: [...]
+  allowRules: [...]
 ```
 
 ---
@@ -248,12 +218,29 @@ go run main.go -m anthropic  # Anthropic Claude
 go run main.go -m gemini     # Google Gemini
 ```
 
-### ✍️ Customizing Tasks & System Prompt
+### 🌐 Running as Web Server
 
-Modify the following variables in the `main()` function:
+Start the web UI server instead of the CLI TUI:
+
+```bash
+go run main.go -m openai -web
+```
+
+This launches an HTTP server (default port defined in `web/server.go`) serving a full HTML frontend with SSE real-time streaming, session browsing, and model switching.
+
+### 🗄️ Session Management
+
+Sessions are automatically persisted to disk as JSON files. Use the API or the session manager to list, load, or create sessions. The auto-naming feature generates descriptive titles for each session based on conversation content.
+
+### 🧠 Runtime Model Switching
+
+When using the web UI, models can be hot-switched at runtime without losing conversation history via the `SwitchModel` API.
+
+### ✍️ Customizing User Task & System Prompt
+
+Adjust the following variables in `main()` to customize behavior:
 
 ```go
-// Edit the systemPrompt variable in main()
 systemPrompt := fmt.Sprintf(
     "You are a helpful assistant running on %s. "+
         "Use the todo tool to plan multi-step work. "+
@@ -263,9 +250,9 @@ systemPrompt := fmt.Sprintf(
 )
 ```
 
-### 📁 Adjusting the Working Directory
+### 📁 Adjusting Work Directory
 
-Set the file sandbox root via `ToolContext.WorkPath`:
+Set `ToolContext.WorkPath` to control the file sandbox root:
 
 ```go
 toolCtx := &tools.ToolContext{
@@ -275,7 +262,7 @@ toolCtx := &tools.ToolContext{
 
 ### 📖 Using Skills
 
-Place your skill files in the directory specified by `skills.dir` in `config.yaml` (default `./.skills/`). Each skill gets its own subdirectory with a `SKILL.md` file:
+Place skill files under the directory specified by `skills.dir` in `config.yaml` (default `./.skills/`). Each skill is a subdirectory containing a `SKILL.md` file:
 
 ```markdown
 ---
@@ -288,7 +275,7 @@ description: One-line description of the skill's purpose
 Detailed steps or playbook...
 ```
 
-After startup, the model sees the skill catalog in the system prompt and loads full content on-demand via the `load_skill` tool.
+On startup, the model sees the skill catalog in the system prompt and loads full content on-demand via the `load_skill` tool.
 
 ### 🧬 Using Subagents
 
@@ -296,39 +283,6 @@ The model can dispatch subtasks via the `sub_task` tool:
 
 - Default `fork=false`: Subagent runs with blank context; the prompt must be self-contained.
 - Set `fork=true`: Subagent inherits parent message history, ideal for "further analysis based on current conversation" scenarios.
-
-### ⚙️ Tuning Runtime Parameters
-
-Edit `config/config.yaml`:
-
-```yaml
-agentloop:
-  maxTurns: 25              # Max turns in main loop
-  todoRoundsThreshold: 9    # Plan reminder threshold
-  maxTools: 5               # Max tool calls per turn
-  sensitiveFiles: [".env", "id_rsa"]  # Sensitive file list
-
-subagent:
-  defaultMaxTurns: 10       # Subagent max turns
-  defaultSystemPrompt: "..."
-  forkSubtaskPromptPrefix: "..."
-
-skills:
-  dir: "./.skills"          # Skills scan directory
-
-compact:
-  persistThreshold: 4000    # Large result persist threshold (bytes)
-  previewBytes: 1000        # Preview bytes retained on disk
-  keepRecentToolResults: 4  # Micro-compact recent results to keep
-  contextLimit: 60000       # Full compaction trigger threshold (bytes)
-  persistDir: ".task_outputs/tool-results"  # Persist directory
-
-permission:
-  mode: "auto"              # default | plan | auto
-  interactive: true         # Ask user on rule miss
-  denyRules: [...]          # Deny rules
-  allowRules: [...]         # Allow rules
-```
 
 ---
 
@@ -352,11 +306,19 @@ permission:
 1. Create a new file in `clients/` (e.g., `claude_chat.go`).
 2. Define a client struct and implement the `ChatClient` interface's `Chat(model, messages, toolList, options)` method.
 3. Inside the method: convert tool schemas → convert message protocols → make HTTP call → normalize response to `*ChatResponse`.
-4. Add a corresponding case in `main.go`'s `switch modelType` branch, handling API key retrieval (with environment variable fallback) and client initialization.
+4. Add a corresponding case in `main.go`'s `switch modelType` branch, handling API key retrieval (with env var fallback) and client initialization.
 
 ### 📖 Adding a New Skill
 
 No code required — just create a new subdirectory under `.skills/` with a `SKILL.md` file (see `.skills/skill-function-test/SKILL.md` for reference). It will be auto-discovered by `SkillRegistry` on restart.
+
+### 🧠 Adding a Model Preset
+
+Add a new entry in `model/registry.go`'s presets map with client type, base URL, and model name. The preset will be selectable via the `-m` flag and available for runtime hot-switching.
+
+### 🔄 Adding a New Emitter Implementation
+
+Implement the `emitter.Emitter` interface and register it in `main.go`. Current implementations: `ui.Renderer` (CLI TUI), `emitter.ApiEmitter` (NDJSON stdout), `web.SSEEmitter` (Web SSE events).
 
 ### 🧪 Unit Testing
 
@@ -372,6 +334,13 @@ Run tests for a specific package:
 go test ./tools/...
 go test ./subagent/...
 go test ./skills/...
+go test ./session/...
+go test ./memory/...
+go test ./prompt/...
+go test ./model/...
+go test ./compact/...
+go test ./hook/...
+go test ./permission/...
 ```
 
 ### 🐞 Debugging with Logs
@@ -385,10 +354,11 @@ Use Zap log levels (`Debug` / `Info` / `Warn` / `Error`) to observe message flow
 | Module | Description |
 |--------|-------------|
 | **🔗 MCP Integration** | Leverage the reserved `ToolContext.McpClients` field to integrate Model Context Protocol (MCP) external tool ecosystem for cross-process tool calls. |
-| **💾 Persistent Storage** | Persist session state, message history, and plan data for session recovery, cross-process sharing, and audit trails. |
 | **🧪 Read-Only Bash Sandbox** | Provide subagents with a restricted `run_bash` that only allows pure query commands, further reducing side-effect risks. |
 | **📈 Execution Metrics & Observability** | Collect metrics on tool call counts, latency, and failure rates for performance tuning and troubleshooting. |
-| **🧠 Memory System Enhancement** | Extend the `memory/` module for cross-session long-term memory storage and retrieval. |
+| **🧠 Enhanced Memory Ranking** | Improve memory retrieval with relevance scoring, temporal decay, and cross-session deduplication. |
+| **🔌 Plugin / MCP Client SDK** | Officially release the MCP client integration SDK for third-party tool providers. |
+| **🔄 Multi-User & Collaboration** | Support multi-user sessions, shared workspaces, and collaborative agent workflows. |
 
 ---
 

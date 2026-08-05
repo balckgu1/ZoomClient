@@ -1,0 +1,50 @@
+# ZoomClient Go 代码质量检查配置
+# 覆盖核心代码路径：clients, compact, config, emitter, fsm, hook, logger,
+# memory, model, permission, prompt, session, skills, subagent, tools, ui, utils, web
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    # 默认启用的核心 linter
+    - errcheck       # 检查未处理的错误返回值
+    - govet          # 官方的 Go vet 静态分析
+    - ineffassign    # 检测无效赋值
+    - staticcheck    # 高级静态分析（涵盖 staticcheck, SA 系列）
+    - unused         # 检测未使用的常量、变量、函数、类型
+
+    # 额外启用的 linter
+    - gosimple       # 代码简化建议
+    - copylocks      # 检测值拷贝的锁
+    - nilerr         # 检测返回 nil 而非 error 的情况
+    - nilnil         # 检测同时返回 nil, nil 的情况
+    - noctx          # 检测缺少 context.Context 的 HTTP 请求
+    - wastedassign   # 检测被后续赋值覆盖的变量
+    - bodyclose      # 检查 HTTP 响应体是否正确关闭
+    - durationcheck  # 检查 duration 的乘法运算
+    - errorlint      # 检查 error 处理模式
+    - forcetypeassert # 检查未检查的 type assertion
+    - makezero       # 检查 slice append 时的长度陷阱
+    - prealloc       # 可预分配容量的 slice 建议
+    - unconvert      # 移除不必要的类型转换
+    - unparam        # 检查未使用的函数参数
+
+  settings:
+    errcheck:
+      check-blank: true                    # 检查空白标识符赋值中忽略的错误
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*go.uber.org/zap.SugaredLogger).Sync
+    govet:
+      enable:
+        - shadow                           # 检查变量遮蔽
+    staticcheck:
+      checks: ["all"]                      # 启用所有 SA 系列检查
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

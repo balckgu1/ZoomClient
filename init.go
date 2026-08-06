@@ -225,17 +225,20 @@ func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Se
 
 // buildHookRunner constructs a hook runner
 func initHookRunner() *hook.Runner {
-	runner := hook.NewRunner() // Build a new hook runner instance
-	runner.Register(hook.EventSessionStart, hook.OnSessionStart)
+	// Build a new hook runner instance
+	runner := hook.NewRunner()
 
-	runner.Register(hook.EventPreToolUse, hook.PreToolBlockDangerous)
-	runner.Register(hook.EventPreToolUse, hook.PreToolRateLimit)
-	runner.Register(hook.EventPreToolUse, hook.PreToolSensitiveFileGuard)
+	// Register hooks for session start
+	runner.HookRegister(hook.EventSessionStart, hook.OnSessionStart)
 
-	runner.Register(hook.EventPostToolUse, hook.PostToolAuditLog)
-	runner.Register(hook.EventToolError, hook.OnToolErrorRecovery)
+	runner.HookRegister(hook.EventPreToolUse, hook.PreToolBlockDangerous)
+	runner.HookRegister(hook.EventPreToolUse, hook.PreToolRateLimit)
+	runner.HookRegister(hook.EventPreToolUse, hook.PreToolSensitiveFileGuard)
 
-	runner.Register(hook.EventSessionEnd, hook.OnSessionEnd)
+	runner.HookRegister(hook.EventPostToolUse, hook.PostToolAuditLog)
+	runner.HookRegister(hook.EventToolError, hook.OnToolErrorRecovery)
+
+	runner.HookRegister(hook.EventSessionEnd, hook.OnSessionEnd)
 	return runner
 }
 

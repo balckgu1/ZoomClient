@@ -144,7 +144,7 @@ func main() {
 		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
 	}
 
-	hookRunner.Run(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
+	hookRunner.HookRun(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
 	if em != nil {
 		em.EmitSessionStart(modelname, logger.LogFilePath)
 	}
@@ -180,5 +180,5 @@ func main() {
 	if em != nil {
 		em.EmitSessionEnd(state.TurnCount)
 	}
-	hookRunner.Run(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
+	hookRunner.HookRun(hook.EventSessionEnd, map[string]any{"total_turns": state.TurnCount})
 }

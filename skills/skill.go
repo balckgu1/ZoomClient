@@ -9,7 +9,7 @@ type SkillManifest struct {
 	Compatibility string `yaml:"compatibility"`
 }
 
-// SkillDocument skill 包含frontmatter的所有完整内容
+// SkillDocument skill 完整内容
 type SkillDocument struct {
 	Manifest SkillManifest // 元信息
 	Body     string        // SKILL.md 去掉 frontmatter 后的正文

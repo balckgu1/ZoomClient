@@ -122,7 +122,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		// Hook: Trigger EventPreToolUse for each tool before tool execution
 		preDecisions := make([]hook.HookResult, len(toolCalls))
 		for i, tc := range toolCalls {
-			preDecisions[i] = hookRunner.Run(hook.EventPreToolUse, map[string]any{
+			preDecisions[i] = hookRunner.HookRun(hook.EventPreToolUse, map[string]any{
 				"tool_name":       tc.Name,
 				"input":           tc.Arguments,
 				"call_index":      i,
@@ -274,7 +274,7 @@ func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, pipeline *prompt.MessagePipeline) {
 	for i, tc := range toolCalls {
 		if results[i].IsError {
-			errordecision := runner.Run(hook.EventToolError, map[string]any{
+			errordecision := runner.HookRun(hook.EventToolError, map[string]any{
 				"tool_name": tc.Name,
 				"input":     tc.Arguments,
 				"output":    results[i].Content,
@@ -287,7 +287,7 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 				})
 			}
 		}
-		runner.Run(hook.EventPostToolUse, map[string]any{
+		runner.HookRun(hook.EventPostToolUse, map[string]any{
 			"tool_name": tc.Name,
 			"input":     tc.Arguments,
 			"output":    results[i].Content,

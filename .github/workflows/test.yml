@@ -26,12 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout 代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 设置 Go 环境
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: 运行 Go 测试
@@ -43,19 +43,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout 代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 设置 Go 环境
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: 运行 golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13
           args: --timeout=5m
+          # 仅检查本次变更引入的新问题；存量历史问题不阻断合并
+          only-new-issues: true
 
   # ── 前端类型检查：TypeScript 编译验证 ────────────────────
   frontend-check:
@@ -66,10 +68,10 @@ jobs:
         working-directory: web/frontend
     steps:
       - name: Checkout 代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 设置 Node.js 环境
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm

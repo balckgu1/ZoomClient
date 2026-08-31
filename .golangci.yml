@@ -18,8 +18,8 @@ linters:
     - unused         # 检测未使用的常量、变量、函数、类型
 
     # 额外启用的 linter
-    - gosimple       # 代码简化建议
-    - copylocks      # 检测值拷贝的锁
+    # 注：gosimple 已并入 staticcheck（checks: ["all"] 已覆盖 S 系列检查），
+    #     copylocks 已是 govet 默认启用的分析器，两者在 v2 中不再是独立 linter
     - nilerr         # 检测返回 nil 而非 error 的情况
     - nilnil         # 检测同时返回 nil, nil 的情况
     - noctx          # 检测缺少 context.Context 的 HTTP 请求

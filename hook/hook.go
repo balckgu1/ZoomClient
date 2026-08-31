@@ -7,13 +7,6 @@ import (
 )
 
 const (
-	ExitContinue = 0 // Continue
-	ExitBlock    = 1 // Block
-	ExitInject   = 2 // Inject
-	ExitRetry    = 3 // Retry
-)
-
-const (
 	EventSessionStart = "SessionStart" // Session start
 	EventPreToolUse   = "PreToolUse"   // Tool execution before
 	EventPostToolUse  = "PostToolUse"  // Tool execution after
@@ -21,46 +14,47 @@ const (
 	EventSessionEnd   = "SessionEnd"   // Session end
 )
 
-type Handler func(payload map[string]any) HookResult
+const (
+	ExitContinue = 0 // Continue
+	ExitBlock    = 1 // Block
+	ExitInject   = 2 // Inject
+	ExitRetry    = 3 // Retry
+)
 
-// HookResult Define the hook handler result structure
+type HookHandlerFunc = func(payload map[string]any) HookResult
+
 type HookResult struct {
-	ExitCode      int
-	Message       string
-	ModifiedInput map[string]any // When ExitCode = 3, modify the input
+	ExitCode int
+	Message  string
 }
 
-// Runner Define the Runner class
 type Runner struct {
-	handlers map[string][]Handler // map{event: []Handler}
+	handlers map[string][]HookHandlerFunc
 }
 
-// NewRunner Construction method of runner
 func NewRunner() *Runner {
 	return &Runner{
-		handlers: make(map[string][]Handler),
+		handlers: make(map[string][]HookHandlerFunc),
 	}
 }
 
-// Register Mount an event to a specified handler
-//
-// Same event can mount multiple handlers, executed in the order of registration.
-func (r *Runner) Register(event string, handler Handler) {
+// HookRegister Register a hook handler for a specific event
+func (r *Runner) HookRegister(event string, handler HookHandlerFunc) {
 	r.handlers[event] = append(r.handlers[event], handler)
 }
 
-// Run Trigger specified event and execute all handlers mounted to that event
-func (r *Runner) Run(event string, payload map[string]any) HookResult {
-	log := logger.Log
+// HookRun Run all hook handlers for a specific event
+func (r *Runner) HookRun(event string, args map[string]any) HookResult {
 
 	handlers, exists := r.handlers[event]
 	if !exists || len(handlers) == 0 {
 		return HookResult{ExitCode: ExitContinue}
 	}
 
-	for _, handler := range r.handlers[event] {
-		result := handler(payload)
+	for _, handlerFuncs := range r.handlers[event] {
+		result := handlerFuncs(args)
 		if result.ExitCode != ExitContinue {
+			log := logger.Log
 			log.Debug("[hook] Handler returns non-zero exit code",
 				zap.String("event", event),
 				zap.Int("exit_code", result.ExitCode),
@@ -69,10 +63,10 @@ func (r *Runner) Run(event string, payload map[string]any) HookResult {
 			return result
 		}
 	}
+
 	return HookResult{ExitCode: ExitContinue}
 }
 
-// HandlerCount Return number of handlers mounted to specified event
 func (r *Runner) HandlerCount(event string) int {
 	return len(r.handlers[event])
 }

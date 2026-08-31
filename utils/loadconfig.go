@@ -150,3 +150,9 @@ func GetConfig() *Config {
 	}
 	return globalConfig
 }
+
+// GetConfigSafe 安全获取全局配置实例。
+// 与 GetConfig 不同，配置未初始化时返回 nil 而不是直接崩溃，
+func GetConfigSafe() *Config {
+	return globalConfig
+}

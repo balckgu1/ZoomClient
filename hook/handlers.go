@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"zoomClient/logger"
+	"zoomClient/permission"
 
 	"go.uber.org/zap"
 )
@@ -29,12 +30,11 @@ func PreToolBlockDangerous(payload map[string]any) HookResult {
 
 	input, _ := payload["input"].(map[string]any)
 	cmd, _ := input["command"].(string)
+	lowered := strings.ToLower(cmd)
 
-	// dangerous command patterns
-	dangerousPatterns := []string{"rm -rf /", "mkfs.", "dd if=", ":(){:|:&};:"}
-
-	for _, pattern := range dangerousPatterns {
-		if strings.Contains(cmd, pattern) {
+	// dangerous command patterns（统一数据源，大小写不敏感匹配）
+	for _, pattern := range permission.DangerousBashPatterns() {
+		if strings.Contains(lowered, pattern) {
 			return HookResult{
 				ExitCode: ExitBlock,
 				Message:  fmt.Sprintf("dangerous command blocked by hook: %s", cmd),

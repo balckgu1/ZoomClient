@@ -1,6 +1,10 @@
 package permission
 
-import "testing"
+import (
+	"testing"
+
+	"zoomClient/utils"
+)
 
 // recordingAsker 测试用 Asker：记录是否被调用，并按预设结果返回
 type recordingAsker struct {
@@ -111,15 +115,17 @@ func TestIsDangerousBash_RmRfRoot(t *testing.T) {
 	}
 }
 
+// 命令替换 $() 是常见合法用法，不再被启发式拦截
 func TestIsDangerousBash_CommandSubstitution(t *testing.T) {
-	if dangerous, _ := isDangerousBash("echo $(whoami)"); !dangerous {
-		t.Errorf("$( ) should be flagged")
+	if dangerous, why := isDangerousBash("echo $(whoami)"); dangerous {
+		t.Errorf("`$( )` should NOT be flagged, got dangerous: %s", why)
 	}
 }
 
+// 反引号命令替换是常见合法用法，不再被启发式拦截
 func TestIsDangerousBash_Backtick(t *testing.T) {
-	if dangerous, _ := isDangerousBash("echo `whoami`"); !dangerous {
-		t.Errorf("backtick should be flagged")
+	if dangerous, why := isDangerousBash("echo `whoami`"); dangerous {
+		t.Errorf("backtick should NOT be flagged, got dangerous: %s", why)
 	}
 }
 
@@ -128,6 +134,27 @@ func TestIsDangerousBash_Normal(t *testing.T) {
 		if dangerous, why := isDangerousBash(cmd); dangerous {
 			t.Errorf("%q should be safe, got dangerous: %s", cmd, why)
 		}
+	}
+}
+
+// 配置未初始化时，DangerousBashPatterns 必须回退到内置默认集，保证安全底线不缺失。
+func TestDangerousBashPatterns_FallbackToBuiltin(t *testing.T) {
+	if cfg := utils.GetConfigSafe(); cfg != nil {
+		t.Skip("config already initialized, skip fallback test")
+	}
+	patterns := DangerousBashPatterns()
+	if len(patterns) == 0 {
+		t.Fatal("fallback patterns should not be empty")
+	}
+	found := false
+	for _, p := range patterns {
+		if p == "rm -rf /" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("fallback patterns should contain `rm -rf /`, got %v", patterns)
 	}
 }
 

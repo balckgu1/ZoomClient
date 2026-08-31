@@ -12,36 +12,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// SkillRegistry skills 注册表
 type SkillRegistry struct {
-	skillsDir string
-	skills    map[string]*SkillDocument
+	skillsDir string                    // skills 存放路径
+	skills    map[string]*SkillDocument // skill的完整内容映射
 }
 
 // NewRegistry 扫描 skillsDir 下所有 SKILL.md 并构建 SkillRegistry
 func NewSkillRegistry(skillsDir string) (*SkillRegistry, error) {
-	reg := &SkillRegistry{
+	return &SkillRegistry{
 		skillsDir: skillsDir,
 		skills:    make(map[string]*SkillDocument),
-	}
-	if skillsDir == "" {
-		return reg, nil
-	}
-	info, err := os.Stat(skillsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return reg, nil
-		}
-		return nil, fmt.Errorf("stat skills dir %q failed: %w", skillsDir, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("skills path %q is not a directory", skillsDir)
-	}
-
-	err = reg.loadAll()
-	if err != nil {
-		return nil, err
-	}
-	return reg, nil
+	}, nil
 }
 
 // loadAll 遍历 skillsDir 目录，递归加载所有 SKILL.md 文件到 SkillRegistry

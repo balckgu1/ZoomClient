@@ -96,6 +96,8 @@ permission:
     - tool: "run_bash"
       content: "mkfs"
     - tool: "run_bash"
+      content: "dd if="
+    - tool: "run_bash"
       content: "shutdown"
     - tool: "run_bash"
       content: "reboot"
@@ -103,6 +105,37 @@ permission:
       content: "> /dev/sda"
     - tool: "run_bash"
       content: ":(){:|:&};:"
+    # Windows dangerous commands
+    - tool: "run_bash"
+      content: "del /f /s /q"        # 静默强制递归删除文件
+    - tool: "run_bash"
+      content: "rmdir /s /q"         # 静默递归删除目录树
+    - tool: "run_bash"
+      content: "format "             # 格式化磁盘/分区
+    - tool: "run_bash"
+      content: "diskpart"            # 磁盘分区管理（clean 可清空整个磁盘）
+    - tool: "run_bash"
+      content: "reg delete"          # 删除注册表项
+    - tool: "run_bash"
+      content: "taskkill /f"         # 强制终止进程
+    - tool: "run_bash"
+      content: "bcdedit"             # 修改系统启动配置
+    - tool: "run_bash"
+      content: "takeown /f"          # 强制获取文件/目录所有权
+    - tool: "run_bash"
+      content: "icacls"              # 修改文件/目录 ACL 权限
+    - tool: "run_bash"
+      content: "remove-item -recurse" # PowerShell 递归删除
+    - tool: "run_bash"
+      content: "format-volume"       # PowerShell 格式化卷
+    - tool: "run_bash"
+      content: "clear-disk"          # PowerShell 清空磁盘
+    - tool: "run_bash"
+      content: "stop-computer"       # PowerShell 关机
+    - tool: "run_bash"
+      content: "restart-computer"    # PowerShell 重启
+    - tool: "run_bash"
+      content: "invoke-expression"   # PowerShell 动态执行任意代码
   allowRules:
     - tool: "run_bash"
       content: "git status"

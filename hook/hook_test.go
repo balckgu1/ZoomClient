@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 // TestRunner_NoHandler_ReturnsContinue 没有任何 handler 时，Run 应直接返回 0。
 func TestRunner_NoHandler_ReturnsContinue(t *testing.T) {
 	runner := NewRunner()
-	result := runner.Run(EventSessionStart, nil)
+	result := runner.HookRun(EventSessionStart, nil)
 	if result.ExitCode != ExitContinue {
 		t.Errorf("expected ExitContinue, got %d", result.ExitCode)
 	}
@@ -28,9 +28,9 @@ func TestRunner_NoHandler_ReturnsContinue(t *testing.T) {
 // TestRunner_RegisterAndCount 验证注册数量与 HandlerCount 一致。
 func TestRunner_RegisterAndCount(t *testing.T) {
 	runner := NewRunner()
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult { return HookResult{} })
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult { return HookResult{} })
-	runner.Register(EventPostToolUse, func(p map[string]any) HookResult { return HookResult{} })
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult { return HookResult{} })
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult { return HookResult{} })
+	runner.HookRegister(EventPostToolUse, func(p map[string]any) HookResult { return HookResult{} })
 
 	if got := runner.HandlerCount(EventPreToolUse); got != 2 {
 		t.Errorf("PreToolUse expected 2 handlers, got %d", got)
@@ -46,14 +46,14 @@ func TestRunner_RegisterAndCount(t *testing.T) {
 // TestRunner_AllContinue 所有 handler 都返回 0 时，最终结果为 0。
 func TestRunner_AllContinue(t *testing.T) {
 	runner := NewRunner()
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult {
 		return HookResult{ExitCode: ExitContinue}
 	})
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult {
 		return HookResult{ExitCode: ExitContinue}
 	})
 
-	result := runner.Run(EventPreToolUse, map[string]any{})
+	result := runner.HookRun(EventPreToolUse, map[string]any{})
 	if result.ExitCode != ExitContinue {
 		t.Errorf("expected ExitContinue, got %d", result.ExitCode)
 	}
@@ -64,16 +64,16 @@ func TestRunner_BlockShortCircuit(t *testing.T) {
 	runner := NewRunner()
 	called := []string{}
 
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult {
 		called = append(called, "h1")
 		return HookResult{ExitCode: ExitBlock, Message: "stop"}
 	})
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult {
 		called = append(called, "h2") // 不应被调用
 		return HookResult{}
 	})
 
-	result := runner.Run(EventPreToolUse, nil)
+	result := runner.HookRun(EventPreToolUse, nil)
 	if result.ExitCode != ExitBlock {
 		t.Errorf("expected ExitBlock, got %d", result.ExitCode)
 	}
@@ -88,15 +88,15 @@ func TestRunner_BlockShortCircuit(t *testing.T) {
 // TestRunner_InjectShortCircuit 验证 exit=2 同样会短路并返回消息。
 func TestRunner_InjectShortCircuit(t *testing.T) {
 	runner := NewRunner()
-	runner.Register(EventPostToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPostToolUse, func(p map[string]any) HookResult {
 		return HookResult{ExitCode: ExitInject, Message: "extra info"}
 	})
-	runner.Register(EventPostToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPostToolUse, func(p map[string]any) HookResult {
 		t.Fatal("second handler should not be called")
 		return HookResult{}
 	})
 
-	result := runner.Run(EventPostToolUse, nil)
+	result := runner.HookRun(EventPostToolUse, nil)
 	if result.ExitCode != ExitInject {
 		t.Errorf("expected ExitInject, got %d", result.ExitCode)
 	}
@@ -109,13 +109,13 @@ func TestRunner_InjectShortCircuit(t *testing.T) {
 func TestRunner_PayloadPropagation(t *testing.T) {
 	runner := NewRunner()
 	var got map[string]any
-	runner.Register(EventPreToolUse, func(p map[string]any) HookResult {
+	runner.HookRegister(EventPreToolUse, func(p map[string]any) HookResult {
 		got = p
 		return HookResult{}
 	})
 
 	want := map[string]any{"tool_name": "read_file", "input": map[string]any{"path": "x"}}
-	runner.Run(EventPreToolUse, want)
+	runner.HookRun(EventPreToolUse, want)
 
 	if got["tool_name"] != "read_file" {
 		t.Errorf("payload tool_name not propagated, got %v", got["tool_name"])

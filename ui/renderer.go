@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/chzyer/readline"
 )
 
 // Renderer 是前端渲染器。stdout 默认指向 os.Stdout，stdin 默认指向 os.Stdin，
@@ -18,13 +20,42 @@ type Renderer struct {
 	Out    io.Writer
 	In     io.Reader
 	reader *bufio.Reader
+	rl     *readline.Instance // 交互式行编辑器；非终端或初始化失败时为 nil
+	model  string
 }
 
 // New 创建一个使用 os.Stdin / os.Stdout 的 Renderer。
+// 在交互式终端下启用 readline（Tab 补全、↑↓ 历史、可编辑输入行）；
+// 非终端 / 管道输入或初始化失败时退化为原 bufio 逐行读取，行为保持不变。
 func New() *Renderer {
 	r := &Renderer{Out: os.Stdout, In: os.Stdin}
+	if readline.DefaultIsTerminal() {
+		rl, err := readline.NewEx(&readline.Config{
+			Prompt:            r.promptStr(),
+			AutoComplete:      buildCompleter(),
+			InterruptPrompt:   "^C",
+			EOFPrompt:         "exit",
+			HistoryLimit:      1000,
+			HistorySearchFold: true,
+			Stdin:             os.Stdin,
+			Stdout:            os.Stdout,
+			Stderr:            os.Stderr,
+		})
+		if err == nil {
+			r.rl = rl
+			return r
+		}
+	}
 	r.reader = bufio.NewReader(r.In)
 	return r
+}
+
+// Close 释放 readline 资源并恢复终端原始模式；进程退出前（runCLIREPL 结束）调用。
+func (r *Renderer) Close() {
+	if r.rl != nil {
+		_ = r.rl.Close()
+		r.rl = nil
+	}
 }
 
 // 内部辅助：直接 Println 到 Out。
@@ -32,19 +63,40 @@ func (r *Renderer) println(s string) {
 	fmt.Fprintln(r.Out, s)
 }
 
+// promptStr 构造当前提示符，存在模型名时附带显示。
+func (r *Renderer) promptStr() string {
+	p := "👤 You> "
+	if r.model != "" {
+		p = fmt.Sprintf("👤 You (%s)> ", r.model)
+	}
+	return styleUserPrompt.Render(p)
+}
+
+// setModel 记录模型名（由 PrintSessionStart 调用），并同步刷新 readline 提示符。
+func (r *Renderer) setModel(m string) {
+	r.model = m
+	if r.rl != nil {
+		r.rl.SetPrompt(r.promptStr())
+	}
+}
+
 // ===================== 会话级 =====================
 
-// PrintSessionStart 显示欢迎横幅与日志文件位置。
+// PrintSessionStart 显示欢迎横幅、日志位置与命令提示列表。
 func (r *Renderer) PrintSessionStart(model, logPath string) {
-	author := "balckgu1"
-	banner := styleBanner.Render("ZoomClient  ·  Agent CLI")
-	info := styleSeparator.Render(fmt.Sprintf("model: %s   |   logs: %s", model, logPath))
-	auth := styleSeparator.Render(fmt.Sprintf("author: %s", author))
-	hint := styleSeparator.Render("commands: /exit /clear /compact /help")
+	r.setModel(model)
+
+	title := styleHeaderTitle.Render("ZoomClient  ·  Agent CLI")
+	meta := styleSeparator.Render(fmt.Sprintf("model: %s    |    logs: %s", model, logPath))
+	auth := styleSeparator.Render("author: balckgu1")
+	banner := styleBanner.Render(title + "\n" + meta + "\n" + auth)
 	r.println(banner)
-	r.println(info)
-	r.println(auth)
-	r.println(hint)
+
+	r.println("")
+	r.println(styleHintTitle.Render("可用命令（Tab 一键补全 · ↑↓ 查看历史）:"))
+	for _, row := range commandHintRows() {
+		r.println(styleHint.Render(row))
+	}
 	r.println("")
 }
 
@@ -61,14 +113,28 @@ func (r *Renderer) PrintTurnSeparator() {
 
 // ===================== 用户输入 =====================
 
-// PromptUser 在 stdout 渲染输入提示并从 stdin 读取一行。
+// PromptUser 渲染交互式输入提示并读取一行用户输入。
 //
-// 返回去掉首尾空白的字符串；若读到 EOF（Ctrl+Z 或管道关闭），第二个返回值为 false。
+// 交互式终端下使用 readline（支持 Tab 补全、↑↓ 历史、行内编辑）；
+// 返回去掉首尾空白的字符串；读到 EOF（Ctrl+Z / 管道关闭）时第二个返回值为 false。
 func (r *Renderer) PromptUser() (string, bool) {
-	fmt.Fprint(r.Out, styleUserPrompt.Render("👤 You> "))
+	if r.rl != nil {
+		line, err := r.rl.Readline()
+		if err == readline.ErrInterrupt {
+			// 单次 Ctrl+C：清空当前输入并继续
+			r.rl.SetPrompt(r.promptStr())
+			r.rl.Refresh()
+			return "", true
+		}
+		if err != nil {
+			return "", false // io.EOF 或其它错误均视为结束
+		}
+		return strings.TrimSpace(line), true
+	}
+
+	fmt.Fprint(r.Out, r.promptStr())
 	line, err := r.reader.ReadString('\n')
 	if err != nil {
-		// 把已读到的部分也返回给调用方（通常 EOF 时 line 为空）
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			return "", false

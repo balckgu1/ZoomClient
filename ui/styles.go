@@ -95,3 +95,20 @@ var (
 			Bold(true).
 			Foreground(colorAssistant)
 )
+
+
+// 会话横幅标题、命令提示条（新样式）
+var (
+	styleHeaderTitle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorAssistant)
+
+	// 命令提示区标题
+	styleHintTitle = lipgloss.NewStyle().
+			Foreground(colorOK).
+			Bold(true)
+
+	// 命令提示区正文
+	styleHint = lipgloss.NewStyle().
+			Foreground(colorMuted)
+)

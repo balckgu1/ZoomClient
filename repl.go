@@ -160,6 +160,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 
 // runCLIREPL runs the CLI mode REPL loop, reading input from stdin.
 func runCLIREPL(s *AgentSession, view *ui.Renderer) {
+	defer view.Close()
 	for {
 		input, ok := view.PromptUser()
 		if !ok {

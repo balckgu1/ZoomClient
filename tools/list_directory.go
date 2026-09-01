@@ -46,10 +46,12 @@ func (l ListDirectory) Call(args map[string]any, toolCtx *ToolContext) ToolResul
 		baseDir = resolved
 	}
 
-	toolCtx.Logger.Info("List directory",
-		zap.String("session", toolCtx.SessionID),
-		zap.String("directory", baseDir),
-	)
+	if toolCtx.Logger != nil {
+		toolCtx.Logger.Info("List directory",
+			zap.String("session", toolCtx.SessionID),
+			zap.String("directory", baseDir),
+		)
+	}
 
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {

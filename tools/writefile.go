@@ -52,7 +52,9 @@ func (t WriteFileTool) Call(args map[string]any, toolCtx *ToolContext) ToolResul
 	}
 
 	targetPath, err := isSafePath(toolCtx.WorkPath, filename)
-	toolCtx.Logger.Info("Writing file", zap.String("session", toolCtx.SessionID), zap.String("filename", filename), zap.String("workdir", targetPath))
+	if toolCtx.Logger != nil {
+		toolCtx.Logger.Info("Writing file", zap.String("session", toolCtx.SessionID), zap.String("filename", filename), zap.String("workdir", targetPath))
+	}
 	if err != nil {
 		return ToolResult{Ok: false, Content: fmt.Sprintf("Error: %v", err), IsError: true}
 	}

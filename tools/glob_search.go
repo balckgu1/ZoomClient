@@ -61,12 +61,14 @@ func (g GlobSearch) Call(args map[string]any, toolCtx *ToolContext) ToolResult {
 		maxResults = int(maxArg)
 	}
 
-	toolCtx.Logger.Info("Glob search",
-		zap.String("session", toolCtx.SessionID),
-		zap.String("pattern", pattern),
-		zap.String("base", baseDir),
-		zap.Int("max_results", maxResults),
-	)
+	if toolCtx.Logger != nil {
+		toolCtx.Logger.Info("Glob search",
+			zap.String("session", toolCtx.SessionID),
+			zap.String("pattern", pattern),
+			zap.String("base", baseDir),
+			zap.Int("max_results", maxResults),
+		)
+	}
 
 	// 统一将 pattern 转为正斜杠，doublestar 默认使用 / 作为路径分隔符
 	normalizedPattern := filepath.ToSlash(pattern)

@@ -312,7 +312,7 @@ func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model str
 
 	logs := logger.Log
 	// attempt 从 0 开始
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		// 1. PreChat：调用前观察/拦截/注入
 		preDecision := hookRunner.HookRun(hook.EventPreChat, map[string]any{
 			"model":          model,
@@ -332,6 +332,8 @@ func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model str
 				"model":          model,
 				"messages_count": len(fullMessages),
 				"est_tokens":     estimateTokens(fullMessages),
+				"retry_count":    attempt,
+				"max_retries":    maxRetries,
 				"error":          err.Error(),
 			})
 			if decision.ExitCode == hook.ExitRetry && attempt < maxRetries {

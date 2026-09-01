@@ -231,13 +231,21 @@ func initHookRunner() *hook.Runner {
 	// Register hooks for session start
 	runner.HookRegister(hook.EventSessionStart, hook.OnSessionStart)
 
+	// Register hooks around LLM calls (pre/post chat + error retry)
+	runner.HookRegister(hook.EventPreChat, hook.PreChatAuditLog)
+	runner.HookRegister(hook.EventPostChat, hook.PostChatValidate)
+	runner.HookRegister(hook.EventLLMError, hook.OnLLMErrorRetry)
+
+	// Register hooks for tool use
 	runner.HookRegister(hook.EventPreToolUse, hook.PreToolBlockDangerous)
 	runner.HookRegister(hook.EventPreToolUse, hook.PreToolRateLimit)
 	runner.HookRegister(hook.EventPreToolUse, hook.PreToolSensitiveFileGuard)
 
+	// Register hooks for tool use completion and errors
 	runner.HookRegister(hook.EventPostToolUse, hook.PostToolAuditLog)
 	runner.HookRegister(hook.EventToolError, hook.OnToolErrorRecovery)
 
+	// Register hooks for session end
 	runner.HookRegister(hook.EventSessionEnd, hook.OnSessionEnd)
 	return runner
 }

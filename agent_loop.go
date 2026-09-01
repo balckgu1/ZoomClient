@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"zoomClient/clients"
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
@@ -19,11 +20,12 @@ import (
 // agentLoop is the main agent reasoning loop.
 // stopCh is optional (nil for CLI/API mode). When closed, the loop aborts at the next safe point.
 func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
+
 	cfg, client, state, model := s.Cfg, s.Client, s.State, s.ModelName
 	pipeline, registry, toolCtx := s.Pipeline, s.Registry, s.ToolCtx
 	todoManager, compactManager := s.TodoManager, s.CompactManager
 	hookRunner, em := s.HookRunner, s.Em
-	log := logger.Log
+	logs := logger.Log
 
 	// Get tool list
 	toolList := registry.GetAll()
@@ -43,19 +45,20 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 		// Pipeline assemble: system prompt + state.messages + reminders + attachments
 		payload := pipeline.AssemblePayload(state.Messages)
-		// Add system prompt at the beginning of state.messages
-		fullMessages := append([]fsm.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
-
-		// LLM chat
-		response, err := client.Chat(model, fullMessages, toolList, map[string]interface{}{"temperature": 0.7})
-		if err != nil {
-			log.Error("call llm failed", zap.Error(err))
-			em.EmitError("LLM", err.Error())
-			break
-		}
 
 		// Clear OneShot reminder
 		pipeline.ClearOneShotReminders()
+
+		// Add system prompt at the beginning of state.messages
+		fullMessages := append([]fsm.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
+
+		// LLM chat（带 hook 干预：PreChat / LLMError / PostChat，失败或空回复时自动重试）
+		response, err := chatWithHooks(hookRunner, client, model, fullMessages, toolList, map[string]interface{}{"temperature": 0.7}, cfg.AgentLoop.MaxLLMRetries, pipeline)
+		if err != nil {
+			logs.Error("call llm failed", zap.Error(err))
+			em.EmitError("LLM", err.Error())
+			break
+		}
 
 		// Add the assistant's response to state.messages
 		state.Messages = append(state.Messages, fsm.Message{
@@ -78,7 +81,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			break
 		}
 
-		log.Info("Model requested tool call", zap.Int("tool count", len(response.Message.ToolCalls)))
+		logs.Info("Model requested tool call", zap.Int("tool count", len(response.Message.ToolCalls)))
 
 		// If reasoning is not empty, render to user
 		if response.Message.ReasoningContent != "" {
@@ -88,13 +91,13 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		// Batch tools based on concurrency safety
 		toolCalls := response.Message.ToolCalls
 		batches := tools.PartitionToolCalls(toolCalls)
-		log.Info("Batch calling of tools", zap.Int("Batch number", len(batches)))
+		logs.Info("Batch calling of tools", zap.Int("Batch number", len(batches)))
 		for batchIndex, batch := range batches {
 			batchToolNames := make([]string, 0, len(batch.Tools))
 			for _, tracked := range batch.Tools {
 				batchToolNames = append(batchToolNames, tracked.Name)
 			}
-			log.Info("Batch details", zap.Int("Batch number", batchIndex),
+			logs.Info("Batch details", zap.Int("Batch number", batchIndex),
 				zap.Bool("Is concurrency safe", batch.IsConcurrencySafe),
 				zap.Strings("tool list", batchToolNames),
 			)
@@ -150,7 +153,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 		// Write Tool Result back to state.messages in the order of call
 		for resultIndex, result := range results {
-			log.Info("tool call finished",
+			logs.Info("tool call finished",
 				zap.String("tool name", toolCalls[resultIndex].Name),
 				zap.String("args", formatArgsPreview(toolCalls[resultIndex].Arguments)),
 				zap.String("result", result.Content),
@@ -169,7 +172,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			// Context compact: Layer 1 (large output persistence): when a single tool result is too large, write full content to disk and keep only a preview in the message
 			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
 			if persistedContent != result.Content {
-				log.Info("tool result content too large, persisted to disk and replaced with preview",
+				logs.Info("tool result content too large, persisted to disk and replaced with preview",
 					zap.String("tool name", toolCalls[resultIndex].Name),
 					zap.Int("origin bytes", len(result.Content)),
 				)
@@ -190,7 +193,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		if !usedTodo {
 			todoManager.IncrementRoundsSinceUpdate()
 			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
-				log.Info("Plan has not been updated for a long time, injecting reminders",
+				logs.Info("Plan has not been updated for a long time, injecting reminders",
 					zap.Int("Rounds since update", cfg.AgentLoop.TodoRoundsThreshold),
 				)
 				pipeline.AddReminder(prompt.Reminder{
@@ -212,10 +215,10 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			beforeSize := compactManager.EstimateSize(state.Messages)
 			newMessages, cerr := compactManager.CompactHistory(state.Messages)
 			if cerr != nil {
-				log.Warn("Complete compression failed, keep the original message history to continue", zap.String("session", toolCtx.SessionID), zap.Error(cerr))
+				logs.Warn("Complete compression failed, keep the original message history to continue", zap.String("session", toolCtx.SessionID), zap.Error(cerr))
 			} else {
 				afterSize := compactManager.EstimateSize(newMessages)
-				log.Info("Complete compression completed",
+				logs.Info("Complete compression completed",
 					zap.String("Session", toolCtx.SessionID),
 					zap.Int("Bytes before compression", beforeSize),
 					zap.Int("Bytes after compression", afterSize),
@@ -228,7 +231,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 		// Limit the maximum number of rounds to avoid infinite loops
 		if state.TurnCount >= cfg.AgentLoop.MaxTurns {
-			log.Warn("Reaching the maximum round, stop the loop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
+			logs.Warn("Reaching the maximum round, stop the loop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
 			em.EmitInfo(fmt.Sprintf("reached max turns (%d), stop", cfg.AgentLoop.MaxTurns))
 			break
 		}
@@ -293,6 +296,104 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 			"output":    results[i].Content,
 		})
 	}
+}
+
+// chatWithHooks 在 LLM 调用前后触发 hook（PreChat / LLMError / PostChat），并按 hook 决策自动重试。
+//
+// 行为约定：
+//   - PreChat 返回 ExitBlock 时中止调用并返回错误；
+//   - LLMError 返回 ExitRetry 时重试调用（失败路径）；
+//   - PostChat 返回 ExitRetry 时重试调用（回复校验路径）；
+//   - 两条重试路径共享同一个 maxRetries 预算，防止无限重试；
+//   - PreChat / PostChat 返回 ExitInject 时，消息以 OneShot reminder 注入，在下一轮组装提示词时生效。
+func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model string,
+	fullMessages []fsm.Message, toolList []tools.Tool, options map[string]interface{},
+	maxRetries int, pipeline *prompt.MessagePipeline) (*clients.ChatResponse, error) {
+
+	logs := logger.Log
+	// attempt 从 0 开始
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// 1. PreChat：调用前观察/拦截/注入
+		preDecision := hookRunner.HookRun(hook.EventPreChat, map[string]any{
+			"model":          model,
+			"messages_count": len(fullMessages),
+			"est_tokens":     estimateTokens(fullMessages),
+		})
+		if preDecision.ExitCode == hook.ExitBlock {
+			return nil, fmt.Errorf("LLM call blocked by pre-chat hook: %s", preDecision.Message)
+		}
+
+		// 2. Chat with LLM
+		response, err := client.Chat(model, fullMessages, toolList, options)
+
+		// 3. LLMError：调用失败时重试
+		if err != nil {
+			decision := hookRunner.HookRun(hook.EventLLMError, map[string]any{
+				"model":          model,
+				"messages_count": len(fullMessages),
+				"est_tokens":     estimateTokens(fullMessages),
+				"error":          err.Error(),
+			})
+			if decision.ExitCode == hook.ExitRetry && attempt < maxRetries {
+				logs.Info("[hook] LLM call failed, retrying",
+					zap.Int("attempt", attempt+1),
+					zap.Int("max_retries", maxRetries),
+					zap.String("error", err.Error()),
+				)
+				continue
+			}
+			return nil, err
+		}
+
+		// 4. EventPostChat LLM 回复成功：交给 PostChat hook 校验回复质量
+		postDecision := hookRunner.HookRun(hook.EventPostChat, map[string]any{
+			"model":            model,
+			"content":          messageContentToString(response.Message.Content),
+			"tool_calls_count": len(response.Message.ToolCalls),
+			"retry_count":      attempt,
+			"max_retries":      maxRetries,
+		})
+
+		if postDecision.ExitCode == hook.ExitRetry && attempt < maxRetries {
+			logs.Info("[hook] LLM response rejected, retrying",
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", maxRetries),
+				zap.String("reason", postDecision.Message),
+			)
+			continue
+		}
+
+		if postDecision.ExitCode == hook.ExitInject && postDecision.Message != "" {
+			pipeline.AddReminder(prompt.Reminder{
+				Content: postDecision.Message,
+				Source:  "post_chat_hook",
+				OneShot: true,
+			})
+		}
+
+		return response, nil
+	}
+	return nil, fmt.Errorf("LLM call failed after %d retries", maxRetries)
+}
+
+// estimateTokens 以字符数/4 的启发式粗略估算消息序列的 token 数。
+// 仅用于 PreChat 审计日志与预算提示，不参与任何拦截决策，允许存在误差。
+func estimateTokens(messages []fsm.Message) int {
+	totalChars := 0
+	for _, m := range messages {
+		switch c := m.Content.(type) {
+		case string:
+			totalChars += len(c)
+		case nil:
+			// 空内容不计入
+		default:
+			totalChars += len(fmt.Sprintf("%v", c))
+		}
+	}
+	if totalChars == 0 {
+		return 0
+	}
+	return totalChars/4 + 1
 }
 
 // messageContentToString safely converts fsm.Message.Content (interface{}) to a readable string.

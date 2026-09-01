@@ -75,6 +75,7 @@ type AgentLoopConfig struct {
 	TodoRoundsThreshold int      `mapstructure:"todoRoundsThreshold"`
 	MaxTools            int      `mapstructure:"maxTools"`
 	SensitiveFiles      []string `mapstructure:"sensitiveFiles"`
+	MaxLLMRetries       int      `mapstructure:"maxLLMRetries"`
 }
 
 type CompactConfig struct {

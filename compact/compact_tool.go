@@ -36,7 +36,9 @@ func (t *CompactTool) Parameters() map[string]interface{} {
 // Call 标记一次手动压缩请求
 func (t *CompactTool) Call(args map[string]interface{}, ctx *tools.ToolContext) tools.ToolResult {
 	t.manager.RequestManualCompact()
-	ctx.Logger.Info("complete compression", zap.String("session", ctx.SessionID))
+	if ctx.Logger != nil {
+		ctx.Logger.Info("complete compression", zap.String("session", ctx.SessionID))
+	}
 	return tools.ToolResult{
 		Ok: true,
 		Content: "The manual compression request has been marked. " +

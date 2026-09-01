@@ -77,6 +77,7 @@ agentloop:
   todoRoundsThreshold: 9 # Default Todo Round Threshold
   maxTools: 5 # Default maximum number of tools that can be called per round
   sensitiveFiles: [".env", "id_rsa"] # Sensitive file list
+  maxLLMRetries: 3 # Maximum retries when LLM call fails or returns empty response
 
 
 #Mode description:

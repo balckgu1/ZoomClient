@@ -117,6 +117,81 @@ func OnToolErrorRecovery(payload map[string]any) HookResult {
 	}
 }
 
+// PreChatAuditLog 在每次 LLM 调用前记录审计信息（模型、消息数、估算 token 数）
+func PreChatAuditLog(payload map[string]any) HookResult {
+	log := logger.Log
+	model, _ := payload["model"].(string)
+	messagesCount, _ := payload["messages_count"].(int)
+	estTokens, _ := payload["est_tokens"].(int)
+
+	log.Debug("[hook] LLM call started",
+		zap.String("model", model),
+		zap.Int("messages_count", messagesCount),
+		zap.Int("est_tokens", estTokens),
+	)
+	return HookResult{ExitCode: ExitContinue}
+}
+
+// OnLLMErrorRetry 处理 LLM 调用失败：
+// 重试预算内返回 ExitRetry 驱动主循环重试；
+// 预算耗尽返回 ExitContinue，由主循环按原逻辑上报错误并终止。
+func OnLLMErrorRetry(payload map[string]any) HookResult {
+	log := logger.Log
+	model, _ := payload["model"].(string)
+	errMsg, _ := payload["error"].(string)
+	retryCount, _ := payload["retry_count"].(int)
+	maxRetries, _ := payload["max_retries"].(int)
+
+	if retryCount < maxRetries {
+		return HookResult{
+			ExitCode: ExitRetry,
+			Message:  fmt.Sprintf("<internal> LLM call failed (%s), retrying (%d/%d) </internal>", errMsg, retryCount+1, maxRetries),
+		}
+	}
+
+	log.Warn("[hook] LLM call failed, retry budget exhausted",
+		zap.String("model", model),
+		zap.String("error", errMsg),
+	)
+	return HookResult{ExitCode: ExitContinue}
+}
+
+// PostChatValidate 校验 LLM 回复质量：
+// 空回复（无文本且无工具调用）在重试预算内返回 ExitRetry 驱动主循环重试；
+// 预算耗尽则放行，由主循环按既有逻辑自然结束，避免死循环。
+func PostChatValidate(payload map[string]any) HookResult {
+	log := logger.Log
+	model, _ := payload["model"].(string)
+	content, _ := payload["content"].(string)
+	toolCallsCount, _ := payload["tool_calls_count"].(int)
+	retryCount, _ := payload["retry_count"].(int)
+	maxRetries, _ := payload["max_retries"].(int)
+
+	// 空回复 + 无工具调用 → 判定为异常回复，尝试重试
+	if strings.TrimSpace(content) == "" && toolCallsCount == 0 {
+		if retryCount < maxRetries {
+			return HookResult{
+				ExitCode: ExitRetry,
+				Message:  "LLM returned an empty response, retrying",
+			}
+		}
+		// 预算耗尽后放行，避免无限重试
+		log.Warn("[hook] LLM returned empty response, retry budget exhausted, pass through",
+			zap.String("model", model),
+			zap.Int("retry_count", retryCount),
+			zap.Int("max_retries", maxRetries),
+		)
+		return HookResult{ExitCode: ExitContinue}
+	}
+
+	log.Debug("[hook] LLM call completed",
+		zap.String("model", model),
+		zap.Int("content_len", len(content)),
+		zap.Int("tool_calls_count", toolCallsCount),
+	)
+	return HookResult{ExitCode: ExitContinue}
+}
+
 // // PreToolInjectReminder 在写文件前注入一条提醒消息给模型。
 // func PreToolInjectReminder(payload map[string]any) HookResult {
 // 	toolName, _ := payload["tool_name"].(string)

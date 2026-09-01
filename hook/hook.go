@@ -8,6 +8,9 @@ import (
 
 const (
 	EventSessionStart = "SessionStart" // Session start
+	EventPreChat      = "PreChat"      // LLM 调用前
+	EventPostChat     = "PostChat"     // LLM 调用后
+	EventLLMError     = "LLMError"     // LLM 调用失败
 	EventPreToolUse   = "PreToolUse"   // Tool execution before
 	EventPostToolUse  = "PostToolUse"  // Tool execution after
 	EventToolError    = "ToolError"    // Tool execution error

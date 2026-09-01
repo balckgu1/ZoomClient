@@ -338,3 +338,151 @@ func TestPostToolAuditLog_LongOutputTruncated(t *testing.T) {
 		t.Errorf("expected ExitContinue, got %d", result.ExitCode)
 	}
 }
+
+// ===================== PreChatAuditLog 测试 =====================
+
+// TestPreChatAuditLog_ReturnsContinue 验证 PreChat handler 不干预流程。
+func TestPreChatAuditLog_ReturnsContinue(t *testing.T) {
+	result := PreChatAuditLog(map[string]any{
+		"model":          "test-model",
+		"messages_count": 3,
+		"est_tokens":     100,
+	})
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue, got %d", result.ExitCode)
+	}
+}
+
+// TestPreChatAuditLog_MissingPayload 缺失字段时不应 panic 且继续。
+func TestPreChatAuditLog_MissingPayload(t *testing.T) {
+	result := PreChatAuditLog(nil)
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue, got %d", result.ExitCode)
+	}
+}
+
+// ===================== PostChatValidate 测试 =====================
+
+// TestPostChatValidate_EmptyContentWithBudget 空回复且预算内时请求重试。
+func TestPostChatValidate_EmptyContentWithBudget(t *testing.T) {
+	result := PostChatValidate(map[string]any{
+		"content":          "",
+		"tool_calls_count": 0,
+		"retry_count":      0,
+		"max_retries":      3,
+	})
+	if result.ExitCode != ExitRetry {
+		t.Errorf("expected ExitRetry for empty content within budget, got %d", result.ExitCode)
+	}
+}
+
+// TestPostChatValidate_WhitespaceContentWithBudget 纯空白回复同样视为空回复。
+func TestPostChatValidate_WhitespaceContentWithBudget(t *testing.T) {
+	result := PostChatValidate(map[string]any{
+		"content":          "   \n\t",
+		"tool_calls_count": 0,
+		"retry_count":      1,
+		"max_retries":      3,
+	})
+	if result.ExitCode != ExitRetry {
+		t.Errorf("expected ExitRetry for whitespace content, got %d", result.ExitCode)
+	}
+}
+
+// TestPostChatValidate_EmptyContentBudgetExhausted 空回复但预算耗尽时放行。
+func TestPostChatValidate_EmptyContentBudgetExhausted(t *testing.T) {
+	result := PostChatValidate(map[string]any{
+		"content":          "",
+		"tool_calls_count": 0,
+		"retry_count":      3,
+		"max_retries":      3,
+	})
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue when budget exhausted, got %d", result.ExitCode)
+	}
+}
+
+// TestPostChatValidate_ValidContent 正常回复直接放行。
+func TestPostChatValidate_ValidContent(t *testing.T) {
+	result := PostChatValidate(map[string]any{
+		"content":          "hello world",
+		"tool_calls_count": 0,
+		"retry_count":      0,
+		"max_retries":      3,
+	})
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue for valid content, got %d", result.ExitCode)
+	}
+}
+
+// TestPostChatValidate_EmptyTextWithToolCalls 空文本但带工具调用时放行（工具调用是有效回复）。
+func TestPostChatValidate_EmptyTextWithToolCalls(t *testing.T) {
+	result := PostChatValidate(map[string]any{
+		"content":          "",
+		"tool_calls_count": 2,
+		"retry_count":      0,
+		"max_retries":      3,
+	})
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue when tool calls present, got %d", result.ExitCode)
+	}
+}
+
+// TestPostChatValidate_MissingBudget 未配置 max_retries 时不重试（安全兜底）。
+func TestPostChatValidate_MissingBudget(t *testing.T) {
+	result := PostChatValidate(map[string]any{
+		"content":          "",
+		"tool_calls_count": 0,
+		"retry_count":      0,
+	})
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue when max_retries missing, got %d", result.ExitCode)
+	}
+}
+
+// ===================== OnLLMErrorRetry 测试 =====================
+
+// TestOnLLMErrorRetry_WithinBudget LLM 失败且预算内时请求重试。
+func TestOnLLMErrorRetry_WithinBudget(t *testing.T) {
+	result := OnLLMErrorRetry(map[string]any{
+		"model":       "test-model",
+		"error":       "timeout",
+		"retry_count": 0,
+		"max_retries": 3,
+	})
+	if result.ExitCode != ExitRetry {
+		t.Errorf("expected ExitRetry within budget, got %d", result.ExitCode)
+	}
+}
+
+// TestOnLLMErrorRetry_LastAttempt 最后一次重试机会（retry_count=max-1）仍应重试。
+func TestOnLLMErrorRetry_LastAttempt(t *testing.T) {
+	result := OnLLMErrorRetry(map[string]any{
+		"error":       "timeout",
+		"retry_count": 2,
+		"max_retries": 3,
+	})
+	if result.ExitCode != ExitRetry {
+		t.Errorf("expected ExitRetry on last attempt, got %d", result.ExitCode)
+	}
+}
+
+// TestOnLLMErrorRetry_BudgetExhausted 预算耗尽后放行（由主循环终止并上报错误）。
+func TestOnLLMErrorRetry_BudgetExhausted(t *testing.T) {
+	result := OnLLMErrorRetry(map[string]any{
+		"error":       "timeout",
+		"retry_count": 3,
+		"max_retries": 3,
+	})
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue when budget exhausted, got %d", result.ExitCode)
+	}
+}
+
+// TestOnLLMErrorRetry_MissingPayload 缺失字段时安全放行，不 panic。
+func TestOnLLMErrorRetry_MissingPayload(t *testing.T) {
+	result := OnLLMErrorRetry(nil)
+	if result.ExitCode != ExitContinue {
+		t.Errorf("expected ExitContinue when payload missing, got %d", result.ExitCode)
+	}
+}

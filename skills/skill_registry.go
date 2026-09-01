@@ -20,10 +20,24 @@ type SkillRegistry struct {
 
 // NewRegistry 扫描 skillsDir 下所有 SKILL.md 并构建 SkillRegistry
 func NewSkillRegistry(skillsDir string) (*SkillRegistry, error) {
-	return &SkillRegistry{
+	reg := &SkillRegistry{
 		skillsDir: skillsDir,
 		skills:    make(map[string]*SkillDocument),
-	}, nil
+	}
+	// 目录不存在或为空时不视为错误，返回空注册表
+	if skillsDir == "" {
+		return reg, nil
+	}
+	if _, err := os.Stat(skillsDir); err != nil {
+		if os.IsNotExist(err) {
+			return reg, nil
+		}
+		return nil, err
+	}
+	if err := reg.loadAll(); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 // loadAll 遍历 skillsDir 目录，递归加载所有 SKILL.md 文件到 SkillRegistry

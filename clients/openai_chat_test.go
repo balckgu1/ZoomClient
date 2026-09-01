@@ -337,7 +337,7 @@ func TestOpenAIClient_Chat_EmptyChoices(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty choices")
 	}
-	if !contains(err.Error(), "无有效 choices") {
+	if !contains(err.Error(), "invalid choices") {
 		t.Errorf("expected error about empty choices, got: %v", err)
 	}
 }

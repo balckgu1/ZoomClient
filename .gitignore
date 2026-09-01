@@ -2,6 +2,8 @@
 
 .qoder/
 
+.gocache/
+
 .idea/
 
 __pycache__/

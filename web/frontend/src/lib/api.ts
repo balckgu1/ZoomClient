@@ -77,6 +77,17 @@ export async function fetchStatus(): Promise<StatusResponse> {
   return res.json();
 }
 
+// ─── 上下文占用 API ───
+
+import type { ContextUsage } from "../types";
+
+// fetchContextUsage 查询最近一次上下文占用快照（GET /api/context-usage）
+export async function fetchContextUsage(): Promise<ContextUsage> {
+  const res = await fetch(`${BASE}/api/context-usage`);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
 // ─── Session API ───
 
 import type { SessionMeta, SessionRecord } from "../types";

@@ -638,3 +638,50 @@ func TestCompactTool_Call_TriggersCompactionViaShouldAutoCompact(t *testing.T) {
 		t.Error("工具调用后 ShouldAutoCompact 应返回 true")
 	}
 }
+
+// ===================== 上下文占用快照 =====================
+
+// TestComputeUsage_SumsAllParts 验证快照汇总：total=四部分之和，limit 透传配置。
+func TestComputeUsage_SumsAllParts(t *testing.T) {
+	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
+	msgs := []fsm.Message{{Role: "user", Content: "hello"}}
+
+	snap := m.ComputeUsage(UsageParts{
+		SystemPromptBytes: 100,
+		SkillsBytes:       20,
+		SkillsCount:       3,
+		ToolsBytes:        50,
+	}, msgs)
+
+	wantMessages := m.EstimateSize(msgs)
+	if snap.MessagesBytes != wantMessages {
+		t.Errorf("MessagesBytes 期望 %d，实际 %d", wantMessages, snap.MessagesBytes)
+	}
+	wantTotal := 100 + 20 + 50 + wantMessages
+	if snap.TotalBytes != wantTotal {
+		t.Errorf("TotalBytes 期望 %d，实际 %d", wantTotal, snap.TotalBytes)
+	}
+	if snap.LimitBytes != defaultTestConfig().ContextLimit {
+		t.Errorf("LimitBytes 应透传 ContextLimit=%d，实际 %d", defaultTestConfig().ContextLimit, snap.LimitBytes)
+	}
+	if snap.SkillsCount != 3 {
+		t.Errorf("SkillsCount 应透传 3，实际 %d", snap.SkillsCount)
+	}
+	if snap.SystemPromptBytes != 100 || snap.SkillsBytes != 20 || snap.ToolsBytes != 50 {
+		t.Errorf("各部分字节数应原样透传，实际 %+v", snap)
+	}
+}
+
+// TestComputeUsage_EmptyMessages 空消息历史时 MessagesBytes 为 0，total 仅含静态部分。
+func TestComputeUsage_EmptyMessages(t *testing.T) {
+	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
+
+	snap := m.ComputeUsage(UsageParts{SystemPromptBytes: 10, ToolsBytes: 5}, nil)
+
+	if snap.MessagesBytes != 0 {
+		t.Errorf("空消息历史 MessagesBytes 期望 0，实际 %d", snap.MessagesBytes)
+	}
+	if snap.TotalBytes != 15 {
+		t.Errorf("TotalBytes 期望 15，实际 %d", snap.TotalBytes)
+	}
+}

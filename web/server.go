@@ -79,6 +79,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/stop", s.handleStop)
 	s.mux.HandleFunc("/api/permission", s.handlePermission)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
+	s.mux.HandleFunc("/api/context-usage", s.handleContextUsage)
 
 	// ─── 会话管理端点 ───
 	s.mux.HandleFunc("/api/sessions", s.handleSessions)

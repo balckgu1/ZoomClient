@@ -114,3 +114,16 @@ export interface PermissionConfig {
   deny_rules: PermissionRule[];
   allow_rules: PermissionRule[];
 }
+
+// ─── 上下文窗口占用 ───
+
+// 上下文占用快照（对应 Go compact.UsageSnapshot），所有尺寸单位为字节
+export interface ContextUsage {
+  limit_bytes: number;         // 配置的上下文总阈值
+  total_bytes: number;         // 各部分之和
+  system_prompt_bytes: number; // system prompt 主体（不含 skills 段）
+  skills_bytes: number;        // skills 目录段
+  skills_count: number;        // 已加载的 skill 数量
+  tools_bytes: number;         // 工具 schema
+  messages_bytes: number;      // 消息历史估算
+}

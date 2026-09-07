@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type {
   ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
-  PermissionConfig, PermissionMode,
+  PermissionConfig, PermissionMode, ContextUsage,
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
@@ -11,6 +11,7 @@ import {
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
   fetchModels, addModel, selectModel, updateModel,
   fetchWorkDir, setWorkDir, fetchPermissionConfig, updatePermissionConfig,
+  fetchContextUsage,
 } from "../lib/api";
 import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
@@ -66,6 +67,9 @@ export function App() {
   // Agent phase state (for status indicator)
   const [agentPhase, setAgentPhase] = useState<AgentPhase>("idle");
   const [currentToolName, setCurrentToolName] = useState<string>("");
+
+  // 上下文窗口占用快照（后端 SSE 推送 + 首屏拉取）
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
 
   // Typewriter effect refs
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -177,6 +181,16 @@ export function App() {
     }
   }, []);
 
+  // refreshContextUsage 拉取上下文占用快照缓存（首屏与 SSE 重连后兜底）
+  const refreshContextUsage = useCallback(async () => {
+    try {
+      const usage = await fetchContextUsage();
+      setContextUsage(usage);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Start typewriter effect for a given assistant message
   const startTypewriter = useCallback((fullText: string, msgIdx: number) => {
     // Clear any existing timer
@@ -254,6 +268,10 @@ export function App() {
         // 工作目录切换成功后由后端回推，更新本地显示
         setWorkDirState(d.path || "");
         showToast(`工作目录已切换：${d.path || ""}`);
+      } else if (event === "context_usage") {
+        // 上下文占用快照：后端每轮/压缩/清空后推送，驱动右下角指示器
+        const usage = d.usage as unknown as ContextUsage | undefined;
+        if (usage) setContextUsage(usage);
       }
       return;
     }
@@ -345,8 +363,9 @@ export function App() {
     refreshModels();
     refreshWorkDir();
     refreshPermission();
+    refreshContextUsage();
     return disconnect;
-  }, [handleSSEEvent, refreshSessions, refreshModels, refreshWorkDir, refreshPermission]);
+  }, [handleSSEEvent, refreshSessions, refreshModels, refreshWorkDir, refreshPermission, refreshContextUsage]);
 
   // Send a chat message
   const handleSend = useCallback(
@@ -573,6 +592,16 @@ export function App() {
     }
   }, [finishTypewriter, showToast]);
 
+  // handleCompact 主动触发一次完整上下文压缩；
+  // 压缩结果与最新占用快照经 SSE 的 compact / context_usage 事件回推
+  const handleCompact = useCallback(async () => {
+    try {
+      await sendCompact();
+    } catch (err) {
+      showToast(`压缩失败：${err}`);
+    }
+  }, [showToast]);
+
   return (
     <div class="app-layout">
       <Sidebar
@@ -607,6 +636,7 @@ export function App() {
           permissionMode={permissionConfig.mode}
           models={models}
           activeModel={activeModel}
+          contextUsage={contextUsage}
           onSend={handleSend}
           onSlashCommand={handleSlashCommand}
           onStop={handleStop}
@@ -616,6 +646,7 @@ export function App() {
           onSelectModel={handleModelSelect}
           onAddModel={handleModelAdd}
           onEditModel={handleModelEdit}
+          onCompact={handleCompact}
         />
         {showWorkDir && (
           <WorkDirPanel

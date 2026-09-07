@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"zoomClient/compact"
 	"zoomClient/permission"
 	"zoomClient/utils"
 )
@@ -231,8 +232,58 @@ func TestHandleStatus_IncludesWorkDirAndPermissionMode(t *testing.T) {
 	}
 }
 
-// ─── 纯函数 ───
+// ─── 上下文占用 ───
 
+// TestHandleContextUsage_ZeroCacheByDefault 未推送过快照时返回零值快照（前端据此显示占位）。
+func TestHandleContextUsage_ZeroCacheByDefault(t *testing.T) {
+	srv := newTestServer(t, permission.ModeAuto, nil, nil)
+
+	rec := doJSON(t, srv, http.MethodGet, "/api/context-usage", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp compact.UsageSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if resp.LimitBytes != 0 || resp.TotalBytes != 0 {
+		t.Errorf("expected zero snapshot, got %+v", resp)
+	}
+}
+
+// TestHandleContextUsage_ReturnsCachedSnapshot 推送缓存后 GET 应回读一致快照。
+func TestHandleContextUsage_ReturnsCachedSnapshot(t *testing.T) {
+	srv := newTestServer(t, permission.ModeAuto, nil, nil)
+	want := compact.UsageSnapshot{
+		LimitBytes: 60000, TotalBytes: 1234,
+		SystemPromptBytes: 100, SkillsBytes: 20, SkillsCount: 2,
+		ToolsBytes: 300, MessagesBytes: 814,
+	}
+	srv.session.SetContextUsage(want)
+
+	rec := doJSON(t, srv, http.MethodGet, "/api/context-usage", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp compact.UsageSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if resp != want {
+		t.Errorf("expected cached snapshot %+v, got %+v", want, resp)
+	}
+}
+
+// TestHandleContextUsage_MethodNotAllowed 非 GET 请求应返回 405。
+func TestHandleContextUsage_MethodNotAllowed(t *testing.T) {
+	srv := newTestServer(t, permission.ModeAuto, nil, nil)
+	rec := doJSON(t, srv, http.MethodPost, "/api/context-usage", "")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+// TestNormalizeRules 校验规则规范化纯函数。
 func TestNormalizeRules(t *testing.T) {
 	in := []permission.Rule{
 		{Tool: "  run_bash ", Behavior: permission.BehaviorAllow, Path: " a ", Content: " b "},

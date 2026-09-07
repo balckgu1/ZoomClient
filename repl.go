@@ -45,6 +45,8 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 			log.Error("Web server error", zap.Error(err))
 		}
 	}()
+	// 启动时推送一次上下文占用快照：前端首屏指示器与 GET /api/context-usage 缓存立即可用
+	emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
 	// Open browser after short delay
 	go func() {
 		time.Sleep(500 * time.Millisecond)

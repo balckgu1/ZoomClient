@@ -1033,3 +1033,90 @@ body {
 .md-content tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
 .md-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 .md-content img { max-width: 100%; border-radius: var(--radius-sm); }
+
+/* ─── 上下文窗口占用指示器（右下角） ─── */
+
+.ctx-meter { position: relative; display: flex; align-items: center; }
+
+/* 折叠态触发器：迷你进度条 + 百分比 */
+.ctx-meter__trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 12px; font-family: var(--font-mono);
+  padding: 4px 2px; border-radius: 4px;
+  transition: color 0.15s;
+}
+.ctx-meter__trigger:hover { color: var(--text); }
+
+.ctx-meter__mini-track {
+  width: 56px; height: 6px; border-radius: 3px;
+  background: var(--surface-2); overflow: hidden; display: inline-block;
+}
+.ctx-meter__mini-fill {
+  display: block; height: 100%; border-radius: 3px;
+  background: var(--accent); transition: width 0.3s, background 0.3s;
+}
+.ctx-meter__mini-fill.is-warning { background: var(--warning); }
+.ctx-meter__mini-fill.is-error { background: var(--error); }
+.ctx-meter__value.is-warning { color: var(--warning); }
+.ctx-meter__value.is-error { color: var(--error); }
+
+/* 悬停展开的明细面板：向上弹出，避免溢出视口 */
+.ctx-meter__panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 264px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  z-index: 120;
+  padding: 12px;
+}
+
+.ctx-meter__head { display: flex; align-items: baseline; justify-content: space-between; }
+.ctx-meter__title { font-size: 13px; font-weight: 600; color: var(--text); }
+.ctx-meter__pct { font-size: 13px; font-family: var(--font-mono); color: var(--text-muted); }
+.ctx-meter__pct.is-warning { color: var(--warning); }
+.ctx-meter__pct.is-error { color: var(--error); }
+
+.ctx-meter__desc {
+  margin: 6px 0 10px; font-size: 12px; line-height: 1.5; color: var(--text-muted);
+}
+
+.ctx-meter__track {
+  height: 6px; border-radius: 3px; background: var(--surface-2);
+  overflow: hidden; margin-bottom: 10px;
+}
+.ctx-meter__fill {
+  height: 100%; border-radius: 3px; background: var(--accent);
+  transition: width 0.3s, background 0.3s;
+}
+.ctx-meter__fill.is-warning { background: var(--warning); }
+.ctx-meter__fill.is-error { background: var(--error); }
+
+/* 明细行：圆点 + 标签 + 百分比 */
+.ctx-meter__rows { list-style: none; margin: 0 0 10px; padding: 0; }
+.ctx-meter__row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; font-size: 12px; color: var(--text-muted);
+}
+.ctx-meter__dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.ctx-meter__dot--prompt { background: var(--success); }
+.ctx-meter__dot--tools { background: var(--accent); }
+.ctx-meter__dot--skills { background: var(--warning); }
+.ctx-meter__dot--messages { background: var(--text-muted); }
+.ctx-meter__label { flex: 1; }
+.ctx-meter__row-pct { font-family: var(--font-mono); }
+
+/* 主动压缩按钮 */
+.ctx-meter__compact {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 0; font-size: 12px; cursor: pointer;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  transition: background 0.15s, border-color 0.15s;
+}
+.ctx-meter__compact:hover { background: var(--surface-2); border-color: var(--accent); }
+.ctx-meter__compact-icon { font-size: 12px; line-height: 1; }

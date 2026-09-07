@@ -1,7 +1,8 @@
 import { useState, useRef } from "preact/hooks";
 import type { JSX } from "preact";
-import type { ModelPreset, PermissionMode } from "../types";
+import type { ContextUsage, ModelPreset, PermissionMode } from "../types";
 import { ModelSelector } from "./ModelSelector";
+import { ContextUsageMeter } from "./ContextUsageMeter";
 import { permissionModeMeta, workDirBaseName } from "../lib/labels";
 
 // Composer 的 props —— 聚合输入框与上下文控制 chip
@@ -12,6 +13,7 @@ interface Props {
   permissionMode: PermissionMode;
   models: ModelPreset[];
   activeModel: string;
+  contextUsage: ContextUsage | null;
   onSend: (message: string) => void;
   onSlashCommand: (cmd: string) => void;
   onStop: () => void;
@@ -21,15 +23,17 @@ interface Props {
   onSelectModel: (name: string) => void;
   onAddModel: (preset: ModelPreset) => void;
   onEditModel: (name: string, preset: ModelPreset) => void;
+  onCompact: () => void;
 }
 
 // Composer —— 底部输入区。
 // 结构参考设计图：上方是上下文 chip 行（工作目录 / 权限模式 / 模型），
-// 中间是多行输入框，下方是操作行（新建会话 + 发送/停止）。
+// 中间是多行输入框，下方是操作行（新建会话 + 上下文占用指示器 + 发送/停止）。
 export function Composer({
-  disabled, busy, workDir, permissionMode, models, activeModel,
+  disabled, busy, workDir, permissionMode, models, activeModel, contextUsage,
   onSend, onSlashCommand, onStop, onNewSession,
   onOpenWorkDir, onOpenPermission, onSelectModel, onAddModel, onEditModel,
+  onCompact,
 }: Props) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -107,6 +111,7 @@ export function Composer({
       <div class="composer__actions">
         <button class="composer__plus" onClick={onNewSession} title="新建会话">＋</button>
         <div class="composer__actions-right">
+          <ContextUsageMeter usage={contextUsage} onCompact={onCompact} />
           <button
             class={`composer__send ${busy ? "composer__send--stop" : ""}`}
             onClick={busy ? onStop : handleSubmit}

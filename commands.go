@@ -25,6 +25,8 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 		}
 		s.State.TurnCount = 0
 		s.Em.EmitInfo("history cleared")
+		// 历史已清空，推送最新占用快照刷新前端指示器
+		emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
 	case "compact":
 		if len(s.State.Messages) <= 1 {
 			s.Em.EmitInfo("no history to compact")
@@ -39,6 +41,8 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 		s.State.Messages = newMsgs
 		after := s.CompactManager.EstimateSize(newMsgs)
 		s.Em.EmitCompact(before, after)
+		// 压缩完成后推送最新占用快照刷新前端指示器
+		emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
 	case "exit":
 		return true
 	}

@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"zoomClient/compact"
 	"zoomClient/fsm"
 )
 
@@ -58,6 +59,12 @@ type Session struct {
 	// workDir 当前工作目录镜像，供 GET /api/workdir 读取；
 	// 实际切换在 REPL 循环中串行更新 toolCtx.WorkPath 后同步到此，避免 HTTP 读取与 REPL 写入竞争
 	workDir string
+
+	// usageMu 保护 usage 缓存的并发读写
+	usageMu sync.RWMutex
+	// usage 最近一次上下文占用快照缓存：由 SseEmitter 推送事件时同步写入，
+	// GET /api/context-usage 只读缓存，避免 HTTP goroutine 直接读 agent 消息历史产生数据竞争
+	usage compact.UsageSnapshot
 }
 
 type permResponse struct {
@@ -134,6 +141,20 @@ func (s *Session) SetWorkDir(dir string) {
 	s.workDirMu.Lock()
 	defer s.workDirMu.Unlock()
 	s.workDir = dir
+}
+
+// SetContextUsage 缓存最新的上下文占用快照（写锁保护），由 SseEmitter 推送事件时调用
+func (s *Session) SetContextUsage(u compact.UsageSnapshot) {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	s.usage = u
+}
+
+// ContextUsage 返回缓存的上下文占用快照（读锁保护）；从未写入时返回零值
+func (s *Session) ContextUsage() compact.UsageSnapshot {
+	s.usageMu.RLock()
+	defer s.usageMu.RUnlock()
+	return s.usage
 }
 
 // itoa 简单的 int64 → string，避免 import strconv

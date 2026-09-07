@@ -158,6 +158,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleContextUsage 处理 GET /api/context-usage：返回最近一次上下文占用快照缓存。
+// 缓存由 SseEmitter 推送 context_usage 事件时写入，此处只读，
+// 避免 HTTP goroutine 直接读取 agent 消息历史与 agentLoop 产生数据竞争。
+func (s *Server) handleContextUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.session.ContextUsage())
+}
+
 // ─── 会话管理 ───
 
 // handleSessions 处理 /api/sessions 路由（GET 列表 / POST 新建）。

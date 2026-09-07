@@ -114,6 +114,16 @@ func BuildOpenAITools(toolList []tools.Tool) []OpenAITool {
 	return result
 }
 
+// ToolsSchemaBytes 估算工具列表以 OpenAI wire 格式序列化后占用的字节数，
+// 供上下文窗口占用统计使用；序列化失败时返回 0。
+func ToolsSchemaBytes(toolList []tools.Tool) int {
+	b, err := json.Marshal(BuildOpenAITools(toolList))
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
 // convertToOpenAIMessages 将内部 fsm.Message 列表转换为 OpenAI 兼容协议消息列表
 //   - tool role 消息需携带 tool_call_id
 //   - assistant 工具调用中的 arguments 需序列化为 JSON 字符串

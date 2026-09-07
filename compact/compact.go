@@ -185,6 +185,40 @@ func (m *CompactManager) ShouldAutoCompact(messages []fsm.Message) bool {
 	return m.EstimateSize(messages) > m.Config.ContextLimit
 }
 
+// UsageParts 上下文各静态组成部分的字节占用，由调用方组装后交给 ComputeUsage。
+type UsageParts struct {
+	SystemPromptBytes int // system prompt 主体（不含 skills 目录段）
+	SkillsBytes       int // skills 目录段
+	SkillsCount       int // 已加载的 skill 数量
+	ToolsBytes        int // 工具 schema（wire 格式）
+}
+
+// UsageSnapshot 上下文窗口占用快照，所有尺寸单位为字节，供 web 前端指示器展示。
+type UsageSnapshot struct {
+	LimitBytes        int `json:"limit_bytes"`         // 配置的上下文总阈值
+	TotalBytes        int `json:"total_bytes"`         // 各部分之和
+	SystemPromptBytes int `json:"system_prompt_bytes"` // system prompt 主体
+	SkillsBytes       int `json:"skills_bytes"`        // skills 目录段
+	SkillsCount       int `json:"skills_count"`        // skill 数量
+	ToolsBytes        int `json:"tools_bytes"`         // 工具 schema
+	MessagesBytes     int `json:"messages_bytes"`      // 消息历史（EstimateSize 估算）
+}
+
+// ComputeUsage 汇总各部分字节占用生成上下文占用快照。
+// 总占用 = system prompt 主体 + skills 段 + 工具 schema + 消息历史估算。
+func (m *CompactManager) ComputeUsage(parts UsageParts, messages []fsm.Message) UsageSnapshot {
+	messagesBytes := m.EstimateSize(messages)
+	return UsageSnapshot{
+		LimitBytes:        m.Config.ContextLimit,
+		TotalBytes:        parts.SystemPromptBytes + parts.SkillsBytes + parts.ToolsBytes + messagesBytes,
+		SystemPromptBytes: parts.SystemPromptBytes,
+		SkillsBytes:       parts.SkillsBytes,
+		SkillsCount:       parts.SkillsCount,
+		ToolsBytes:        parts.ToolsBytes,
+		MessagesBytes:     messagesBytes,
+	}
+}
+
 // CompactHistory 调模型生成一份摘要，用 system + 摘要消息替换原始长历史。
 // 若原始历史尾部存在带 tool_calls 的 assistant 消息及其配对的 tool 结果，
 // 会将它们一并保留在摘要之后，确保 OpenAI 协议的配对关系不被破坏。

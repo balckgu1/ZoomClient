@@ -1,6 +1,8 @@
 package prompt
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -85,5 +87,75 @@ func TestBuild_SectionsSeparatedByDoubleNewline(t *testing.T) {
 	// core 段和 dynamic 段之间应有 \n\n
 	if !strings.Contains(result, "\n\n") {
 		t.Errorf("Build() sections should be separated by \\n\\n, got:\n%s", result)
+	}
+}
+
+// TestSkillsSection_And_SkillCount 验证 skills 段与数量统计：
+// nil/空 registry 返回空段与 0；含 skill 的 registry 返回目录段与数量，
+// 且 Build()/Pipeline 透传结果包含该段原文（占用统计按字节拆分依赖这一点）。
+func TestSkillsSection_And_SkillCount(t *testing.T) {
+	// nil registry：不应 panic，返回空段与 0
+	nilBuilder := NewSystemPromptBuilder(nil, "", "m", "./w")
+	if got := nilBuilder.SkillsSection(); got != "" {
+		t.Errorf("nil registry 的 SkillsSection() 应返回空字符串，实际 %q", got)
+	}
+	if got := nilBuilder.SkillCount(); got != 0 {
+		t.Errorf("nil registry 的 SkillCount() 应返回 0，实际 %d", got)
+	}
+
+	// 空 registry：同样为空
+	emptyReg, _ := skills.NewSkillRegistry("")
+	emptyBuilder := NewSystemPromptBuilder(emptyReg, "", "m", "./w")
+	if got := emptyBuilder.SkillsSection(); got != "" {
+		t.Errorf("空 registry 的 SkillsSection() 应返回空字符串，实际 %q", got)
+	}
+	if got := emptyBuilder.SkillCount(); got != 0 {
+		t.Errorf("空 registry 的 SkillCount() 应返回 0，实际 %d", got)
+	}
+
+	// 含 1 个 skill 的 registry
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "code-review")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: code-review\ndescription: Review checklist\n---\nCheck for nil returns.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := skills.NewSkillRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	builder := NewSystemPromptBuilder(reg, "", "m", "./w")
+
+	section := builder.SkillsSection()
+	if !strings.Contains(section, "Skills available") || !strings.Contains(section, "code-review") {
+		t.Errorf("SkillsSection() 应包含 skills 目录，实际 %q", section)
+	}
+	if builder.SkillCount() != 1 {
+		t.Errorf("SkillCount() 应返回 1，实际 %d", builder.SkillCount())
+	}
+	// Build() 必须原样包含 skills 段，占用统计才能按字节拆分
+	if !strings.Contains(builder.Build(), section) {
+		t.Error("Build() 应包含 SkillsSection() 的完整原文")
+	}
+
+	// Pipeline 透传应与 builder 一致
+	pipeline := NewPipeline(builder)
+	if pipeline.SkillsSection() != section {
+		t.Error("Pipeline.SkillsSection() 应与 builder 一致")
+	}
+	if pipeline.SkillCount() != 1 {
+		t.Errorf("Pipeline.SkillCount() 应返回 1，实际 %d", pipeline.SkillCount())
+	}
+	if !strings.Contains(pipeline.BuildSystemPrompt(), section) {
+		t.Error("Pipeline.BuildSystemPrompt() 应包含 skills 段")
+	}
+
+	// builder 为 nil 的 pipeline 应返回零值而非 panic
+	nilPipeline := NewPipeline(nil)
+	if nilPipeline.SkillsSection() != "" || nilPipeline.SkillCount() != 0 || nilPipeline.BuildSystemPrompt() != "" {
+		t.Error("builder 为 nil 的 pipeline 应返回零值")
 	}
 }

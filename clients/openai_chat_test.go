@@ -387,3 +387,22 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// TestToolsSchemaBytes_MatchesWireMarshal 验证工具 schema 字节估算与 OpenAI wire 格式序列化长度一致。
+func TestToolsSchemaBytes_MatchesWireMarshal(t *testing.T) {
+	list := []tools.Tool{
+		mockTool{name: "read_file", description: "read a file", params: map[string]interface{}{"type": "object"}},
+		mockTool{name: "run_bash", description: "run a command", params: map[string]interface{}{"type": "object"}},
+	}
+
+	want, err := json.Marshal(BuildOpenAITools(list))
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if got := ToolsSchemaBytes(list); got != len(want) {
+		t.Errorf("ToolsSchemaBytes = %d, want %d", got, len(want))
+	}
+	if got := ToolsSchemaBytes(nil); got != len("[]") {
+		t.Errorf("ToolsSchemaBytes(nil) = %d, want %d (空列表序列化为 [])", got, len("[]"))
+	}
+}

@@ -11,8 +11,44 @@ interface Props {
   messages: ChatMessage[];
   agentPhase: AgentPhase;
   toolName?: string;
+  // onSuggestion 点击空状态推荐卡片时触发，直接把起始提示词发送给智能体
+  onSuggestion?: (prompt: string) => void;
 }
 
+// 空状态推荐卡片：图标、标题、说明与点击后发送的起始提示词。
+// 参考设计图的四张彩色卡片，帮助用户快速上手。
+const SUGGESTIONS: { icon: string; tone: string; title: string; desc: string; prompt: string }[] = [
+  {
+    icon: "🔍",
+    tone: "blue",
+    title: "探索并理解代码",
+    desc: "梳理项目结构与关键模块",
+    prompt: "请帮我梳理这个项目的整体结构和关键模块。",
+  },
+  {
+    icon: "🛠",
+    tone: "green",
+    title: "构建新功能",
+    desc: "从零实现一个功能、应用或工具",
+    prompt: "我想新增一个功能，请先帮我确认需求，再给出实现方案。",
+  },
+  {
+    icon: "📝",
+    tone: "amber",
+    title: "审查代码",
+    desc: "审查改动并提出优化建议",
+    prompt: "请审查当前代码，指出潜在问题并给出修改建议。",
+  },
+  {
+    icon: "🐞",
+    tone: "red",
+    title: "修复问题",
+    desc: "定位并修复 Bug 或失败用例",
+    prompt: "请帮我定位并修复当前存在的问题或失败的测试。",
+  },
+];
+
+// renderMessage 按消息角色分发到对应的展示组件。
 function renderMessage(msg: ChatMessage) {
   switch (msg.role) {
     case "user":
@@ -34,13 +70,13 @@ function renderMessage(msg: ChatMessage) {
     case "sub_agent":
       return (
         <div key={msg._id} class="message system-message">
-          <span class="system-icon">🤖</span> Sub-agent: {msg.prompt}
+          <span class="system-icon">🤖</span> 子智能体：{msg.prompt}
         </div>
       );
     case "hook_blocked":
       return (
         <div key={msg._id} class="message system-message hook-blocked">
-          ⚠️ Hook blocked: {msg.tool} ({msg.reason})
+          ⚠️ 钩子拦截：{msg.tool}（{msg.reason}）
         </div>
       );
     case "system":
@@ -54,7 +90,7 @@ function renderMessage(msg: ChatMessage) {
   }
 }
 
-export function MessageList({ messages, agentPhase, toolName }: Props) {
+export function MessageList({ messages, agentPhase, toolName, onSuggestion }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLElement>(null);
   const userScrolledUp = useRef(false);
@@ -89,12 +125,29 @@ export function MessageList({ messages, agentPhase, toolName }: Props) {
       {messages.length === 0 && agentPhase === "idle" && (
         <div class="empty-state">
           <div class="empty-state__logo">⚡</div>
-          <h2 class="empty-state__title">ZoomClient</h2>
-          <p class="empty-state__desc">Send a message to start the conversation.</p>
+          <h2 class="empty-state__title">今天想做点什么？</h2>
+          <p class="empty-state__desc">选择一个起点，或直接在下方输入你的需求。</p>
+
+          <div class="empty-state__cards">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s.title}
+                class={`suggestion-card suggestion-card--${s.tone}`}
+                onClick={() => onSuggestion?.(s.prompt)}
+              >
+                <span class="suggestion-card__icon">{s.icon}</span>
+                <span class="suggestion-card__body">
+                  <span class="suggestion-card__title">{s.title}</span>
+                  <span class="suggestion-card__desc">{s.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
           <div class="empty-state__hints">
-            <span class="hint-tag"><code>/clear</code> Clear history</span>
-            <span class="hint-tag"><code>/compact</code> Compact context</span>
-            <span class="hint-tag"><code>/exit</code> Exit session</span>
+            <span class="hint-tag"><code>/clear</code> 清空历史</span>
+            <span class="hint-tag"><code>/compact</code> 压缩上下文</span>
+            <span class="hint-tag"><code>/exit</code> 退出会话</span>
           </div>
         </div>
       )}

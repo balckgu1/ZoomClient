@@ -4,6 +4,8 @@
 // 由 SSE HTTP handler 消费并以 text/event-stream 格式推送给浏览器。
 package web
 
+import "zoomClient/compact"
+
 // SseEmitter 将 agent 事件转为 SSE 事件流。
 type SseEmitter struct {
 	session *Session
@@ -110,6 +112,16 @@ func (e *SseEmitter) EmitCompact(beforeBytes, afterBytes int) {
 		"event":        "compact",
 		"before_bytes": beforeBytes,
 		"after_bytes":  afterBytes,
+	})
+}
+
+// EmitContextUsage 推送上下文窗口占用快照：先写入 Session 缓存供 GET /api/context-usage 读取，
+// 再经 system 通道推送给前端右下角指示器实时刷新。
+func (e *SseEmitter) EmitContextUsage(snap compact.UsageSnapshot) {
+	e.session.SetContextUsage(snap)
+	e.emit("system", map[string]any{
+		"event": "context_usage",
+		"usage": snap,
 	})
 }
 

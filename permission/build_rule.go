@@ -15,10 +15,10 @@ import (
 //   - 普通子串：直接 Contains 匹配（默认）
 //   - 正则：以 "re:" 开头，例如 "re:^git\\s+push"
 type Rule struct {
-	Tool     string   `mapstructure:"tool"     yaml:"tool"`
-	Behavior Behavior `mapstructure:"behavior" yaml:"behavior"`
-	Path     string   `mapstructure:"path"     yaml:"path"`
-	Content  string   `mapstructure:"content"  yaml:"content"`
+	Tool     string   `mapstructure:"tool"     yaml:"tool"     json:"tool"`
+	Behavior Behavior `mapstructure:"behavior" yaml:"behavior" json:"behavior"`
+	Path     string   `mapstructure:"path"     yaml:"path"     json:"path"`
+	Content  string   `mapstructure:"content"  yaml:"content"  json:"content"`
 }
 
 // BuildPermissionRules converts the PermissionRuleConfig list in config to permission.Rule.

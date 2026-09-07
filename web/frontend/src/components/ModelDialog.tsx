@@ -61,7 +61,7 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
     }
   };
 
-  const title = mode === "add" ? "Add Model" : "Edit Model";
+  const title = mode === "add" ? "添加模型" : "编辑模型";
 
   return (
     <div class="modal-overlay" onClick={onClose}>
@@ -72,16 +72,16 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
         </div>
         <div class="model-dialog__body">
           <label class="model-dialog__field">
-            <span class="model-dialog__label">Name</span>
+            <span class="model-dialog__label">名称</span>
             <input
               value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
-              placeholder="Display name"
+              placeholder="展示名称"
               disabled={mode === "edit"}
             />
           </label>
           <label class="model-dialog__field">
-            <span class="model-dialog__label">Type</span>
+            <span class="model-dialog__label">类型</span>
             <select value={type} onChange={(e) => setType((e.target as HTMLSelectElement).value)}>
               <option value="openai">OpenAI</option>
               <option value="ollama">Ollama</option>
@@ -111,11 +111,11 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
             </label>
           )}
           <label class="model-dialog__field">
-            <span class="model-dialog__label">Model name</span>
+            <span class="model-dialog__label">模型名</span>
             <input
               value={modelName}
               onInput={(e) => setModelName((e.target as HTMLInputElement).value)}
-              placeholder={name || "e.g. gpt-4o"}
+              placeholder={name || "例如 gpt-4o"}
             />
           </label>
 
@@ -128,12 +128,12 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
         </div>
         <div class="model-dialog__footer">
           <button class="model-dialog__btn btn-test" onClick={handleTest} disabled={testing}>
-            {testing ? "Testing..." : "Test"}
+            {testing ? "测试中…" : "测试"}
           </button>
           <div class="model-dialog__footer-right">
-            <button class="model-dialog__btn btn-cancel" onClick={onClose}>Cancel</button>
+            <button class="model-dialog__btn btn-cancel" onClick={onClose}>取消</button>
             <button class="model-dialog__btn btn-save" onClick={handleSave} disabled={!name.trim()}>
-              Save
+              保存
             </button>
           </div>
         </div>

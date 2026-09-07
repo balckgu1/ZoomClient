@@ -65,6 +65,32 @@ func (p *MessagePipeline) UpdateModelName(model string) {
 	}
 }
 
+// SkillsSection 返回 system prompt 中 skills 目录段文本（无 skills 时为空字符串）。
+// 上下文占用统计据此把 skills 段从 system prompt 主体中拆分出来单独展示。
+func (p *MessagePipeline) SkillsSection() string {
+	if p.builder == nil {
+		return ""
+	}
+	return p.builder.SkillsSection()
+}
+
+// BuildSystemPrompt 返回组装完成的完整 system prompt（含 skills 目录段），
+// 供上下文占用统计等只需要 system prompt 尺寸的场景使用。
+func (p *MessagePipeline) BuildSystemPrompt() string {
+	if p.builder == nil {
+		return ""
+	}
+	return p.builder.Build()
+}
+
+// SkillCount 返回当前已加载的 skill 数量。
+func (p *MessagePipeline) SkillCount() int {
+	if p.builder == nil {
+		return 0
+	}
+	return p.builder.SkillCount()
+}
+
 // UpdateWorkDir 热更新 Pipeline 使用的工作目录
 func (p *MessagePipeline) UpdateWorkDir(workDir string) {
 	if p.builder != nil {

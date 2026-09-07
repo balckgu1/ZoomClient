@@ -13,6 +13,7 @@ type SessionRecord struct {
 	UpdatedAt time.Time     `json:"updated_at"`
 	Model     string        `json:"model"`
 	TurnCount int           `json:"turn_count"`
+	WorkDir   string        `json:"workdir"`
 	Messages  []fsm.Message `json:"messages"`
 }
 
@@ -23,6 +24,7 @@ type SessionMeta struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	TurnCount int       `json:"turn_count"`
+	WorkDir   string    `json:"workdir"`
 }
 
 // ToMeta 从 session 中提取元信息
@@ -33,6 +35,7 @@ func (r *SessionRecord) ToMeta() SessionMeta {
 		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 		TurnCount: r.TurnCount,
+		WorkDir:   r.WorkDir,
 	}
 }
 

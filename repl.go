@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -24,7 +26,18 @@ import (
 // runWebREPL starts the web server and runs the web mode REPL loop.
 func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webPort int, sessMgr *session.Manager) {
 	log := logger.Log
-	webServer := web.NewServer(webSess, sessMgr, s.ModelRegistry, webPort)
+	// 初始化工作目录镜像，使 GET /api/workdir 立即可返回当前目录
+	webSess.SetWorkDir(s.ToolCtx.WorkPath)
+	// 通过依赖注入创建 Web Server，聚合会话、模型、工具上下文、权限与提示词管道等后端能力
+	webServer := web.NewServer(web.ServerDeps{
+		Session:       webSess,
+		SessionMgr:    sessMgr,
+		ModelRegistry: s.ModelRegistry,
+		ToolCtx:       s.ToolCtx,
+		PermissionMgr: s.PermissionMgr,
+		Pipeline:      s.Pipeline,
+		Config:        s.Cfg,
+	}, webPort)
 	// run http server
 	go func() {
 		log.Info("Web server starting", zap.String("addr", webServer.Addr()))
@@ -32,6 +45,8 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 			log.Error("Web server error", zap.Error(err))
 		}
 	}()
+	// 启动时推送一次上下文占用快照：前端首屏指示器与 GET /api/context-usage 缓存立即可用
+	emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
 	// Open browser after short delay
 	go func() {
 		time.Sleep(500 * time.Millisecond)
@@ -93,6 +108,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					CreatedAt: createdAt,
 					UpdatedAt: time.Now(),
 					Model:     s.ModelName,
+					WorkDir:   webSess.WorkDir(),
 					TurnCount: s.State.TurnCount,
 					Messages:  s.State.Messages,
 				}
@@ -144,6 +160,31 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					}
 				}
 
+			case "set_workdir":
+				// 切换工作目录：在 REPL 循环内串行执行，与 agentLoop 对 WorkPath 的读取互斥，避免数据竞争
+				absDir, absErr := filepath.Abs(cmd.WorkDir)
+				if absErr != nil {
+					s.Em.EmitError("workdir", fmt.Sprintf("invalid path %q: %s", cmd.WorkDir, absErr.Error()))
+					break
+				}
+				info, statErr := os.Stat(absDir)
+				if statErr != nil || !info.IsDir() {
+					s.Em.EmitError("workdir", fmt.Sprintf("not a valid directory: %s", absDir))
+					break
+				}
+				// 更新工具沙箱根目录，并热更新系统提示词中的工作目录
+				s.ToolCtx.WorkPath = absDir
+				if s.Pipeline != nil {
+					s.Pipeline.UpdateWorkDir(absDir)
+				}
+				webSess.SetWorkDir(absDir)
+				log.Info("Working directory switched", zap.String("workdir", absDir))
+				s.Em.EmitInfo(fmt.Sprintf("Working directory switched to %s", absDir))
+				// 推送专用事件，便于前端可靠地同步工作目录状态（而非解析提示文本）
+				if sseEm, ok := s.Em.(*web.SseEmitter); ok {
+					sseEm.EmitSystem("workdir_changed", map[string]string{"path": absDir})
+				}
+
 			default:
 				if handleSessionCommand(cmd.Action, s) {
 					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -160,6 +201,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 
 // runCLIREPL runs the CLI mode REPL loop, reading input from stdin.
 func runCLIREPL(s *AgentSession, view *ui.Renderer) {
+	defer view.Close()
 	for {
 		input, ok := view.PromptUser()
 		if !ok {
@@ -188,6 +230,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 				Model:     s.ModelName,
+				WorkDir:   s.ToolCtx.WorkPath,
 				TurnCount: s.State.TurnCount,
 				Messages:  s.State.Messages,
 			}

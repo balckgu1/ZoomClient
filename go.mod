@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.45.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/chzyer/readline v1.5.1
 	github.com/google/uuid v1.6.0
 	github.com/spf13/viper v1.21.0
 	go.uber.org/zap v1.27.1
@@ -14,7 +15,9 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/mattn/go-colorable v0.1.14 // indirect
+require (
+	github.com/mattn/go-colorable v0.1.14 // indirect
+)
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

@@ -4,14 +4,16 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"zoomClient/compact"
 	"zoomClient/fsm"
 )
 
 // Command 表示一条来自前端 HTTP 请求的上行命令
 type Command struct {
-	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model" | "stop"
+	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model" | "stop" | "set_workdir"
 	Message   string // chat 命令的消息内容
 	ModelName string // select_model 命令的目标模型名
+	WorkDir   string // set_workdir 命令的目标工作目录
 }
 
 // Event 表示一条要推送给前端浏览器的 SSE 事件
@@ -51,6 +53,18 @@ type Session struct {
 
 	// TurnCount 跟踪轮次
 	TurnCount int
+
+	// workDirMu 保护 workDir 镜像的并发读写
+	workDirMu sync.RWMutex
+	// workDir 当前工作目录镜像，供 GET /api/workdir 读取；
+	// 实际切换在 REPL 循环中串行更新 toolCtx.WorkPath 后同步到此，避免 HTTP 读取与 REPL 写入竞争
+	workDir string
+
+	// usageMu 保护 usage 缓存的并发读写
+	usageMu sync.RWMutex
+	// usage 最近一次上下文占用快照缓存：由 SseEmitter 推送事件时同步写入，
+	// GET /api/context-usage 只读缓存，避免 HTTP goroutine 直接读 agent 消息历史产生数据竞争
+	usage compact.UsageSnapshot
 }
 
 type permResponse struct {
@@ -113,6 +127,34 @@ func (s *Session) ResolvePermission(id string, ok bool, reason string) {
 	if v, loaded := s.permPending.Load(id); loaded {
 		v.(chan permResponse) <- permResponse{ok: ok, reason: reason}
 	}
+}
+
+// WorkDir 返回当前工作目录镜像（读锁保护）
+func (s *Session) WorkDir() string {
+	s.workDirMu.RLock()
+	defer s.workDirMu.RUnlock()
+	return s.workDir
+}
+
+// SetWorkDir 更新工作目录镜像（写锁保护），由 REPL 在成功切换后调用
+func (s *Session) SetWorkDir(dir string) {
+	s.workDirMu.Lock()
+	defer s.workDirMu.Unlock()
+	s.workDir = dir
+}
+
+// SetContextUsage 缓存最新的上下文占用快照（写锁保护），由 SseEmitter 推送事件时调用
+func (s *Session) SetContextUsage(u compact.UsageSnapshot) {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	s.usage = u
+}
+
+// ContextUsage 返回缓存的上下文占用快照（读锁保护）；从未写入时返回零值
+func (s *Session) ContextUsage() compact.UsageSnapshot {
+	s.usageMu.RLock()
+	defer s.usageMu.RUnlock()
+	return s.usage
 }
 
 // itoa 简单的 int64 → string，避免 import strconv

@@ -76,6 +76,8 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			}
 			// Render assistant
 			em.EmitAssistant(messageContentToString(response.Message.Content))
+			// 本轮结束前推送上下文占用快照，覆盖最终 assistant 回复的增量
+			emitContextUsageWeb(s, payload.SystemPrompt, toolList)
 			em.EmitDone()
 			state.TransitionReason = nil
 			break
@@ -228,6 +230,9 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 				state.Messages = newMessages
 			}
 		}
+
+		// 推送上下文占用快照：反映本轮工具结果追加与完整压缩后的真实占用
+		emitContextUsageWeb(s, payload.SystemPrompt, toolList)
 
 		// Limit the maximum number of rounds to avoid infinite loops
 		if state.TurnCount >= cfg.AgentLoop.MaxTurns {

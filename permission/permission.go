@@ -3,6 +3,7 @@ package permission
 import (
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // - ModeDefault：未命中规则时一律问用户
@@ -61,6 +62,9 @@ func IsWrite(toolName string) bool {
 
 // Manager 权限管理器
 type Manager struct {
+	// mu 保护 mode / DenyRules / AllowRules 的并发读写：
+	// agentLoop 通过 Check 读取规则，Web 处理器可在运行时更新规则，二者可能并发。
+	mu         sync.RWMutex
 	mode       Mode
 	DenyRules  []Rule // 命中即拒绝
 	AllowRules []Rule // 命中即放行
@@ -83,6 +87,8 @@ func NewManager(mode Mode, denyRules []Rule, allowRules []Rule, asker Asker) *Ma
 
 // SetMode 切换当前模式。不合法的取值会回退到 ModeDefault
 func (m *Manager) SetMode(mode Mode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	switch mode {
 	case ModeDefault, ModePlan, ModeAuto:
 		m.mode = mode
@@ -93,11 +99,17 @@ func (m *Manager) SetMode(mode Mode) {
 
 // GetMode 返回当前模式
 func (m *Manager) GetMode() Mode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.mode
 }
 
 // Check 执行权限检查
 func (m *Manager) Check(toolName string, args map[string]any) Decision {
+	// 读取 mode 与规则期间持有读锁；Check 只做快速匹配、不阻塞，
+	// 真正会阻塞的 Asker.Ask 在 Decide 中于 Check 返回后调用，不会持锁等待用户。
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	// 检查是否命中 deny rules
 	for _, rule := range m.DenyRules {
@@ -180,6 +192,44 @@ func (m *Manager) Decide(toolName string, args map[string]any) (bool, string) {
 		return false, why
 	}
 	return false, "unknown decision"
+}
+
+// PermissionSnapshot 权限配置的只读快照，用于 Web 前端展示与编辑。
+// 通过值拷贝隔离内部状态，避免前端直接持有 Manager 的规则切片。
+type PermissionSnapshot struct {
+	Mode       Mode   `json:"mode"`
+	DenyRules  []Rule `json:"deny_rules"`
+	AllowRules []Rule `json:"allow_rules"`
+}
+
+// Snapshot 返回当前权限配置（模式 + deny/allow 规则副本）。
+// 读取期间持有读锁，返回的规则切片是内部切片的拷贝，调用方可安全修改。
+func (m *Manager) Snapshot() PermissionSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	deny := make([]Rule, len(m.DenyRules))
+	copy(deny, m.DenyRules)
+	allow := make([]Rule, len(m.AllowRules))
+	copy(allow, m.AllowRules)
+
+	return PermissionSnapshot{
+		Mode:       m.mode,
+		DenyRules:  deny,
+		AllowRules: allow,
+	}
+}
+
+// UpdateRules 在运行时整体替换 deny / allow 规则列表。
+// 写入期间持有写锁，保证与 Check 的读取互斥；传入切片会被拷贝，避免外部后续修改影响内部状态。
+func (m *Manager) UpdateRules(deny, allow []Rule) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.DenyRules = make([]Rule, len(deny))
+	copy(m.DenyRules, deny)
+	m.AllowRules = make([]Rule, len(allow))
+	copy(m.AllowRules, allow)
 }
 
 // matchesRule 判断一条 Rule 是否命中本次工具调用。

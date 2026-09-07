@@ -9,9 +9,10 @@ import (
 
 // Command 表示一条来自前端 HTTP 请求的上行命令
 type Command struct {
-	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model" | "stop"
+	Action    string // "chat" | "clear" | "compact" | "exit" | "select_model" | "stop" | "set_workdir"
 	Message   string // chat 命令的消息内容
 	ModelName string // select_model 命令的目标模型名
+	WorkDir   string // set_workdir 命令的目标工作目录
 }
 
 // Event 表示一条要推送给前端浏览器的 SSE 事件
@@ -51,6 +52,12 @@ type Session struct {
 
 	// TurnCount 跟踪轮次
 	TurnCount int
+
+	// workDirMu 保护 workDir 镜像的并发读写
+	workDirMu sync.RWMutex
+	// workDir 当前工作目录镜像，供 GET /api/workdir 读取；
+	// 实际切换在 REPL 循环中串行更新 toolCtx.WorkPath 后同步到此，避免 HTTP 读取与 REPL 写入竞争
+	workDir string
 }
 
 type permResponse struct {
@@ -113,6 +120,20 @@ func (s *Session) ResolvePermission(id string, ok bool, reason string) {
 	if v, loaded := s.permPending.Load(id); loaded {
 		v.(chan permResponse) <- permResponse{ok: ok, reason: reason}
 	}
+}
+
+// WorkDir 返回当前工作目录镜像（读锁保护）
+func (s *Session) WorkDir() string {
+	s.workDirMu.RLock()
+	defer s.workDirMu.RUnlock()
+	return s.workDir
+}
+
+// SetWorkDir 更新工作目录镜像（写锁保护），由 REPL 在成功切换后调用
+func (s *Session) SetWorkDir(dir string) {
+	s.workDirMu.Lock()
+	defer s.workDirMu.Unlock()
+	s.workDir = dir
 }
 
 // itoa 简单的 int64 → string，避免 import strconv

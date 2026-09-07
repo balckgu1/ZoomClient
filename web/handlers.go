@@ -10,6 +10,7 @@ import (
 	"strings"
 	"zoomClient/fsm"
 	"zoomClient/model"
+	"zoomClient/permission"
 )
 
 // handleSSE 建立 SSE 长连接，将 Session.EventCh 中的事件以 text/event-stream 格式推送。
@@ -148,10 +149,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"model":      s.session.Model,
-		"turn_count": s.session.State.TurnCount,
-		"busy":       s.session.Busy.Load(),
-		"session_id": s.session.ID,
+		"model":           s.session.Model,
+		"turn_count":      s.session.State.TurnCount,
+		"busy":            s.session.Busy.Load(),
+		"session_id":      s.session.ID,
+		"workdir":         s.session.WorkDir(),
+		"permission_mode": s.permissionMgr.GetMode(),
 	})
 }
 
@@ -413,6 +416,116 @@ func (s *Server) handleModelTest(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"message": "Connection successful",
 	})
+}
+
+// ─── 工作目录管理 ───
+
+// handleWorkDir 处理 /api/workdir：GET 查询当前工作目录，POST 请求切换工作目录。
+//
+// 切换动作通过 CmdCh 投递给 REPL 循环串行执行：REPL 会校验目录有效性，
+// 并同步更新 toolCtx.WorkPath 与系统提示词管道，最后经 SSE 反馈结果。
+// 这样做可保证与 agentLoop 对工作目录的读取互斥，避免数据竞争。
+func (s *Server) handleWorkDir(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"path": s.session.WorkDir()})
+
+	case http.MethodPost:
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		path := strings.TrimSpace(req.Path)
+		if path == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+			return
+		}
+		s.session.CmdCh <- Command{Action: "set_workdir", WorkDir: path}
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ─── 权限配置管理 ───
+
+// permissionConfigResponse 权限配置的对外 JSON 响应体。
+type permissionConfigResponse struct {
+	Mode        permission.Mode   `json:"mode"`
+	Interactive bool              `json:"interactive"`
+	DenyRules   []permission.Rule `json:"deny_rules"`
+	AllowRules  []permission.Rule `json:"allow_rules"`
+}
+
+// handlePermissionConfig 处理 /api/permission/config：
+// GET 返回当前权限配置快照，PUT 在运行时更新模式与 deny/allow 规则。
+//
+// permission.Manager 内部以读写锁保护，故此处可直接同步更新并立即返回最新快照，
+// 无需经过 REPL 循环。
+func (s *Server) handlePermissionConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.buildPermissionConfigResponse())
+
+	case http.MethodPut:
+		var req struct {
+			Mode       string            `json:"mode"`
+			DenyRules  []permission.Rule `json:"deny_rules"`
+			AllowRules []permission.Rule `json:"allow_rules"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		// 模式为空时保持不变；非空时由 SetMode 校验（非法值回退到 default）
+		if strings.TrimSpace(req.Mode) != "" {
+			s.permissionMgr.SetMode(permission.Mode(strings.TrimSpace(req.Mode)))
+		}
+		// 规范化规则行为：deny 列表统一为 deny，allow 列表统一为 allow，
+		// 与 Check 中"按列表归属决定行为"的语义保持一致
+		deny := normalizeRules(req.DenyRules, permission.BehaviorDeny)
+		allow := normalizeRules(req.AllowRules, permission.BehaviorAllow)
+		s.permissionMgr.UpdateRules(deny, allow)
+
+		writeJSON(w, http.StatusOK, s.buildPermissionConfigResponse())
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// buildPermissionConfigResponse 基于权限管理器快照与全局配置组装响应体。
+func (s *Server) buildPermissionConfigResponse() permissionConfigResponse {
+	snap := s.permissionMgr.Snapshot()
+	interactive := false
+	if s.config != nil {
+		interactive = s.config.Permission.Interactive
+	}
+	return permissionConfigResponse{
+		Mode:        snap.Mode,
+		Interactive: interactive,
+		DenyRules:   snap.DenyRules,
+		AllowRules:  snap.AllowRules,
+	}
+}
+
+// normalizeRules 拷贝规则列表并强制其行为字段与所属列表语义一致，
+// 同时去除首尾空白，避免前端传入空值或错误的 behavior 影响判定。
+func normalizeRules(rules []permission.Rule, behavior permission.Behavior) []permission.Rule {
+	out := make([]permission.Rule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, permission.Rule{
+			Tool:     strings.TrimSpace(r.Tool),
+			Behavior: behavior,
+			Path:     strings.TrimSpace(r.Path),
+			Content:  strings.TrimSpace(r.Content),
+		})
+	}
+	return out
 }
 
 // ─── 辅助函数 ───

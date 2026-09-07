@@ -1,18 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
-import type { ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset } from "../types";
+import type {
+  ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
+  PermissionConfig, PermissionMode,
+} from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
 import {
   sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
   fetchModels, addModel, selectModel, updateModel,
+  fetchWorkDir, setWorkDir, fetchPermissionConfig, updatePermissionConfig,
 } from "../lib/api";
 import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
-import { InputBar } from "./InputBar";
+import { Composer } from "./Composer";
 import { PermissionDialog } from "./PermissionDialog";
+import { WorkDirPanel } from "./WorkDirPanel";
+import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
-import { ModelSelector } from "./ModelSelector";
 
 export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -32,6 +37,18 @@ export function App() {
   // Model state
   const [models, setModels] = useState<ModelPreset[]>([]);
   const [activeModel, setActiveModel] = useState("");
+
+  // 工作目录与权限配置状态（来自后端，可运行时修改）
+  const [workDir, setWorkDirState] = useState("");
+  const [permissionConfig, setPermissionConfig] = useState<PermissionConfig>({
+    mode: "default" as PermissionMode,
+    interactive: false,
+    deny_rules: [],
+    allow_rules: [],
+  });
+  // 控制面板模态框的显示
+  const [showWorkDir, setShowWorkDir] = useState(false);
+  const [showPermission, setShowPermission] = useState(false);
 
   // Agent phase state (for status indicator)
   const [agentPhase, setAgentPhase] = useState<AgentPhase>("idle");
@@ -107,6 +124,26 @@ export function App() {
     }
   }, []);
 
+  // refreshWorkDir 拉取当前工作目录
+  const refreshWorkDir = useCallback(async () => {
+    try {
+      const dir = await fetchWorkDir();
+      setWorkDirState(dir);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // refreshPermission 拉取当前权限配置快照
+  const refreshPermission = useCallback(async () => {
+    try {
+      const cfg = await fetchPermissionConfig();
+      setPermissionConfig(cfg);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Start typewriter effect for a given assistant message
   const startTypewriter = useCallback((fullText: string, msgIdx: number) => {
     // Clear any existing timer
@@ -156,15 +193,15 @@ export function App() {
       const event = d.event;
       if (event === "ready") {
         setModel(d.model || "");
-        showToast("Session started");
+        showToast("会话已开始");
       } else if (event === "info") {
         showToast(d.message || "");
       } else if (event === "error") {
-        showToast(`Error [${d.scope}]: ${d.message}`);
+        showToast(`错误 [${d.scope}]：${d.message}`);
       } else if (event === "compact") {
         const before = d.before_bytes || "?";
         const after = d.after_bytes || "?";
-        showToast(`Compacted: ${before} → ${after} bytes`);
+        showToast(`已压缩上下文：${before} → ${after} 字节`);
       } else if (event === "permission_ask") {
         setPermission({
           id: d.id,
@@ -173,13 +210,17 @@ export function App() {
           reason: d.reason,
         });
       } else if (event === "session_end") {
-        showToast("Session ended");
+        showToast("会话已结束");
       } else if (event === "session_renamed") {
         const id = d.id;
         const title = d.title;
         setSessions((prev) =>
           prev.map((s) => (s.id === id ? { ...s, title } : s))
         );
+      } else if (event === "workdir_changed") {
+        // 工作目录切换成功后由后端回推，更新本地显示
+        setWorkDirState(d.path || "");
+        showToast(`工作目录已切换：${d.path || ""}`);
       }
       return;
     }
@@ -259,13 +300,15 @@ export function App() {
     }
   }, [showToast, refreshSessions, finishTypewriter, startTypewriter]);
 
-  // Connect SSE on mount + load sessions + load models
+  // Connect SSE on mount + load sessions + load models + workdir + permission
   useEffect(() => {
     const disconnect = connectSSE("/api/events", handleSSEEvent, setConnected);
     refreshSessions();
     refreshModels();
+    refreshWorkDir();
+    refreshPermission();
     return disconnect;
-  }, [handleSSEEvent, refreshSessions, refreshModels]);
+  }, [handleSSEEvent, refreshSessions, refreshModels, refreshWorkDir, refreshPermission]);
 
   // Send a chat message
   const handleSend = useCallback(
@@ -278,7 +321,7 @@ export function App() {
       } catch (err) {
         setBusy(false);
         setAgentPhase("idle");
-        showToast(`Send failed: ${err}`);
+        showToast(`发送失败：${err}`);
       }
     },
     [showToast]
@@ -293,17 +336,17 @@ export function App() {
           await sendClear();
           setMessages([]);
           setTurnCount(0);
-          showToast("History cleared");
+          showToast("已清空历史");
         } else if (lower === "/compact") {
           await sendCompact();
         } else if (lower === "/exit") {
           await sendExit();
-          showToast("Session ending...");
+          showToast("会话正在结束…");
         } else {
-          showToast(`Unknown command: ${cmd}`);
+          showToast(`未知命令：${cmd}`);
         }
       } catch (err) {
-        showToast(`Command failed: ${err}`);
+        showToast(`命令执行失败：${err}`);
       }
     },
     [showToast]
@@ -316,7 +359,7 @@ export function App() {
       try {
         await sendPermission(permission.id, allow, reason);
       } catch (err) {
-        showToast(`Permission reply failed: ${err}`);
+        showToast(`权限响应失败：${err}`);
       }
       setPermission(null);
     },
@@ -333,7 +376,7 @@ export function App() {
       setTurnCount(0);
       await refreshSessions();
     } catch (err) {
-      showToast(`Create session failed: ${err}`);
+      showToast(`创建会话失败：${err}`);
     }
   }, [refreshSessions, showToast]);
 
@@ -362,12 +405,12 @@ export function App() {
       setMessages(converted);
       setTurnCount(record.turn_count || 0);
     } catch (err) {
-      showToast(`Load session failed: ${err}`);
+      showToast(`加载会话失败：${err}`);
     }
   }, [currentSessionId, showToast]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
-    if (!confirm("Are you sure to delete this session?")) return;
+    if (!confirm("确定要删除这个会话吗？")) return;
     try {
       await deleteSession(id);
       if (id === currentSessionId) {
@@ -383,7 +426,7 @@ export function App() {
         await refreshSessions();
       }
     } catch (err) {
-      showToast(`Delete failed: ${err}`);
+      showToast(`删除失败：${err}`);
     }
   }, [currentSessionId, refreshSessions, handleSelectSession, handleNewSession, showToast]);
 
@@ -394,7 +437,7 @@ export function App() {
         prev.map((s) => (s.id === id ? { ...s, title } : s))
       );
     } catch (err) {
-      showToast(`Rename failed: ${err}`);
+      showToast(`重命名失败：${err}`);
     }
   }, [showToast]);
 
@@ -412,9 +455,9 @@ export function App() {
       await selectModel(name);
       setActiveModel(name);
       setModel(name);
-      showToast(`Switching to model "${name}"...`);
+      showToast(`正在切换到模型"${name}"…`);
     } catch (err) {
-      showToast(`Model switch failed: ${err}`);
+      showToast(`切换模型失败：${err}`);
     }
   }, [showToast]);
 
@@ -422,9 +465,9 @@ export function App() {
     try {
       await addModel(preset);
       await refreshModels();
-      showToast(`Model "${preset.name}" added`);
+      showToast(`已添加模型"${preset.name}"`);
     } catch (err) {
-      showToast(`Add model failed: ${err}`);
+      showToast(`添加模型失败：${err}`);
     }
   }, [refreshModels, showToast]);
 
@@ -432,11 +475,37 @@ export function App() {
     try {
       await updateModel(name, preset);
       await refreshModels();
-      showToast(`Model "${name}" updated`);
+      showToast(`已更新模型"${name}"`);
     } catch (err) {
-      showToast(`Edit model failed: ${err}`);
+      showToast(`编辑模型失败：${err}`);
     }
   }, [refreshModels, showToast]);
+
+  // handleWorkDirSave 提交工作目录切换请求。
+  // 后端串行处理，成功/失败通过 SSE 的 workdir_changed / error 事件反馈。
+  const handleWorkDirSave = useCallback(async (path: string) => {
+    try {
+      await setWorkDir(path);
+      showToast("已提交工作目录切换请求…");
+    } catch (err) {
+      showToast(`切换工作目录失败：${err}`);
+    }
+  }, [showToast]);
+
+  // handlePermissionSave 运行时更新权限模式与规则，后端同步生效并返回最新快照。
+  const handlePermissionSave = useCallback(async (cfg: {
+    mode: PermissionMode;
+    deny_rules: PermissionConfig["deny_rules"];
+    allow_rules: PermissionConfig["allow_rules"];
+  }) => {
+    try {
+      const updated = await updatePermissionConfig(cfg);
+      setPermissionConfig(updated);
+      showToast("权限配置已更新");
+    } catch (err) {
+      showToast(`更新权限配置失败：${err}`);
+    }
+  }, [showToast]);
 
   // Handle stop button
   const handleStop = useCallback(async () => {
@@ -446,9 +515,9 @@ export function App() {
       setBusy(false);
       setAgentPhase("idle");
       setCurrentToolName("");
-      showToast("Generation stopped");
+      showToast("已停止生成");
     } catch (err) {
-      showToast(`Stop failed: ${err}`);
+      showToast(`停止失败：${err}`);
     }
   }, [finishTypewriter, showToast]);
 
@@ -457,6 +526,8 @@ export function App() {
       <Sidebar
         sessions={sessions}
         currentId={currentSessionId}
+        connected={connected}
+        workDir={workDir}
         onSelect={handleSelectSession}
         onNew={handleNewSession}
         onDelete={handleDeleteSession}
@@ -465,23 +536,49 @@ export function App() {
       <div class="app-main">
         <StatusBar
           status={{ messages, model, connected, busy, turnCount, pendingPermission: permission }}
+          workDir={workDir}
         />
-        <div class="model-bar">
-          <ModelSelector
-            models={models}
-            active={activeModel}
-            onSelect={handleModelSelect}
-            onAdd={handleModelAdd}
-            onEdit={handleModelEdit}
-            disabled={busy}
-          />
-        </div>
-        <MessageList messages={messages} agentPhase={agentPhase} toolName={currentToolName} />
+        <MessageList
+          messages={messages}
+          agentPhase={agentPhase}
+          toolName={currentToolName}
+          onSuggestion={handleSend}
+        />
         {currentToast && <div class="toast">{currentToast}</div>}
         {permission && (
           <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
         )}
-        <InputBar disabled={busy} busy={busy} onSend={handleSend} onSlashCommand={handleSlashCommand} onStop={handleStop} />
+        <Composer
+          disabled={busy}
+          busy={busy}
+          workDir={workDir}
+          permissionMode={permissionConfig.mode}
+          models={models}
+          activeModel={activeModel}
+          onSend={handleSend}
+          onSlashCommand={handleSlashCommand}
+          onStop={handleStop}
+          onNewSession={handleNewSession}
+          onOpenWorkDir={() => setShowWorkDir(true)}
+          onOpenPermission={() => setShowPermission(true)}
+          onSelectModel={handleModelSelect}
+          onAddModel={handleModelAdd}
+          onEditModel={handleModelEdit}
+        />
+        {showWorkDir && (
+          <WorkDirPanel
+            current={workDir}
+            onSave={handleWorkDirSave}
+            onClose={() => setShowWorkDir(false)}
+          />
+        )}
+        {showPermission && (
+          <PermissionPanel
+            config={permissionConfig}
+            onSave={handlePermissionSave}
+            onClose={() => setShowPermission(false)}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,3 +1,6 @@
+// web/server.go
+//
+// HTTP Server 的组装：依赖注入、路由注册、CORS 中间件与生命周期管理。
 package web
 
 import (
@@ -5,26 +8,54 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+
 	"zoomClient/model"
+	"zoomClient/permission"
+	"zoomClient/prompt"
 	"zoomClient/session"
+	"zoomClient/tools"
+	"zoomClient/utils"
 )
+
+// ServerDeps 聚合 Web Server 运行所需的全部后端依赖。
+//
+// 使用结构体而非一长串位置参数，便于后续扩展新能力（如新增管理器）时
+// 只需增加字段，而不必改动所有调用方的参数顺序，提升可维护性。
+type ServerDeps struct {
+	Session       *Session               // Web 会话（命令/事件通道、权限交互、工作目录镜像）
+	SessionMgr    *session.Manager       // 会话持久化管理器
+	ModelRegistry *model.Registry        // 模型预设注册表
+	ToolCtx       *tools.ToolContext     // 工具上下文（含工作目录 WorkPath）
+	PermissionMgr *permission.Manager    // 权限管理器（模式 + deny/allow 规则）
+	Pipeline      *prompt.MessagePipeline // 系统提示词组装管道（切换工作目录时热更新）
+	Config        *utils.Config          // 全局配置（用于展示只读信息，如 interactive）
+}
 
 // Server 封装 HTTP Server
 type Server struct {
 	session       *Session
 	sessionMgr    *session.Manager
 	modelRegistry *model.Registry
-	mux           *http.ServeMux
-	port          int
-	httpServer    *http.Server
+	toolCtx       *tools.ToolContext
+	permissionMgr *permission.Manager
+	pipeline      *prompt.MessagePipeline
+	config        *utils.Config
+
+	mux        *http.ServeMux
+	port       int
+	httpServer *http.Server
 }
 
-// NewServer 创建 HTTP Server
-func NewServer(sess *Session, sessionMgr *session.Manager, modelRegistry *model.Registry, port int) *Server {
+// NewServer 依据注入的依赖创建 HTTP Server
+func NewServer(deps ServerDeps, port int) *Server {
 	s := &Server{
-		session:       sess,
-		sessionMgr:    sessionMgr,
-		modelRegistry: modelRegistry,
+		session:       deps.Session,
+		sessionMgr:    deps.SessionMgr,
+		modelRegistry: deps.ModelRegistry,
+		toolCtx:       deps.ToolCtx,
+		permissionMgr: deps.PermissionMgr,
+		pipeline:      deps.Pipeline,
+		config:        deps.Config,
 		mux:           http.NewServeMux(),
 		port:          port,
 	}
@@ -39,7 +70,7 @@ func NewServer(sess *Session, sessionMgr *session.Manager, modelRegistry *model.
 
 // registerRoutes 注册所有路由
 func (s *Server) registerRoutes() {
-	// API 端点
+	// ─── 核心交互端点 ───
 	s.mux.HandleFunc("/api/events", s.handleSSE)
 	s.mux.HandleFunc("/api/chat", s.handleChat)
 	s.mux.HandleFunc("/api/clear", s.handleClear)
@@ -49,16 +80,22 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/permission", s.handlePermission)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 
-	// 会话管理端点
+	// ─── 会话管理端点 ───
 	s.mux.HandleFunc("/api/sessions", s.handleSessions)
 	s.mux.HandleFunc("/api/sessions/", s.handleSessionByID)
 
-	// 模型管理端点
+	// ─── 模型管理端点 ───
 	s.mux.HandleFunc("/api/models", s.handleModels)
 	s.mux.HandleFunc("/api/model/select", s.handleSelectModel)
 	s.mux.HandleFunc("/api/models/", s.handleModelByID)
 
-	// 静态文件（go:embed 的前端构建产物）
+	// ─── 工作目录端点（GET 查询 / POST 切换）───
+	s.mux.HandleFunc("/api/workdir", s.handleWorkDir)
+
+	// ─── 权限配置端点（GET 查询 / PUT 运行时更新模式与规则）───
+	s.mux.HandleFunc("/api/permission/config", s.handlePermissionConfig)
+
+	// ─── 静态文件（go:embed 的前端构建产物）───
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		panic("failed to create sub FS: " + err.Error())

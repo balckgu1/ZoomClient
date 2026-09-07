@@ -22,11 +22,11 @@ export function AgentStatus({ phase, toolName }: Props) {
         {phase === "streaming" && <span class="agent-status__cursor">|</span>}
       </div>
       <span class="agent-status__label">
-        {phase === "thinking" && "Thinking..."}
+        {phase === "thinking" && "思考中…"}
         {phase === "handling" && (
-          <>Handling{toolName ? <><code class="agent-status__tool-name">{toolName}</code></> : null}...</>
+          <>正在处理{toolName ? <><code class="agent-status__tool-name">{toolName}</code></> : null}…</>
         )}
-        {phase === "streaming" && "Streaming..."}
+        {phase === "streaming" && "输出中…"}
       </span>
     </div>
   );

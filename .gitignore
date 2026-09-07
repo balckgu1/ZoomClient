@@ -47,4 +47,7 @@ desktop/FRONTEND_ARCHITECTURE.md
 
 web/frontend/node_modules/
 
-web/frontend/dist/
+# 前端构建产物默认忽略；但保留占位文件 .gitkeep，
+# 使 go:embed all:frontend/dist 在未执行 npm run build 的全新克隆 / CI 下仍可编译
+web/frontend/dist/*
+!web/frontend/dist/.gitkeep

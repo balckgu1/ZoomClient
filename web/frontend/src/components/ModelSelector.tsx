@@ -76,7 +76,7 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
     setEditTarget(undefined);
   };
 
-  const activeLabel = active || "No model";
+  const activeLabel = active || "未选择模型";
 
   return (
     <div class="model-selector" ref={ref}>
@@ -84,7 +84,7 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
         class="model-selector-trigger"
         onClick={() => !disabled && (open ? closeDropdown() : setOpen(true))}
         disabled={disabled}
-        title="Switch model"
+        title="切换模型"
       >
         <span class="model-selector-label">{activeLabel}</span>
         <span class="model-selector-arrow">{open ? "▲" : "▼"}</span>
@@ -97,7 +97,7 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
               <input
                 class="model-selector-search-input"
                 type="text"
-                placeholder="Search models..."
+                placeholder="搜索模型…"
                 value={search}
                 onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
                 onClick={(e) => e.stopPropagation()}
@@ -105,7 +105,7 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
             </div>
           )}
           {filtered.length === 0 && (
-            <div class="model-selector-empty">{search ? "No matching models" : "No models configured"}</div>
+            <div class="model-selector-empty">{search ? "无匹配模型" : "未配置模型"}</div>
           )}
           {filtered.map((m) => (
             <div
@@ -121,11 +121,11 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
 
           <div class="model-selector-divider" />
           <div class="model-selector-item model-selector-add" onClick={handleOpenAdd}>
-            + Add model
+            ＋ 添加模型
           </div>
           {models.length > 0 && (
             <div class="model-selector-item model-selector-edit" onClick={() => setShowEditSub(!showEditSub)}>
-              <span class="model-selector-edit-label">Edit model</span>
+              <span class="model-selector-edit-label">编辑模型</span>
               <span class="model-selector-sub-arrow">{showEditSub ? "▼" : "▶"}</span>
             </div>
           )}

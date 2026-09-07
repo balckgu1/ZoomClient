@@ -68,6 +68,8 @@ export interface StatusResponse {
   turn_count: number;
   busy: boolean;
   session_id: string;
+  workdir: string;
+  permission_mode: string;
 }
 
 export async function fetchStatus(): Promise<StatusResponse> {
@@ -146,4 +148,43 @@ async function put(path: string, body: Record<string, unknown>): Promise<Respons
 
 export async function updateModel(name: string, preset: ModelPreset): Promise<void> {
   await put(`/api/models/${name}`, preset as unknown as Record<string, unknown>);
+}
+
+// ─── 工作目录 API ───
+
+import type { PermissionConfig, PermissionMode, PermissionRule } from "../types";
+
+// fetchWorkDir 查询当前工作目录（GET /api/workdir）
+export async function fetchWorkDir(): Promise<string> {
+  const res = await fetch(`${BASE}/api/workdir`);
+  if (!res.ok) throw new Error(res.statusText);
+  const data = await res.json();
+  return (data.path as string) || "";
+}
+
+// setWorkDir 请求切换工作目录（POST /api/workdir）。
+// 注意：后端将切换动作投递给 REPL 循环串行执行，本请求仅返回"已接受"，
+// 真正的成功/失败结果通过 SSE 的 info/error 事件反馈，前端应据此刷新显示。
+export async function setWorkDir(path: string): Promise<void> {
+  await post("/api/workdir", { path });
+}
+
+// ─── 权限配置 API ───
+
+// fetchPermissionConfig 查询当前权限配置（GET /api/permission/config）
+export async function fetchPermissionConfig(): Promise<PermissionConfig> {
+  const res = await fetch(`${BASE}/api/permission/config`);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+// updatePermissionConfig 运行时更新权限模式与规则（PUT /api/permission/config），
+// 后端同步生效并返回最新快照。
+export async function updatePermissionConfig(cfg: {
+  mode: PermissionMode;
+  deny_rules: PermissionRule[];
+  allow_rules: PermissionRule[];
+}): Promise<PermissionConfig> {
+  const res = await put("/api/permission/config", cfg as unknown as Record<string, unknown>);
+  return res.json();
 }

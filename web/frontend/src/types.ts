@@ -31,9 +31,27 @@ export interface SessionMeta {
   turn_count: number;
 }
 
+// 后端持久化的原始工具调用（对应 Go 的 tools.ToolCall）
+export interface PersistedToolCall {
+  id?: string;
+  name: string;
+  arguments?: Record<string, unknown>;
+}
+
+// 后端持久化的原始消息（对应 Go 的 fsm.Message）。
+// 与前端展示用的 ChatMessage 不同：调用工具的 assistant 轮次 content 为空、
+// 调用信息在 tool_calls 中，工具结果单独以 role:"tool" + tool_call_id 存储。
+export interface PersistedMessage {
+  role: string;
+  content?: unknown; // 字符串或工具结果数组
+  tool_calls?: PersistedToolCall[];
+  tool_call_id?: string;
+  reasoning_content?: string;
+}
+
 // Full session record (with messages)
 export interface SessionRecord extends SessionMeta {
-  messages: ChatMessage[];
+  messages: PersistedMessage[];
   model: string;
 }
 

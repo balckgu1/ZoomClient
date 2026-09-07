@@ -5,6 +5,7 @@ import type {
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
+import { reconstructMessages } from "../lib/history";
 import {
   sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
@@ -20,12 +21,24 @@ import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
 
 export function App() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // 按会话维护独立的消息缓冲区：切换会话只改变"显示哪个缓冲"，不丢弃任何会话的实时状态。
+  // 这是修复"切走再切回后工具调用/思考态丢失"的核心——旧实现用单一全局 messages 数组，
+  // 每次切换都从磁盘整体替换，既丢在途状态又对有损历史无法还原工具卡片。
+  const [buffers, setBuffers] = useState<Record<string, ChatMessage[]>>({});
+  const [turnCounts, setTurnCounts] = useState<Record<string, number>>({});
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [model, setModel] = useState("");
-  const [turnCount, setTurnCount] = useState(0);
   const [permission, setPermission] = useState<PermissionAsk | null>(null);
+
+  // runningSessionId：当前正在跑 agentLoop 的会话 id。SSE 事件与打字机都写入该会话缓冲，
+  // 即使用户此刻正在查看别的会话，运行会话的流式内容也能持续累积、切回即恢复。
+  const runningSessionId = useRef<string>("");
+  // busyRef：busy 的 ref 镜像，供 useCallback（如 handleSelectSession）同步读取，
+  // 避免把 busy 放进依赖导致回调频繁重建。
+  const busyRef = useRef(false);
+  // buffersRef：buffers 的 ref 镜像，供 handleSelectSession 判断目标会话是否已有缓存。
+  const buffersRef = useRef<Record<string, ChatMessage[]>>({});
   // Toast queue: multiple toasts are queued and shown sequentially
   const [toastQueue, setToastQueue] = useState<string[]>([]);
   const [currentToast, setCurrentToast] = useState<string | null>(null);
@@ -64,6 +77,26 @@ export function App() {
   const nextMsgId = useRef(0);
   const genId = useCallback(() => { nextMsgId.current += 1; return nextMsgId.current; }, []);
 
+  // 同步 buffersRef 镜像，供回调中读取最新缓冲而无需加入依赖
+  useEffect(() => { buffersRef.current = buffers; }, [buffers]);
+
+  // updateRunning 把一次消息变更应用到"运行会话"的缓冲区。
+  // SSE 事件与打字机都通过它写入，保证运行会话的内容不会串到当前正在查看的其它会话。
+  const updateRunning = useCallback((fn: (msgs: ChatMessage[]) => ChatMessage[]) => {
+    const sid = runningSessionId.current;
+    if (!sid) return;
+    setBuffers((prev) => ({ ...prev, [sid]: fn(prev[sid] ?? []) }));
+  }, []);
+
+  // ─── 显示态派生：始终展示"当前选中会话"的缓冲与运行状态 ───
+  const messages = currentSessionId ? (buffers[currentSessionId] ?? []) : [];
+  const turnCount = currentSessionId ? (turnCounts[currentSessionId] ?? 0) : 0;
+  // 仅当查看的正是运行中的会话时，才展示"思考中/流式"等实时相位与当前工具名；
+  // 查看其它会话时应显示为 idle，避免把别的会话的运行态误显示到这里。
+  const viewingRunning = !!currentSessionId && currentSessionId === runningSessionId.current;
+  const displayPhase: AgentPhase = viewingRunning ? agentPhase : "idle";
+  const displayTool = viewingRunning ? currentToolName : "";
+
   // Finish typewriter: flush remaining text immediately
   const finishTypewriter = useCallback(() => {
     if (typewriterTimer.current) {
@@ -74,7 +107,7 @@ export function App() {
     const idx = currentIndex.current;
     const msgIdx = streamingMsgIdx.current;
     if (msgIdx >= 0 && idx < remaining.length) {
-      setMessages((prev) => {
+      updateRunning((prev) => {
         const updated = [...prev];
         if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
           updated[msgIdx] = { ...updated[msgIdx], content: remaining, streaming: false } as ChatMessage;
@@ -85,7 +118,7 @@ export function App() {
     currentIndex.current = 0;
     pendingText.current = "";
     streamingMsgIdx.current = -1;
-  }, []);
+  }, [updateRunning]);
 
   // Show a toast message briefly. Multiple toasts are queued and shown sequentially.
   const showToast = useCallback((msg: string) => {
@@ -164,7 +197,7 @@ export function App() {
         // Done streaming
         if (typewriterTimer.current) clearInterval(typewriterTimer.current);
         typewriterTimer.current = null;
-        setMessages((prev) => {
+        updateRunning((prev) => {
           const updated = [...prev];
           if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
             updated[msgIdx] = { ...updated[msgIdx], content: text, streaming: false } as ChatMessage;
@@ -175,7 +208,7 @@ export function App() {
         setAgentPhase("idle");
         return;
       }
-      setMessages((prev) => {
+      updateRunning((prev) => {
         const updated = [...prev];
         if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
           updated[msgIdx] = { ...updated[msgIdx], content: text.slice(0, ci), streaming: true } as ChatMessage;
@@ -183,7 +216,7 @@ export function App() {
         return updated;
       });
     }, speed);
-  }, []);
+  }, [updateRunning]);
 
   // Handle incoming SSE events
   const handleSSEEvent = useCallback((evt: SSEEvent) => {
@@ -240,7 +273,7 @@ export function App() {
         finishTypewriter();
         const fullText = d.content;
         // Add empty assistant message, then start typewriter
-        setMessages((prev) => {
+        updateRunning((prev) => {
           const updated = [...prev, { _id: genId(), role: "assistant", content: "", streaming: true } as ChatMessage];
           const newIdx = updated.length - 1;
           // Schedule typewriter after state update
@@ -248,18 +281,18 @@ export function App() {
           return updated;
         });
       } else if (type === "reasoning") {
-        setMessages((prev) => [...prev, { _id: genId(), role: "reasoning", content: d.content }]);
+        updateRunning((prev) => [...prev, { _id: genId(), role: "reasoning", content: d.content }]);
         setAgentPhase("thinking");
       } else if (type === "tool_call") {
         finishTypewriter();
-        setMessages((prev) => [
+        updateRunning((prev) => [
           ...prev,
           { _id: genId(), role: "tool_call", name: d.name, args: d.args },
         ]);
         setAgentPhase("handling");
         setCurrentToolName(d.name || "");
       } else if (type === "tool_result") {
-        setMessages((prev) => {
+        updateRunning((prev) => {
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
             const m = updated[i];
@@ -278,27 +311,32 @@ export function App() {
         setAgentPhase("thinking");
         setCurrentToolName("");
       } else if (type === "sub_agent") {
-        setMessages((prev) => [...prev, { _id: genId(), role: "sub_agent", prompt: d.prompt }]);
+        updateRunning((prev) => [...prev, { _id: genId(), role: "sub_agent", prompt: d.prompt }]);
       } else if (type === "hook_blocked") {
-        setMessages((prev) => [
+        updateRunning((prev) => [
           ...prev,
           { _id: genId(), role: "hook_blocked", tool: d.tool, reason: d.reason },
         ]);
       } else if (type === "todo_panel") {
-        setMessages((prev) => [
+        updateRunning((prev) => [
           ...prev,
           { _id: genId(), role: "system", content: `📋 Plan\n${d.content}` },
         ]);
       } else if (type === "done") {
         finishTypewriter();
+        busyRef.current = false;
         setBusy(false);
         setAgentPhase("idle");
         setCurrentToolName("");
-        setTurnCount((c) => c + 1);
+        // 轮次计数归属到运行会话
+        const sid = runningSessionId.current;
+        if (sid) {
+          setTurnCounts((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 }));
+        }
         refreshSessions();
       }
     }
-  }, [showToast, refreshSessions, finishTypewriter, startTypewriter]);
+  }, [showToast, refreshSessions, finishTypewriter, startTypewriter, updateRunning]);
 
   // Connect SSE on mount + load sessions + load models + workdir + permission
   useEffect(() => {
@@ -313,18 +351,22 @@ export function App() {
   // Send a chat message
   const handleSend = useCallback(
     async (message: string) => {
-      setMessages((prev) => [...prev, { _id: genId(), role: "user", content: message }]);
+      // 标记运行会话：本轮所有 SSE 事件与打字机都写入该会话缓冲
+      runningSessionId.current = currentSessionId;
+      busyRef.current = true;
+      updateRunning((prev) => [...prev, { _id: genId(), role: "user", content: message }]);
       setBusy(true);
       setAgentPhase("thinking");
       try {
         await sendChat(message);
       } catch (err) {
+        busyRef.current = false;
         setBusy(false);
         setAgentPhase("idle");
         showToast(`发送失败：${err}`);
       }
     },
-    [showToast]
+    [showToast, updateRunning, currentSessionId]
   );
 
   // Handle slash commands
@@ -334,8 +376,11 @@ export function App() {
       try {
         if (lower === "/clear") {
           await sendClear();
-          setMessages([]);
-          setTurnCount(0);
+          const sid = currentSessionId;
+          if (sid) {
+            setBuffers((prev) => ({ ...prev, [sid]: [] }));
+            setTurnCounts((prev) => ({ ...prev, [sid]: 0 }));
+          }
           showToast("已清空历史");
         } else if (lower === "/compact") {
           await sendCompact();
@@ -349,7 +394,7 @@ export function App() {
         showToast(`命令执行失败：${err}`);
       }
     },
-    [showToast]
+    [showToast, currentSessionId]
   );
 
   // Handle permission dialog response
@@ -372,8 +417,8 @@ export function App() {
     try {
       const meta = await createSession();
       setCurrentSessionId(meta.id);
-      setMessages([]);
-      setTurnCount(0);
+      setBuffers((prev) => ({ ...prev, [meta.id]: [] }));
+      setTurnCounts((prev) => ({ ...prev, [meta.id]: 0 }));
       await refreshSessions();
     } catch (err) {
       showToast(`创建会话失败：${err}`);
@@ -382,28 +427,23 @@ export function App() {
 
   const handleSelectSession = useCallback(async (id: string) => {
     if (id === currentSessionId) return;
+    setCurrentSessionId(id);
+
+    // 已有缓存（含正在运行的会话）：保留实时视图，切回即恢复思考/流式与工具卡片。
+    if (buffersRef.current[id]) {
+      // 仅在空闲时回同步后端活跃会话（GET 会 swap 后端 State）；
+      // busy 时跳过 swap，避免打断正在运行的轮次上下文。
+      if (!busyRef.current) {
+        try { await loadSession(id); } catch { /* 忽略：仅用于同步后端活跃会话 */ }
+      }
+      return;
+    }
+
+    // 无缓存：从后端加载（swap 活跃会话）并无损重建历史
     try {
       const record = await loadSession(id);
-      setCurrentSessionId(id);
-      // Convert backend messages (fsm.Message format) to ChatMessage format
-      const converted: ChatMessage[] = [];
-      if (record.messages) {
-        for (const msg of record.messages) {
-          const m = msg as Record<string, unknown>;
-          if (m.role === "user") {
-            converted.push({ _id: genId(), role: "user", content: String(m.content || "") });
-          } else if (m.role === "assistant") {
-            if (m.reasoning_content) {
-              converted.push({ _id: genId(), role: "reasoning", content: String(m.reasoning_content) });
-            }
-            converted.push({ _id: genId(), role: "assistant", content: String(m.content || "") });
-          } else if (m.role === "tool" && m.tool_call_id) {
-            // Skip tool messages for cleaner display
-          }
-        }
-      }
-      setMessages(converted);
-      setTurnCount(record.turn_count || 0);
+      setBuffers((prev) => ({ ...prev, [id]: reconstructMessages(record.messages, genId) }));
+      setTurnCounts((prev) => ({ ...prev, [id]: record.turn_count || 0 }));
     } catch (err) {
       showToast(`加载会话失败：${err}`);
     }
@@ -413,6 +453,9 @@ export function App() {
     if (!confirm("确定要删除这个会话吗？")) return;
     try {
       await deleteSession(id);
+      // 清除该会话的前端缓存，避免残留
+      setBuffers((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      setTurnCounts((prev) => { const n = { ...prev }; delete n[id]; return n; });
       if (id === currentSessionId) {
         // Refresh and select latest
         const list = await fetchSessions();
@@ -444,7 +487,15 @@ export function App() {
   // Auto-select first session on initial load
   useEffect(() => {
     if (!currentSessionId && sessions.length > 0) {
-      setCurrentSessionId(sessions[0].id);
+      const id = sessions[0].id;
+      setCurrentSessionId(id);
+      // 首屏加载该会话历史并无损重建，避免首个会话显示空白
+      loadSession(id)
+        .then((record) => {
+          setBuffers((prev) => (prev[id] ? prev : { ...prev, [id]: reconstructMessages(record.messages, genId) }));
+          setTurnCounts((prev) => ({ ...prev, [id]: record.turn_count || 0 }));
+        })
+        .catch(() => { /* 忽略：首屏加载失败时保持空缓冲 */ });
     }
   }, [sessions, currentSessionId]);
 
@@ -512,6 +563,7 @@ export function App() {
     try {
       await sendStop();
       finishTypewriter();
+      busyRef.current = false;
       setBusy(false);
       setAgentPhase("idle");
       setCurrentToolName("");
@@ -540,8 +592,8 @@ export function App() {
         />
         <MessageList
           messages={messages}
-          agentPhase={agentPhase}
-          toolName={currentToolName}
+          agentPhase={displayPhase}
+          toolName={displayTool}
           onSuggestion={handleSend}
         />
         {currentToast && <div class="toast">{currentToast}</div>}

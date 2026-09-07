@@ -108,6 +108,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					CreatedAt: createdAt,
 					UpdatedAt: time.Now(),
 					Model:     s.ModelName,
+					WorkDir:   webSess.WorkDir(),
 					TurnCount: s.State.TurnCount,
 					Messages:  s.State.Messages,
 				}
@@ -229,6 +230,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 				Model:     s.ModelName,
+				WorkDir:   s.ToolCtx.WorkPath,
 				TurnCount: s.State.TurnCount,
 				Messages:  s.State.Messages,
 			}

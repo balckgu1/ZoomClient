@@ -29,6 +29,7 @@ export interface SessionMeta {
   created_at: string;
   updated_at: string;
   turn_count: number;
+  workdir: string;
 }
 
 // 后端持久化的原始工具调用（对应 Go 的 tools.ToolCall）

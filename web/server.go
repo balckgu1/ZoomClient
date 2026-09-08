@@ -13,6 +13,7 @@ import (
 	"zoomClient/permission"
 	"zoomClient/prompt"
 	"zoomClient/session"
+	"zoomClient/skills"
 	"zoomClient/tools"
 	"zoomClient/utils"
 )
@@ -22,13 +23,14 @@ import (
 // 使用结构体而非一长串位置参数，便于后续扩展新能力（如新增管理器）时
 // 只需增加字段，而不必改动所有调用方的参数顺序，提升可维护性。
 type ServerDeps struct {
-	Session       *Session               // Web 会话（命令/事件通道、权限交互、工作目录镜像）
-	SessionMgr    *session.Manager       // 会话持久化管理器
-	ModelRegistry *model.Registry        // 模型预设注册表
-	ToolCtx       *tools.ToolContext     // 工具上下文（含工作目录 WorkPath）
-	PermissionMgr *permission.Manager    // 权限管理器（模式 + deny/allow 规则）
+	Session       *Session                // Web 会话（命令/事件通道、权限交互、工作目录镜像）
+	SessionMgr    *session.Manager        // 会话持久化管理器
+	ModelRegistry *model.Registry         // 模型预设注册表
+	SkillRegistry *skills.SkillRegistry   // skill 注册表（对外提供技能目录）
+	ToolCtx       *tools.ToolContext      // 工具上下文（含工作目录 WorkPath）
+	PermissionMgr *permission.Manager     // 权限管理器（模式 + deny/allow 规则）
 	Pipeline      *prompt.MessagePipeline // 系统提示词组装管道（切换工作目录时热更新）
-	Config        *utils.Config          // 全局配置（用于展示只读信息，如 interactive）
+	Config        *utils.Config           // 全局配置（用于展示只读信息，如 interactive）
 }
 
 // Server 封装 HTTP Server
@@ -36,6 +38,7 @@ type Server struct {
 	session       *Session
 	sessionMgr    *session.Manager
 	modelRegistry *model.Registry
+	skillRegistry *skills.SkillRegistry
 	toolCtx       *tools.ToolContext
 	permissionMgr *permission.Manager
 	pipeline      *prompt.MessagePipeline
@@ -52,6 +55,7 @@ func NewServer(deps ServerDeps, port int) *Server {
 		session:       deps.Session,
 		sessionMgr:    deps.SessionMgr,
 		modelRegistry: deps.ModelRegistry,
+		skillRegistry: deps.SkillRegistry,
 		toolCtx:       deps.ToolCtx,
 		permissionMgr: deps.PermissionMgr,
 		pipeline:      deps.Pipeline,
@@ -92,6 +96,9 @@ func (s *Server) registerRoutes() {
 
 	// ─── 工作目录端点（GET 查询 / POST 切换）───
 	s.mux.HandleFunc("/api/workdir", s.handleWorkDir)
+
+	// ─── 技能目录端点（GET 列出全部已加载 skill，供输入框 "/" 扩展框使用）───
+	s.mux.HandleFunc("/api/skills", s.handleSkills)
 
 	// ─── 权限配置端点（GET 查询 / PUT 运行时更新模式与规则）───
 	s.mux.HandleFunc("/api/permission/config", s.handlePermissionConfig)

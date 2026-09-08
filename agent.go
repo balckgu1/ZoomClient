@@ -12,6 +12,7 @@ import (
 	"zoomClient/permission"
 	"zoomClient/prompt"
 	"zoomClient/session"
+	"zoomClient/skills"
 	"zoomClient/tools"
 	"zoomClient/utils"
 )
@@ -24,6 +25,7 @@ type AgentSession struct {
 	ModelName       string
 	ModelRegistry   *model.Registry
 	Pipeline        *prompt.MessagePipeline
+	SkillRegistry   *skills.SkillRegistry // skill 注册表（Web 模式对外提供技能目录）
 	Registry        *tools.ToolRegister
 	ToolCtx         *tools.ToolContext
 	TodoManager     *tools.TodoManager

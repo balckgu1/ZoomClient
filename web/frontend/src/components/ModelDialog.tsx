@@ -1,6 +1,7 @@
 import { useState, useEffect } from "preact/hooks";
 import type { ModelPreset } from "../types";
 import { testModel } from "../lib/api";
+import { IconCheck, IconClose, IconSpark } from "../lib/icons";
 
 interface Props {
   mode: "add" | "edit";
@@ -9,6 +10,9 @@ interface Props {
   onClose: () => void;
 }
 
+// ModelDialog —— 添加 / 编辑模型预设的模态表单。
+// 名称在编辑态时被锁定（它是更新别的字段的锚点），其余字段可自由修改，
+// 底部提供"测试连通性"与"保存"两组动作。
 export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
   const [name, setName] = useState("");
   const [type, setType] = useState("openai");
@@ -68,7 +72,9 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
       <div class="model-dialog" onClick={(e) => e.stopPropagation()}>
         <div class="model-dialog__header">
           <h3>{title}</h3>
-          <button class="model-dialog__close" onClick={onClose}>&times;</button>
+          <button class="model-dialog__close" onClick={onClose} aria-label="关闭">
+            <IconClose size={14} />
+          </button>
         </div>
         <div class="model-dialog__body">
           <label class="model-dialog__field">
@@ -121,18 +127,18 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
 
           {testResult && (
             <div class={`model-dialog__test-result ${testResult.ok ? "test-ok" : "test-fail"}`}>
-              {testResult.ok ? "✅ " : "❌ "}
-              {testResult.msg}
+              {testResult.ok ? <IconCheck size={14} /> : <IconClose size={14} />}
+              <span>{testResult.msg}</span>
             </div>
           )}
         </div>
         <div class="model-dialog__footer">
-          <button class="model-dialog__btn btn-test" onClick={handleTest} disabled={testing}>
-            {testing ? "测试中…" : "测试"}
+          <button class="btn btn--ghost" onClick={handleTest} disabled={testing}>
+            <IconSpark size={14} /> {testing ? "测试中…" : "测试"}
           </button>
           <div class="model-dialog__footer-right">
-            <button class="model-dialog__btn btn-cancel" onClick={onClose}>取消</button>
-            <button class="model-dialog__btn btn-save" onClick={handleSave} disabled={!name.trim()}>
+            <button class="btn btn--ghost" onClick={onClose}>取消</button>
+            <button class="btn btn--primary" onClick={handleSave} disabled={!name.trim()}>
               保存
             </button>
           </div>

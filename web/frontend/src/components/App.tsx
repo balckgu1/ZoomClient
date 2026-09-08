@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type {
   ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
-  PermissionConfig, PermissionMode, ContextUsage,
+  PermissionConfig, PermissionMode, ContextUsage, SkillMeta,
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
 import { reconstructMessages } from "../lib/history";
+import { findSkill, parseSlashInput, skillPrompt } from "../lib/slash";
 import {
   sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
   fetchModels, addModel, selectModel, updateModel,
   fetchWorkDir, setWorkDir, fetchPermissionConfig, updatePermissionConfig,
-  fetchContextUsage,
+  fetchContextUsage, fetchSkills,
 } from "../lib/api";
 import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
@@ -20,6 +21,16 @@ import { PermissionDialog } from "./PermissionDialog";
 import { WorkDirPanel } from "./WorkDirPanel";
 import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
+import { IconAlert, IconCheck, IconSpark } from "../lib/icons";
+
+// ToastTone 是轻提示的三种语气：普通消息、成功、失败。
+type ToastTone = "info" | "ok" | "error";
+
+// ToastItem 队列条目：文本 + 语气。
+interface ToastItem {
+  text: string;
+  tone: ToastTone;
+}
 
 export function App() {
   // 按会话维护独立的消息缓冲区：切换会话只改变"显示哪个缓冲"，不丢弃任何会话的实时状态。
@@ -40,9 +51,13 @@ export function App() {
   const busyRef = useRef(false);
   // buffersRef：buffers 的 ref 镜像，供 handleSelectSession 判断目标会话是否已有缓存。
   const buffersRef = useRef<Record<string, ChatMessage[]>>({});
-  // Toast queue: multiple toasts are queued and shown sequentially
-  const [toastQueue, setToastQueue] = useState<string[]>([]);
-  const [currentToast, setCurrentToast] = useState<string | null>(null);
+  // Toast 队列：多条提示排队依次展示。
+  // tone 决定图标与描边色——成功、失败、普通消息不该长成同一个样子。
+  const [toastQueue, setToastQueue] = useState<ToastItem[]>([]);
+  const [currentToast, setCurrentToast] = useState<ToastItem | null>(null);
+
+  // skills 为后端已加载的技能目录，驱动输入框 "/" 扩展框的技能分区
+  const [skills, setSkills] = useState<SkillMeta[]>([]);
 
   // Session state
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
@@ -124,9 +139,9 @@ export function App() {
     streamingMsgIdx.current = -1;
   }, [updateRunning]);
 
-  // Show a toast message briefly. Multiple toasts are queued and shown sequentially.
-  const showToast = useCallback((msg: string) => {
-    setToastQueue((prev) => [...prev, msg]);
+  // showToast 入队一条轻提示。tone 缺省为 info，只有明确的成败才需要指定。
+  const showToast = useCallback((text: string, tone: ToastTone = "info") => {
+    setToastQueue((prev) => [...prev, { text, tone }]);
   }, []);
 
   // Process toast queue: show next when current disappears
@@ -191,6 +206,17 @@ export function App() {
     }
   }, []);
 
+  // refreshSkills 拉取已加载的技能目录（GET /api/skills），驱动 "/" 扩展框。
+  // skill 属于可选能力：目录拉取失败时保持空列表即可，不打扰用户。
+  const refreshSkills = useCallback(async () => {
+    try {
+      const list = await fetchSkills();
+      setSkills(list || []);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Start typewriter effect for a given assistant message
   const startTypewriter = useCallback((fullText: string, msgIdx: number) => {
     // Clear any existing timer
@@ -244,11 +270,11 @@ export function App() {
       } else if (event === "info") {
         showToast(d.message || "");
       } else if (event === "error") {
-        showToast(`错误 [${d.scope}]：${d.message}`);
+        showToast(`错误 [${d.scope}]：${d.message}`, "error");
       } else if (event === "compact") {
         const before = d.before_bytes || "?";
         const after = d.after_bytes || "?";
-        showToast(`已压缩上下文：${before} → ${after} 字节`);
+        showToast(`已压缩上下文：${before} → ${after} 字节`, "ok");
       } else if (event === "permission_ask") {
         setPermission({
           id: d.id,
@@ -267,7 +293,7 @@ export function App() {
       } else if (event === "workdir_changed") {
         // 工作目录切换成功后由后端回推，更新本地显示
         setWorkDirState(d.path || "");
-        showToast(`工作目录已切换：${d.path || ""}`);
+        showToast(`工作目录已切换：${d.path || ""}`, "ok");
       } else if (event === "context_usage") {
         // 上下文占用快照：后端每轮/压缩/清空后推送，驱动右下角指示器
         const usage = d.usage as unknown as ContextUsage | undefined;
@@ -364,8 +390,9 @@ export function App() {
     refreshWorkDir();
     refreshPermission();
     refreshContextUsage();
+    refreshSkills();
     return disconnect;
-  }, [handleSSEEvent, refreshSessions, refreshModels, refreshWorkDir, refreshPermission, refreshContextUsage]);
+  }, [handleSSEEvent, refreshSessions, refreshModels, refreshWorkDir, refreshPermission, refreshContextUsage, refreshSkills]);
 
   // Send a chat message
   const handleSend = useCallback(
@@ -382,38 +409,53 @@ export function App() {
         busyRef.current = false;
         setBusy(false);
         setAgentPhase("idle");
-        showToast(`发送失败：${err}`);
+        showToast(`发送失败：${err}`, "error");
       }
     },
     [showToast, updateRunning, currentSessionId]
   );
 
-  // Handle slash commands
+  // handleSlashCommand 处理输入框提交上来的斜杠行。
+  //
+  // 首个 token 决定意图：
+  //   · /clear、/compact、/exit 是 Web 模式真正接了后端分支的内置命令，就地执行；
+  //   · 命中已加载技能名时，翻译成一条"先 load_skill 再干活"的普通对话消息发出去——
+  //     技能正文不在上下文里，必须由模型主动调工具载入；
+  //   · 其余一律提示未知命令，不静默丢弃用户输入。
   const handleSlashCommand = useCallback(
     async (cmd: string) => {
-      const lower = cmd.toLowerCase().trim();
+      const { head, name, rest } = parseSlashInput(cmd);
       try {
-        if (lower === "/clear") {
+        if (head === "/clear") {
           await sendClear();
           const sid = currentSessionId;
           if (sid) {
             setBuffers((prev) => ({ ...prev, [sid]: [] }));
             setTurnCounts((prev) => ({ ...prev, [sid]: 0 }));
           }
-          showToast("已清空历史");
-        } else if (lower === "/compact") {
+          showToast("已清空历史", "ok");
+          return;
+        }
+        if (head === "/compact") {
           await sendCompact();
-        } else if (lower === "/exit") {
+          return;
+        }
+        if (head === "/exit") {
           await sendExit();
           showToast("会话正在结束…");
-        } else {
-          showToast(`未知命令：${cmd}`);
+          return;
         }
+        const skill = findSkill(skills, name);
+        if (skill) {
+          await handleSend(skillPrompt(skill, rest));
+          return;
+        }
+        showToast(`未知命令：${head}`, "error");
       } catch (err) {
-        showToast(`命令执行失败：${err}`);
+        showToast(`命令执行失败：${err}`, "error");
       }
     },
-    [showToast, currentSessionId]
+    [showToast, currentSessionId, skills, handleSend]
   );
 
   // Handle permission dialog response
@@ -423,7 +465,7 @@ export function App() {
       try {
         await sendPermission(permission.id, allow, reason);
       } catch (err) {
-        showToast(`权限响应失败：${err}`);
+        showToast(`权限响应失败：${err}`, "error");
       }
       setPermission(null);
     },
@@ -440,7 +482,7 @@ export function App() {
       setTurnCounts((prev) => ({ ...prev, [meta.id]: 0 }));
       await refreshSessions();
     } catch (err) {
-      showToast(`创建会话失败：${err}`);
+      showToast(`创建会话失败：${err}`, "error");
     }
   }, [refreshSessions, showToast]);
 
@@ -464,7 +506,7 @@ export function App() {
       setBuffers((prev) => ({ ...prev, [id]: reconstructMessages(record.messages, genId) }));
       setTurnCounts((prev) => ({ ...prev, [id]: record.turn_count || 0 }));
     } catch (err) {
-      showToast(`加载会话失败：${err}`);
+      showToast(`加载会话失败：${err}`, "error");
     }
   }, [currentSessionId, showToast]);
 
@@ -488,7 +530,7 @@ export function App() {
         await refreshSessions();
       }
     } catch (err) {
-      showToast(`删除失败：${err}`);
+      showToast(`删除失败：${err}`, "error");
     }
   }, [currentSessionId, refreshSessions, handleSelectSession, handleNewSession, showToast]);
 
@@ -499,7 +541,7 @@ export function App() {
         prev.map((s) => (s.id === id ? { ...s, title } : s))
       );
     } catch (err) {
-      showToast(`重命名失败：${err}`);
+      showToast(`重命名失败：${err}`, "error");
     }
   }, [showToast]);
 
@@ -527,7 +569,7 @@ export function App() {
       setModel(name);
       showToast(`正在切换到模型"${name}"…`);
     } catch (err) {
-      showToast(`切换模型失败：${err}`);
+      showToast(`切换模型失败：${err}`, "error");
     }
   }, [showToast]);
 
@@ -535,9 +577,9 @@ export function App() {
     try {
       await addModel(preset);
       await refreshModels();
-      showToast(`已添加模型"${preset.name}"`);
+      showToast(`已添加模型"${preset.name}"`, "ok");
     } catch (err) {
-      showToast(`添加模型失败：${err}`);
+      showToast(`添加模型失败：${err}`, "error");
     }
   }, [refreshModels, showToast]);
 
@@ -545,9 +587,9 @@ export function App() {
     try {
       await updateModel(name, preset);
       await refreshModels();
-      showToast(`已更新模型"${name}"`);
+      showToast(`已更新模型"${name}"`, "ok");
     } catch (err) {
-      showToast(`编辑模型失败：${err}`);
+      showToast(`编辑模型失败：${err}`, "error");
     }
   }, [refreshModels, showToast]);
 
@@ -558,7 +600,7 @@ export function App() {
       await setWorkDir(path);
       showToast("已提交工作目录切换请求…");
     } catch (err) {
-      showToast(`切换工作目录失败：${err}`);
+      showToast(`切换工作目录失败：${err}`, "error");
     }
   }, [showToast]);
 
@@ -571,9 +613,9 @@ export function App() {
     try {
       const updated = await updatePermissionConfig(cfg);
       setPermissionConfig(updated);
-      showToast("权限配置已更新");
+      showToast("权限配置已更新", "ok");
     } catch (err) {
-      showToast(`更新权限配置失败：${err}`);
+      showToast(`更新权限配置失败：${err}`, "error");
     }
   }, [showToast]);
 
@@ -588,7 +630,7 @@ export function App() {
       setCurrentToolName("");
       showToast("已停止生成");
     } catch (err) {
-      showToast(`停止失败：${err}`);
+      showToast(`停止失败：${err}`, "error");
     }
   }, [finishTypewriter, showToast]);
 
@@ -598,7 +640,7 @@ export function App() {
     try {
       await sendCompact();
     } catch (err) {
-      showToast(`压缩失败：${err}`);
+      showToast(`压缩失败：${err}`, "error");
     }
   }, [showToast]);
 
@@ -625,7 +667,16 @@ export function App() {
           toolName={displayTool}
           onSuggestion={handleSend}
         />
-        {currentToast && <div class="toast">{currentToast}</div>}
+        {currentToast && (
+          <div class={`toast ${currentToast.tone === "ok" ? "toast--ok" : currentToast.tone === "error" ? "toast--error" : ""}`}>
+            {currentToast.tone === "ok"
+              ? <IconCheck size={14} />
+              : currentToast.tone === "error"
+                ? <IconAlert size={14} />
+                : <IconSpark size={14} />}
+            <span>{currentToast.text}</span>
+          </div>
+        )}
         {permission && (
           <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
         )}
@@ -637,10 +688,10 @@ export function App() {
           models={models}
           activeModel={activeModel}
           contextUsage={contextUsage}
+          skills={skills}
           onSend={handleSend}
           onSlashCommand={handleSlashCommand}
           onStop={handleStop}
-          onNewSession={handleNewSession}
           onOpenWorkDir={() => setShowWorkDir(true)}
           onOpenPermission={() => setShowPermission(true)}
           onSelectModel={handleModelSelect}

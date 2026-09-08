@@ -11,6 +11,7 @@ import (
 	"zoomClient/fsm"
 	"zoomClient/model"
 	"zoomClient/permission"
+	"zoomClient/skills"
 )
 
 // handleSSE 建立 SSE 长连接，将 Session.EventCh 中的事件以 text/event-stream 格式推送。
@@ -460,6 +461,32 @@ func (s *Server) handleWorkDir(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ─── 技能目录 ───
+
+// skillsResponse GET /api/skills 的响应体。
+type skillsResponse struct {
+	Skills []skills.SkillManifest `json:"skills"`
+	Count  int                    `json:"count"`
+}
+
+// handleSkills 处理 GET /api/skills：列出全部已加载的 skill 元信息。
+//
+// 前端在输入框键入 "/" 时用该目录渲染扩展框，用户选中后以对话消息的形式
+// 触发模型调用 load_skill 工具载入完整技能正文，因此这里只需返回展示字段。
+// skill 属于可选能力：注册表未注入或目录为空时返回空列表，而不是错误。
+func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := skillsResponse{Skills: []skills.SkillManifest{}}
+	if s.skillRegistry != nil {
+		resp.Skills = s.skillRegistry.Manifests()
+		resp.Count = len(resp.Skills)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ─── 权限配置管理 ───

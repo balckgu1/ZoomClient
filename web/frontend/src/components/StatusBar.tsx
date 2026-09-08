@@ -1,5 +1,6 @@
 import type { AppState } from "../types";
 import { workDirBaseName } from "../lib/labels";
+import { IconFolder } from "../lib/icons";
 
 interface Props {
   status: AppState;
@@ -7,24 +8,29 @@ interface Props {
   workDir: string;
 }
 
-// StatusBar —— 主区域顶部的纤细状态条。
-// 左侧展示当前工作目录面包屑，右侧展示连接状态与对话轮次。
+// StatusBar —— 主区域顶部的状态条。
+// 左侧是当前工作目录面包屑（带一盏"灯丝"指示智能体是否在运行），
+// 右侧展示连接状态与对话轮次。
 export function StatusBar({ status, workDir }: Props) {
   return (
-    <header class="topbar">
+    <header class={`topbar ${status.busy ? "is-live" : ""}`}>
       <div class="topbar__left">
-        <span class="topbar__crumb-icon">📁</span>
+        <span class="eyebrow">workspace</span>
         <span class="topbar__crumb" title={workDir || "未设置工作目录"}>
-          {workDirBaseName(workDir)}
+          <IconFolder size={13} />
+          <span class="topbar__crumb-name">{workDirBaseName(workDir)}</span>
         </span>
-        {status.busy && <span class="topbar__busy">处理中…</span>}
+        <span class="topbar__crumb-path" title={workDir}>{workDir || "未设置"}</span>
       </div>
       <div class="topbar__right">
-        <span class={`conn-dot ${status.connected ? "connected" : "disconnected"}`} />
-        <span class="topbar__conn">{status.connected ? "已连接" : "未连接"}</span>
-        {status.turnCount > 0 && (
-          <span class="turn-badge">第 {status.turnCount} 轮</span>
-        )}
+        <span class="filament" aria-hidden="true" />
+        <span class="topbar__turn">
+          <span class="eyebrow">turn</span> {status.turnCount}
+        </span>
+        <span class={`topbar__conn ${status.connected ? "is-on" : "is-off"}`}>
+          <span class="led led--on" aria-hidden="true" />
+          {status.connected ? "已连接" : "未连接"}
+        </span>
       </div>
     </header>
   );

@@ -33,6 +33,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 		Session:       webSess,
 		SessionMgr:    sessMgr,
 		ModelRegistry: s.ModelRegistry,
+		SkillRegistry: s.SkillRegistry,
 		ToolCtx:       s.ToolCtx,
 		PermissionMgr: s.PermissionMgr,
 		Pipeline:      s.Pipeline,

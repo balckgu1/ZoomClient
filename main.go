@@ -140,7 +140,8 @@ func main() {
 		State: state, Cfg: cfg, Client: client, ModelName: modelname,
 		ModelRegistry: modelRegistry,
 		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
-		TodoManager: todoManager, CompactManager: compactManager,
+		SkillRegistry: skillregistry,
+		TodoManager:   todoManager, CompactManager: compactManager,
 		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
 	}
 

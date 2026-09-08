@@ -12,10 +12,12 @@ interface Props {
   streaming?: boolean;
 }
 
+// AssistantMessage —— 智能体回复：满宽纯正文，不戴气泡不戴头像。
+// 流式输出时退化为纯文本 + 光标，避免每帧重新解析 Markdown（性能优化）。
 export function AssistantMessage({ content, streaming }: Props) {
-  // 流式输出时使用纯文本渲染，避免每帧都重新解析 Markdown（性能优化）
+  // 流式时使用纯文本渲染，逐字符更新不高频触发 marked 解析
   const html = useMemo(() => {
-    if (streaming) return null; // 流式时不解析
+    if (streaming) return null;
     try {
       return marked.parse(content || "") as string;
     } catch {
@@ -24,16 +26,15 @@ export function AssistantMessage({ content, streaming }: Props) {
   }, [content, streaming]);
 
   return (
-    <div class="message assistant-message">
-      <div class="avatar">🤖</div>
-      <div class={`bubble assistant-bubble${streaming ? " streaming" : ""}`}>
-        {streaming ? (
+    <div class="msg-assistant">
+      {streaming ? (
+        <>
           <span class="md-plaintext">{content || ""}</span>
-        ) : (
-          <div class="md-content" dangerouslySetInnerHTML={{ __html: html || "" }} />
-        )}
-        {streaming && <span class="typing-cursor">|</span>}
-      </div>
+          <span class="caret" aria-hidden="true" />
+        </>
+      ) : (
+        <div class="md-content" dangerouslySetInnerHTML={{ __html: html || "" }} />
+      )}
     </div>
   );
 }

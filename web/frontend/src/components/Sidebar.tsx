@@ -1,6 +1,9 @@
 import { useState } from "preact/hooks";
 import type { SessionMeta } from "../types";
 import { workDirBaseName } from "../lib/labels";
+import {
+  IconBolt, IconFolder, IconPlus, IconPencil, IconTrash,
+} from "../lib/icons";
 
 interface SidebarProps {
   sessions: SessionMeta[];
@@ -38,7 +41,7 @@ function groupByWorkspace(sessions: SessionMeta[]) {
   return groups;
 }
 
-// Sidebar —— 左侧导航栏：品牌区 + 新建会话 + 分组会话列表 + 底部状态。
+// Sidebar —— 左侧导航栏：品牌区 + 新建会话 + 按工作区分组的会话列表 + 底部状态。
 export function Sidebar({
   sessions,
   currentId,
@@ -78,32 +81,39 @@ export function Sidebar({
     <aside class="sidebar">
       {/* 品牌区 */}
       <div class="sidebar__brand">
-        <span class="sidebar__logo">⚡</span>
+        <span class="sidebar__mark"><IconBolt size={15} /></span>
         <span class="sidebar__name">ZoomClient</span>
+        <span class="sidebar__mode">web</span>
       </div>
 
       {/* 主操作：新建会话 */}
-      <button class="sidebar-new" onClick={onNew}>
-        ＋ 新对话
+      <button class="sidebar__new" onClick={onNew}>
+        <IconPlus size={14} />
+        新对话
+        <kbd class="kbd">Ctrl N</kbd>
       </button>
 
       {/* 会话列表 */}
-      <div class="sidebar-list">
+      <div class="sidebar__scroll">
         {groups.length === 0 && (
-          <div class="sidebar-empty">暂无会话，点击上方"新对话"开始</div>
+          <div class="sidebar__empty">暂无会话，点击上方"新对话"开始</div>
         )}
         {groups.map((group) => (
-          <div key={group.label} class="sidebar-group">
-            <div class="sidebar-group-label" title={group.title}>{group.label}</div>
+          <div key={group.label} class="sidebar__group">
+            <div class="sidebar__group-label" title={group.title}>
+              <IconFolder size={11} />
+              <span class="sidebar__group-name">{group.label}</span>
+              <span class="sidebar__group-count">{group.items.length}</span>
+            </div>
             {group.items.map((s) => (
               <div
                 key={s.id}
-                class={`sidebar-item ${s.id === currentId ? "active" : ""}`}
+                class={`sidebar__item ${s.id === currentId ? "is-active" : ""}`}
                 onClick={() => onSelect(s.id)}
               >
                 {editingId === s.id ? (
                   <input
-                    class="sidebar-rename-input"
+                    class="sidebar__rename"
                     value={editTitle}
                     onInput={(e) => setEditTitle((e.target as HTMLInputElement).value)}
                     onKeyDown={handleKeyDown}
@@ -113,27 +123,27 @@ export function Sidebar({
                   />
                 ) : (
                   <>
-                    <span class="sidebar-title">{s.title}</span>
-                    <div class="sidebar-actions">
+                    <span class="sidebar__title">{s.title}</span>
+                    <div class="sidebar__tools">
                       <button
-                        class="sidebar-action-btn"
+                        class="sidebar__tool"
                         title="重命名"
                         onClick={(e) => {
                           e.stopPropagation();
                           startRename(s.id, s.title);
                         }}
                       >
-                        ✏️
+                        <IconPencil size={12} />
                       </button>
                       <button
-                        class="sidebar-action-btn sidebar-action-delete"
+                        class="sidebar__tool sidebar__tool--danger"
                         title="删除"
                         onClick={(e) => {
                           e.stopPropagation();
                           onDelete(s.id);
                         }}
                       >
-                        🗑️
+                        <IconTrash size={12} />
                       </button>
                     </div>
                   </>
@@ -145,14 +155,14 @@ export function Sidebar({
       </div>
 
       {/* 底部状态区 */}
-      <div class="sidebar__footer">
-        <div class="sidebar__footer-row" title={workDir || "未设置工作目录"}>
-          <span class="sidebar__footer-icon">📁</span>
-          <span class="sidebar__footer-text">{workDirBaseName(workDir)}</span>
+      <div class="sidebar__foot">
+        <div class="sidebar__foot-row" title={workDir || "未设置工作目录"}>
+          <IconFolder size={12} />
+          <span class="sidebar__foot-text">{workDirBaseName(workDir)}</span>
         </div>
-        <div class="sidebar__footer-row">
-          <span class={`conn-dot ${connected ? "connected" : "disconnected"}`} />
-          <span class="sidebar__footer-text">{connected ? "已连接" : "未连接"}</span>
+        <div class="sidebar__foot-row">
+          <span class={`led ${connected ? "led--on" : "led--off"}`} />
+          <span class="sidebar__foot-text">{connected ? "已连接" : "未连接"}</span>
         </div>
       </div>
     </aside>

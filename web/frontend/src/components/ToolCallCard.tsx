@@ -1,4 +1,5 @@
 import { useState } from "preact/hooks";
+import { IconCheck, IconChevronRight, IconClose, IconWrench } from "../lib/icons";
 
 interface Props {
   name: string;
@@ -16,42 +17,57 @@ function safeTruncate(str: string, maxLen: number): string {
 
 const RESULT_PREVIEW_LEN = 300;
 
+// ToolCallCard —— 工具调用：蓝色色轨 + 可折叠参数与结果。
+// 头部一行承载"名字 + 状态 + 行数/字节 + 展开箭头"，正文按需展开，
+// 让频繁的工具调用在对话流里保持低视觉噪音。
 export function ToolCallCard({ name, args, result, isError }: Props) {
   const isPending = result === undefined;
-  const statusIcon = isPending ? null : isError ? "❌" : "✅";
   const [expanded, setExpanded] = useState(false);
+  const toggle = () => setExpanded((v) => !v);
 
   const lines = result ? result.split("\n").length : 0;
+  const bytes = result ? result.length : 0;
   const needsTruncate = result !== undefined && result.length > RESULT_PREVIEW_LEN;
   const displayResult = expanded || !needsTruncate
     ? result || ""
     : safeTruncate(result || "", RESULT_PREVIEW_LEN);
 
+  // 状态图标：等待=旋转的扳手、成功=绿勾、失败=红叉
+  const stateClass = isPending ? "tool__state--wait" : isError ? "tool__state--err" : "tool__state--ok";
+  const stateIcon = isPending
+    ? <IconWrench size={13} />
+    : isError
+      ? <IconClose size={13} />
+      : <IconCheck size={13} />;
+
   return (
-    <div class={`message tool-card ${isError ? "tool-error" : ""}`}>
-      <div class="tool-header">
-        {isPending ? (
-          <span class="tool-pending-icon">⏳</span>
-        ) : (
-          <span class="tool-icon">{statusIcon}</span>
-        )}
-        <span class="tool-name">{name}</span>
-      </div>
-      {args && <pre class="tool-args">{args}</pre>}
-      {result !== undefined && (
-        <div class="tool-result">
-          <span class="tool-meta">
-            {lines} lines / {result.length} bytes
-            {needsTruncate && (
-              <button
-                class="tool-expand-btn"
-                onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-              >
-                {expanded ? "▲ Collapse" : "▼ Expand"}
-              </button>
-            )}
+    <div class={`rail rail--tool ${isError ? "is-error" : ""} ${isPending ? "is-pending" : ""}`}>
+      <button class="tool__head" onClick={toggle} aria-expanded={expanded}>
+        <span class="tool__kind">tool</span>
+        <span class="tool__name">{name}</span>
+        <span class={`tool__state ${stateClass}`}>{stateIcon}</span>
+        {result !== undefined && (
+          <span class="tool__brief">
+            <span>{lines} 行 / {bytes} 字节</span>
           </span>
-          <pre class="tool-result-content">{displayResult}</pre>
+        )}
+        <span class="tool__chev"><IconChevronRight size={13} /></span>
+      </button>
+
+      {(args || result !== undefined) && expanded && (
+        <div class="tool__body">
+          {args && (
+            <>
+              <span class="tool__label">参数</span>
+              <pre class="tool__args">{args}</pre>
+            </>
+          )}
+          {result !== undefined && (
+            <>
+              <span class="tool__label">结果</span>
+              <pre class={`tool__out ${isError ? "tool__out--err" : ""}`}>{displayResult}</pre>
+            </>
+          )}
         </div>
       )}
     </div>

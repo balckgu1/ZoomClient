@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"zoomClient/compact"
 	"zoomClient/permission"
+	"zoomClient/skills"
 	"zoomClient/utils"
 )
 
@@ -302,5 +305,83 @@ func TestNormalizeRules(t *testing.T) {
 	// 确认未修改原始输入
 	if in[0].Behavior != permission.BehaviorAllow {
 		t.Errorf("normalizeRules mutated its input")
+	}
+}
+
+// ─── 技能目录 ───
+
+// writeSkill 在指定目录下生成一个带 frontmatter 的 SKILL.md，供测试构造真实注册表。
+func writeSkill(t *testing.T, dir, folder, name, description string) {
+	t.Helper()
+	skillDir := filepath.Join(dir, folder)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create skill dir failed: %v", err)
+	}
+	content := "---\nname: " + name + "\ndescription: " + description + "\n---\n# " + name + "\nbody\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write SKILL.md failed: %v", err)
+	}
+}
+
+// TestHandleSkills_ListsLoadedSkills 已加载的 skill 应按名称排序完整返回。
+func TestHandleSkills_ListsLoadedSkills(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, dir, "zeta", "zeta-tool", "Zeta 工具说明")
+	writeSkill(t, dir, "alpha", "alpha-tool", "Alpha 工具说明")
+
+	reg, err := skills.NewSkillRegistry(dir)
+	if err != nil {
+		t.Fatalf("build registry failed: %v", err)
+	}
+	srv := newTestServer(t, permission.ModeDefault, nil, nil)
+	srv.skillRegistry = reg
+
+	rec := doJSON(t, srv, http.MethodGet, "/api/skills", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp skillsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if resp.Count != 2 || len(resp.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got count=%d len=%d", resp.Count, len(resp.Skills))
+	}
+	if resp.Skills[0].Name != "alpha-tool" || resp.Skills[1].Name != "zeta-tool" {
+		t.Errorf("expected skills sorted by name, got %s / %s", resp.Skills[0].Name, resp.Skills[1].Name)
+	}
+	if resp.Skills[0].Description != "Alpha 工具说明" {
+		t.Errorf("expected description returned, got %q", resp.Skills[0].Description)
+	}
+}
+
+// TestHandleSkills_EmptyWhenRegistryMissing 注册表未注入时应返回空数组而非 null，
+// 前端可直接遍历而无需额外判空。
+func TestHandleSkills_EmptyWhenRegistryMissing(t *testing.T) {
+	srv := newTestServer(t, permission.ModeDefault, nil, nil)
+
+	rec := doJSON(t, srv, http.MethodGet, "/api/skills", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"skills":[]`) {
+		t.Errorf("expected empty skills array, got body %s", rec.Body.String())
+	}
+	var resp skillsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if resp.Count != 0 || len(resp.Skills) != 0 {
+		t.Errorf("expected zero skills, got %+v", resp)
+	}
+}
+
+// TestHandleSkills_MethodNotAllowed 非 GET 请求应返回 405。
+func TestHandleSkills_MethodNotAllowed(t *testing.T) {
+	srv := newTestServer(t, permission.ModeDefault, nil, nil)
+	rec := doJSON(t, srv, http.MethodPost, "/api/skills", "")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
 	}
 }

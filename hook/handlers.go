@@ -167,15 +167,21 @@ func PostChatValidate(payload map[string]any) HookResult {
 	retryCount, _ := payload["retry_count"].(int)
 	maxRetries, _ := payload["max_retries"].(int)
 
-	// 空回复 + 无工具调用 → 判定为异常回复，尝试重试
+	// 空回复 + 无工具调用，判定为异常回复，尝试重试
 	if strings.TrimSpace(content) == "" && toolCallsCount == 0 {
+		log.Warn("[hook] LLM returned empty response, retrying",
+			zap.String("model", model),
+			zap.Int("retry_count", retryCount),
+			zap.Int("max_retries", maxRetries),
+		)
+		// 重试次数内返回 ExitRetry 驱动主循环重试
 		if retryCount < maxRetries {
 			return HookResult{
 				ExitCode: ExitRetry,
-				Message:  "LLM returned an empty response, retrying",
+				Message:  "LLM returned an empty response and did not invoke any tools, retrying",
 			}
 		}
-		// 预算耗尽后放行，避免无限重试
+		// 重试次数耗尽后放行，避免无限重试
 		log.Warn("[hook] LLM returned empty response, retry budget exhausted, pass through",
 			zap.String("model", model),
 			zap.Int("retry_count", retryCount),

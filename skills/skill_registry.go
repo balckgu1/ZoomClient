@@ -128,6 +128,21 @@ func (r *SkillRegistry) Names() []string {
 	return names
 }
 
+// Manifests 按名称排序返回全部 skill 的元信息副本。
+//
+// 只暴露 frontmatter 级别的展示字段，不含正文，供 Web 端 /api/skills
+// 构建斜杠菜单使用；返回值是拷贝，调用方修改不会影响注册表内部状态。
+func (r *SkillRegistry) Manifests() []SkillManifest {
+	names := r.Names()
+	out := make([]SkillManifest, 0, len(names))
+	for _, name := range names {
+		if doc, ok := r.skills[name]; ok {
+			out = append(out, doc.Manifest)
+		}
+	}
+	return out
+}
+
 // DescribeAvailable 生成适合塞入 system prompt 的目录文本
 func (r *SkillRegistry) DescribeAvailable() string {
 	if len(r.skills) == 0 {

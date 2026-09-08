@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "preact/hooks";
 import type { ModelPreset } from "../types";
 import { ModelDialog } from "./ModelDialog";
+import { IconCheck, IconChevronDown, IconChevronRight, IconPencil, IconPlus, IconSearch, IconLayers } from "../lib/icons";
 
 interface Props {
   models: ModelPreset[];
@@ -11,6 +12,8 @@ interface Props {
   disabled?: boolean;
 }
 
+// ModelSelector —— 输入板上的模型切换 chip，展开一块菜单。
+// 复写 main > 添加 / 编辑，编辑态另开子菜单列出可选模型。
 export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<"add" | "edit" | null>(null);
@@ -19,7 +22,7 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
   const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside, reset all sub-states
+  // 点击外部收起菜单，复位所有子状态
   const closeDropdown = () => {
     setOpen(false);
     setShowEditSub(false);
@@ -81,21 +84,23 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
   return (
     <div class="model-selector" ref={ref}>
       <button
-        class="model-selector-trigger"
+        class="chip model-selector__trigger"
         onClick={() => !disabled && (open ? closeDropdown() : setOpen(true))}
         disabled={disabled}
         title="切换模型"
       >
-        <span class="model-selector-label">{activeLabel}</span>
-        <span class="model-selector-arrow">{open ? "▲" : "▼"}</span>
+        <IconLayers size={13} />
+        <span class="chip__label">{activeLabel}</span>
+        <IconChevronDown size={11} />
       </button>
 
       {open && (
-        <div class="model-selector-dropdown">
+        <div class="menu">
           {models.length > 3 && (
-            <div class="model-selector-search">
+            <div class="menu__search">
+              <IconSearch size={13} />
               <input
-                class="model-selector-search-input"
+                class="menu__search-input"
                 type="text"
                 placeholder="搜索模型…"
                 value={search}
@@ -105,41 +110,47 @@ export function ModelSelector({ models, active, onSelect, onAdd, onEdit, disable
             </div>
           )}
           {filtered.length === 0 && (
-            <div class="model-selector-empty">{search ? "无匹配模型" : "未配置模型"}</div>
+            <div class="menu__empty">{search ? "无匹配模型" : "未配置模型"}</div>
           )}
           {filtered.map((m) => (
-            <div
+            <button
               key={m.name}
-              class={`model-selector-item ${m.name === active ? "active" : ""}`}
+              class={`menu__item ${m.name === active ? "is-active" : ""}`}
               onClick={() => handleSelect(m.name)}
             >
-              <span class="model-selector-item-name">{m.name}</span>
-              <span class="model-selector-item-meta">{m.type} / {m.model_name}</span>
-              {m.name === active && <span class="model-selector-check">✓</span>}
-            </div>
+              <span class="menu__item-name">{m.name}</span>
+              <span class="menu__item-meta">{m.type} / {m.model_name}</span>
+              {m.name === active && <span class="menu__check"><IconCheck size={13} /></span>}
+            </button>
           ))}
 
-          <div class="model-selector-divider" />
-          <div class="model-selector-item model-selector-add" onClick={handleOpenAdd}>
-            ＋ 添加模型
-          </div>
+          <div class="menu__sep" />
+          <button class="menu__item menu__item--action" onClick={handleOpenAdd}>
+            <IconPlus size={14} />
+            <span class="menu__item-name">添加模型</span>
+          </button>
           {models.length > 0 && (
-            <div class="model-selector-item model-selector-edit" onClick={() => setShowEditSub(!showEditSub)}>
-              <span class="model-selector-edit-label">编辑模型</span>
-              <span class="model-selector-sub-arrow">{showEditSub ? "▼" : "▶"}</span>
-            </div>
+            <button
+              class="menu__item menu__item--action"
+              onClick={() => setShowEditSub(!showEditSub)}
+            >
+              <IconPencil size={14} />
+              <span class="menu__item-name">编辑模型</span>
+              <span class="menu__sub-arrow">
+                {showEditSub ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}
+              </span>
+            </button>
           )}
           {showEditSub &&
             models.map((m) => (
-              <div
+              <button
                 key={`edit-${m.name}`}
-                class="model-selector-item model-selector-sub-item"
+                class="menu__item menu__item--action menu__sub"
                 onClick={() => handleOpenEdit(m)}
               >
-                <span class="model-selector-sub-icon">✎</span>
-                <span class="model-selector-item-name">{m.name}</span>
-                <span class="model-selector-item-meta">{m.type}</span>
-              </div>
+                <span class="menu__item-name">{m.name}</span>
+                <span class="menu__item-meta">{m.type}</span>
+              </button>
             ))}
         </div>
       )}

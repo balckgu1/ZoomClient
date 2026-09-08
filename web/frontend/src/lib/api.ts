@@ -199,3 +199,18 @@ export async function updatePermissionConfig(cfg: {
   const res = await put("/api/permission/config", cfg as unknown as Record<string, unknown>);
   return res.json();
 }
+
+// ─── 技能目录 API ───
+
+import type { SkillMeta } from "../types";
+
+// fetchSkills 拉取全部已加载 skill 的元信息（GET /api/skills），供输入框 "/" 扩展框使用。
+//
+// 后端约定 skills 恒为数组，这里仍兜底一次 null：技能目录属于可选能力，
+// 拉取失败或旧版二进制缺字段时退化为空列表，不应让整个输入框报错。
+export async function fetchSkills(): Promise<SkillMeta[]> {
+  const res = await fetch(`${BASE}/api/skills`);
+  if (!res.ok) throw new Error(res.statusText);
+  const data = await res.json();
+  return (data.skills as SkillMeta[]) || [];
+}

@@ -128,3 +128,21 @@ export interface ContextUsage {
   tools_bytes: number;         // 工具 schema
   messages_bytes: number;      // 消息历史估算
 }
+
+// ─── 技能目录 ───
+
+// 单个 skill 的展示元信息（对应 Go 的 skills.SkillManifest）。
+// 后端只返回 frontmatter 级字段，不含 SKILL.md 正文——正文由模型调用 load_skill 工具载入。
+export interface SkillMeta {
+  name: string;
+  description: string;
+  version?: string;
+  author?: string;
+  compatibility?: string;
+}
+
+// GET /api/skills 的响应体
+export interface SkillsResponse {
+  skills: SkillMeta[];
+  count: number;
+}

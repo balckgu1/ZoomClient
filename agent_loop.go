@@ -168,7 +168,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 			// If todo tool was called and succeeded, render the latest plan panel to user
 			if toolCalls[resultIndex].Name == "todo" && result.Ok {
-				em.EmitTodoPanel(todoManager.Render())
+				em.EmitTodoPanel(todoManager.Render(), todoManager.Items())
 			}
 
 			// Context compact: Layer 1 (large output persistence): when a single tool result is too large, write full content to disk and keep only a preview in the message

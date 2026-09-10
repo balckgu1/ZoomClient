@@ -4,7 +4,10 @@
 // 由 SSE HTTP handler 消费并以 text/event-stream 格式推送给浏览器。
 package web
 
-import "zoomClient/compact"
+import (
+	"zoomClient/compact"
+	"zoomClient/tools"
+)
 
 // SseEmitter 将 agent 事件转为 SSE 事件流。
 type SseEmitter struct {
@@ -100,10 +103,13 @@ func (e *SseEmitter) EmitHookBlocked(toolName, reason string) {
 
 // ─── 计划 / 压缩 ───
 
-func (e *SseEmitter) EmitTodoPanel(rendered string) {
-	e.emit("agent", map[string]string{
+// EmitTodoPanel 推送当前任务计划面板：content 为纯文本渲染（兼容旧逻辑），
+// items 为结构化条目数组（含 id/content/status/progressLabel），驱动前端顶部进度条。
+func (e *SseEmitter) EmitTodoPanel(rendered string, items []tools.PlanItem) {
+	e.emit("agent", map[string]any{
 		"type":    "todo_panel",
 		"content": rendered,
+		"items":   items,
 	})
 }
 

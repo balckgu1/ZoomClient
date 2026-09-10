@@ -4,6 +4,8 @@
 // CLI 模式由 ui.Renderer 实现（终端彩色渲染），API 模式由 ApiEmitter 实现（NDJSON stdout）。
 package emitter
 
+import "zoomClient/tools"
+
 // Emitter 是 agentLoop 所有用户可见事件的输出抽象
 type Emitter interface {
 	// Session生命周期
@@ -38,7 +40,8 @@ type Emitter interface {
 	// 计划 / 压缩
 
 	// EmitTodoPanel 输出当前任务计划面板。
-	EmitTodoPanel(rendered string)
+	// rendered 为纯文本渲染（兼容 CLI），items 为结构化条目（供 Web 前端渲染进度）。
+	EmitTodoPanel(rendered string, items []tools.PlanItem)
 	// EmitCompact 通知上下文压缩已触发。
 	EmitCompact(beforeBytes, afterBytes int)
 

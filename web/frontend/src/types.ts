@@ -146,3 +146,21 @@ export interface SkillsResponse {
   skills: SkillMeta[];
   count: number;
 }
+
+// ─── 任务计划（todo tool）───
+
+// 计划条目状态：pending 待做 / in_progress 进行中 / completed 已完成
+export type PlanItemStatus = "pending" | "in_progress" | "completed";
+
+// 计划中的单个步骤（对应 Go tools.PlanItem）
+export interface PlanItem {
+  id: string;
+  content: string;
+  status: PlanItemStatus;
+  progressLabel?: string; // 进行中时的自然语言描述
+}
+
+// 当前任务计划：由后端 todo_panel 事件推送
+export interface TodoPlan {
+  items: PlanItem[];
+}

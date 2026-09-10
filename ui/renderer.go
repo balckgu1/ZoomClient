@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 
+	"zoomClient/tools"
+
 	"github.com/chzyer/readline"
 )
 
@@ -274,11 +276,11 @@ func (r *Renderer) EmitToolCall(name, argsPreview string)  { r.PrintToolCall(nam
 func (r *Renderer) EmitToolResult(name, content string, isError bool) {
 	r.PrintToolResult(name, content, isError)
 }
-func (r *Renderer) EmitSubAgent(promptPreview string)                { r.PrintSubAgent(promptPreview) }
-func (r *Renderer) EmitHookBlocked(toolName, reason string)          { r.PrintHookBlocked(toolName, reason) }
-func (r *Renderer) EmitTodoPanel(rendered string)                    { r.PrintTodoPanel(rendered) }
-func (r *Renderer) EmitCompact(beforeBytes, afterBytes int)          { r.PrintCompact(beforeBytes, afterBytes) }
-func (r *Renderer) EmitError(scope, msg string)                      { r.PrintError(scope, msg) }
-func (r *Renderer) EmitInfo(msg string)                              { r.PrintInfo(msg) }
-func (r *Renderer) EmitEmotion(state string, meta map[string]string) {} // CLI 模式无宠物情绪
-func (r *Renderer) EmitSystem(event string, data map[string]string)  {} // CLI 模式无系统事件流
+func (r *Renderer) EmitSubAgent(promptPreview string)                 { r.PrintSubAgent(promptPreview) }
+func (r *Renderer) EmitHookBlocked(toolName, reason string)           { r.PrintHookBlocked(toolName, reason) }
+func (r *Renderer) EmitTodoPanel(rendered string, _ []tools.PlanItem) { r.PrintTodoPanel(rendered) }
+func (r *Renderer) EmitCompact(beforeBytes, afterBytes int)           { r.PrintCompact(beforeBytes, afterBytes) }
+func (r *Renderer) EmitError(scope, msg string)                       { r.PrintError(scope, msg) }
+func (r *Renderer) EmitInfo(msg string)                               { r.PrintInfo(msg) }
+func (r *Renderer) EmitEmotion(state string, meta map[string]string)  {} // CLI 模式无宠物情绪
+func (r *Renderer) EmitSystem(event string, data map[string]string)   {} // CLI 模式无系统事件流

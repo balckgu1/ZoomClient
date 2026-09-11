@@ -6,15 +6,17 @@ import (
 	"sync"
 )
 
-// - ModeDefault：未命中规则时一律问用户
-// - ModePlan   ：只允许读，不允许任何写/执行
-// - ModeAuto   ：只读工具自动放行，写/执行类问用户
+// - ModeDefault:未命中规则时一律问用户
+// - ModePlan   :只允许读，不允许任何写/执行
+// - ModeAuto   :只读工具自动放行，写/执行类问用户
+// - ModeRoot   :完全控制
 type Mode string
 
 const (
 	ModeDefault Mode = "default"
 	ModePlan    Mode = "plan"
 	ModeAuto    Mode = "auto"
+	ModeRoot    Mode = "root"
 )
 
 // Behavior 单条规则或一次决策的行为。
@@ -32,7 +34,7 @@ type Decision struct {
 	Reason   string
 }
 
-// readOnlyTools 被视作"只读、安全"的工具白名单。
+// readOnlyTools 只读 & 安全 的tool白名单。
 var readOnlyTools = map[string]bool{
 	"read_file":      true,
 	"list_directory": true,
@@ -40,9 +42,14 @@ var readOnlyTools = map[string]bool{
 	"todo":           true,
 	"compact":        true,
 	"glob_search":    true,
+	"create_task":    true,
+	"list_tasks":     true,
+	"get_task":       true,
+	"claim_task":     true,
+	"complete_task":  true,
 }
 
-// writeTools 被视作"会写文件 / 会跑命令 / 会跨上下文"的工具。
+// writeTools 写文件 / 跑命令 / 跨上下文 的tool
 var writeTools = map[string]bool{
 	"write_file": true,
 	"edit_file":  true,
@@ -62,13 +69,11 @@ func IsWrite(toolName string) bool {
 
 // Manager 权限管理器
 type Manager struct {
-	// mu 保护 mode / DenyRules / AllowRules 的并发读写：
-	// agentLoop 通过 Check 读取规则，Web 处理器可在运行时更新规则，二者可能并发。
-	mu         sync.RWMutex
-	mode       Mode
-	DenyRules  []Rule // 命中即拒绝
-	AllowRules []Rule // 命中即放行
-	Asker      Asker  // 命中 ask 时如何与用户交互
+	mu         sync.RWMutex // mu 保护 mode / DenyRules / AllowRules 的并发读写
+	mode       Mode         // 当前模式
+	DenyRules  []Rule       // 命中即拒绝
+	AllowRules []Rule       // 命中即放行
+	Asker      Asker        // 命中 ask 时如何与用户交互
 }
 
 // NewManager 构造一个权限管理器，asker 为 nil 时使用 DenyAsker
@@ -90,7 +95,7 @@ func (m *Manager) SetMode(mode Mode) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch mode {
-	case ModeDefault, ModePlan, ModeAuto:
+	case ModeDefault, ModePlan, ModeAuto, ModeRoot:
 		m.mode = mode
 	default:
 		m.mode = ModeDefault
@@ -150,6 +155,14 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 				Behavior: BehaviorAllow,
 				Reason:   "matched allow rule: " + describeRule(rule),
 			}
+		}
+	}
+
+	// root 模式自动放行所有未命中deny rule的工具
+	if m.mode == ModeRoot {
+		return Decision{
+			Behavior: BehaviorAllow,
+			Reason:   "root mode allows all tools that are not on the deny rule",
 		}
 	}
 

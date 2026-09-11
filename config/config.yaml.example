@@ -85,9 +85,10 @@ agentloop:
 
 
 #Mode description:
-#Ask the user when the default rule is not hit
-#The plan only allows reading, and any write/execute tools are rejected
-#Auto read-only tool automatically releases, write/execute tools ask users
+# default Ask the user when rules are not hit
+# plan    Read-only is allowed, any write/execute tools are denied
+# auto    Read-only tools are automatically allowed, write/execute tools ask the user
+# root    All tools are allowed
 permission:
   mode: "auto"
   interactive: true   # Whether to query from STDIN when hitting ask; Please change CI/non interactive scenario to false

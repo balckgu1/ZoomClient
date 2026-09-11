@@ -91,10 +91,11 @@ export interface WorkDirResponse {
 // ─── 权限管理 ───
 
 // 权限模式：
+//   root    —— 完全访问，未命中拒绝规则的工具全部直接放行（高危）
 //   default —— 未命中规则时询问用户
 //   plan    —— 只读，禁止任何写/执行类工具
 //   auto    —— 只读工具自动放行，写/执行类工具询问用户
-export type PermissionMode = "default" | "plan" | "auto";
+export type PermissionMode = "default" | "plan" | "auto" | "root";
 
 // 单条权限规则，与后端 permission.Rule 对应。
 //   tool     —— 目标工具名，"" 或 "*" 表示任意工具

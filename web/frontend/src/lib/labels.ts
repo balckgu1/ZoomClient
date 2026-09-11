@@ -6,12 +6,19 @@ export interface PermissionModeMeta {
   value: PermissionMode;
   label: string;
   hint: string;
-  // tone 决定徽章配色：warn=橙色（自动放行）、neutral=中性（默认询问）、safe=绿色（只读）
-  tone: "warn" | "neutral" | "safe";
+  // tone 决定徽章配色：danger=红色（完全访问）、warn=橙色（自动放行）、
+  // neutral=中性（默认询问）、safe=绿色（只读）
+  tone: "danger" | "warn" | "neutral" | "safe";
 }
 
 // 按"从宽松到严格"排序，方便用户在面板中理解差异
 export const PERMISSION_MODES: PermissionModeMeta[] = [
+  {
+    value: "root",
+    label: "完全访问",
+    hint: "所有工具直接放行，仅拒绝规则仍会拦截（谨慎使用）",
+    tone: "danger",
+  },
   {
     value: "auto",
     label: "自动放行",
@@ -33,11 +40,11 @@ export const PERMISSION_MODES: PermissionModeMeta[] = [
 ];
 
 // permissionModeMeta 返回指定模式的元数据，未知模式回退到 default。
+// 注意：数组按宽松到严格排序，回退项必须按 value 查找而不是按下标取，
+// 避免模式列表增删时下标漂移导致回退错位。
 export function permissionModeMeta(mode: PermissionMode): PermissionModeMeta {
-  return (
-    PERMISSION_MODES.find((m) => m.value === mode) ??
-    (PERMISSION_MODES[1] as PermissionModeMeta)
-  );
+  const fallback = PERMISSION_MODES.find((m) => m.value === "default")!;
+  return PERMISSION_MODES.find((m) => m.value === mode) ?? fallback;
 }
 
 // workDirBaseName 从完整路径中截取最后一段目录名，用于 chip 的简短展示。

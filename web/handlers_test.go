@@ -139,6 +139,19 @@ func TestHandlePermissionConfig_PUT_EmptyModeKeepsCurrent(t *testing.T) {
 	}
 }
 
+// 前端切换到 root（完全访问）模式时，PUT 必须真实生效而不是被 SetMode 回退
+func TestHandlePermissionConfig_PUT_RootMode(t *testing.T) {
+	srv := newTestServer(t, permission.ModeAuto, nil, nil)
+
+	rec := doJSON(t, srv, http.MethodPut, "/api/permission/config", `{"mode":"root","deny_rules":[],"allow_rules":[]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if got := srv.permissionMgr.GetMode(); got != permission.ModeRoot {
+		t.Errorf("expected mode root, got %s", got)
+	}
+}
+
 func TestHandlePermissionConfig_PUT_InvalidJSON(t *testing.T) {
 	srv := newTestServer(t, permission.ModeAuto, nil, nil)
 	rec := doJSON(t, srv, http.MethodPut, "/api/permission/config", `{invalid`)

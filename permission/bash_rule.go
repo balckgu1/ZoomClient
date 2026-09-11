@@ -8,6 +8,9 @@ import (
 
 // dangerousBashSubstrings 内置默认危险命令模式
 // 仅当配置未初始化或未配置任何 deny 规则时使用
+// 注意：条目全部小写，匹配时会对命令做 ToLower，因此大小写不敏感；
+// 正则类模式（如 iex / curl|sh）无法放入此处（本集按子串包含匹配），
+// 它们仅在配置 denyRules 中以 "re:" 前缀生效。
 var dangerousBashSubstrings = []string{
 	"sudo ",
 	"rm -rf /",
@@ -17,6 +20,21 @@ var dangerousBashSubstrings = []string{
 	"reboot",
 	"> /dev/sda",
 	":(){:|:&};:", // Classic fork bomb
+	// 扩展 Windows 破坏性 / 持久化命令
+	"remove-partition",
+	"delete-volume",
+	"vssadmin delete",
+	"wbadmin delete",
+	"set-mppreference",
+	"add-mppreference",
+	"of=/dev/",
+	"-encodedcommand",
+	"certutil -decode",
+	"reg add",
+	"net user administrator /active",
+	"net localgroup administrators",
+	"bitsadmin /transfer",
+	"schtasks /create",
 }
 
 // DangerousBashPatterns 返回统一的危险 bash 命令模式集

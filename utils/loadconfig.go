@@ -17,6 +17,7 @@ type Config struct {
 	Skills     SkillsConfig     `mapstructure:"skills"`
 	Memory     MemoryConfig     `mapstructure:"memory"`
 	Session    SessionConfig    `mapstructure:"session"`
+	Tasks      TasksConfig      `mapstructure:"tasks"`
 	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
 	Compact    CompactConfig    `mapstructure:"compact"`
 	Permission PermissionConfig `mapstructure:"permission"`
@@ -64,6 +65,11 @@ type MemoryConfig struct {
 // SessionConfig 会话持久化配置
 type SessionConfig struct {
 	Dir string `mapstructure:"dir"`
+}
+
+// TasksConfig 任务系统持久化配置
+type TasksConfig struct {
+	Dir string `mapstructure:"dir"` // 存储目录，默认 ./.tasks
 }
 
 type ToolsConfig struct {

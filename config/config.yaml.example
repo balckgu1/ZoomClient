@@ -63,6 +63,10 @@ memory:
 session:
   dir: "./.sessions"  # session history directory
 
+# task system config
+tasks:
+  dir: "./.tasks"  # persistent task graph directory (each task = one JSON file)
+
 # compact system config
 compact:
   persistThreshold:      4000  # persist threshold

@@ -16,6 +16,7 @@ import (
 	"zoomClient/permission"
 	"zoomClient/skills"
 	"zoomClient/subagent"
+	"zoomClient/task"
 	"zoomClient/tools"
 	"zoomClient/ui"
 	"zoomClient/utils"
@@ -173,6 +174,14 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	// Instantiate and register todo manager
 	todoManager := tools.NewTodoManager()
 	registry.Register(todoManager)
+
+	// Instantiate and register task manager
+	taskManager := task.NewTaskManager(cfg.Tasks.Dir)
+	registry.Register(task.NewCreateTaskTool(taskManager))
+	registry.Register(task.NewListTasksTool(taskManager))
+	registry.Register(task.NewGetTaskTool(taskManager))
+	registry.Register(task.NewClaimTaskTool(taskManager))
+	registry.Register(task.NewCompleteTaskTool(taskManager))
 
 	// Instantiate and register compact manager
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type {
   ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
-  PermissionConfig, PermissionMode, ContextUsage, SkillMeta,
+  PermissionConfig, PermissionMode, ContextUsage, SkillMeta, TodoPlan,
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
@@ -21,6 +21,7 @@ import { PermissionDialog } from "./PermissionDialog";
 import { WorkDirPanel } from "./WorkDirPanel";
 import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
+import { TodoPlanProgress } from "./TodoPlanProgress";
 import { IconAlert, IconCheck, IconSpark } from "../lib/icons";
 
 // ToastTone 是轻提示的三种语气：普通消息、成功、失败。
@@ -85,6 +86,10 @@ export function App() {
 
   // 上下文窗口占用快照（后端 SSE 推送 + 首屏拉取）
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+
+  // 当前任务计划（模型调用 todo tool 后由后端推送）。
+  // 仅当模型实际使用了 todo tool 时为非空，此时顶部渲染计划进度条；否则为 null 不显示。
+  const [todoPlan, setTodoPlan] = useState<TodoPlan | null>(null);
 
   // Typewriter effect refs
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -362,10 +367,11 @@ export function App() {
           { _id: genId(), role: "hook_blocked", tool: d.tool, reason: d.reason },
         ]);
       } else if (type === "todo_panel") {
-        updateRunning((prev) => [
-          ...prev,
-          { _id: genId(), role: "system", content: `📋 Plan\n${d.content}` },
-        ]);
+        // 后端推送任务计划：items 为结构化条目数组，驱动顶部计划进度条。
+        // items 为空数组时视为未生成计划，清空进度条（不渲染）。
+        const rawItems = (evt.data.items as unknown) ?? null;
+        const items = Array.isArray(rawItems) ? rawItems as TodoPlan["items"] : [];
+        setTodoPlan(items.length > 0 ? { items } : null);
       } else if (type === "done") {
         finishTypewriter();
         busyRef.current = false;
@@ -433,6 +439,7 @@ export function App() {
             setBuffers((prev) => ({ ...prev, [sid]: [] }));
             setTurnCounts((prev) => ({ ...prev, [sid]: 0 }));
           }
+          setTodoPlan(null);
           showToast("已清空历史", "ok");
           return;
         }
@@ -480,6 +487,7 @@ export function App() {
       setCurrentSessionId(meta.id);
       setBuffers((prev) => ({ ...prev, [meta.id]: [] }));
       setTurnCounts((prev) => ({ ...prev, [meta.id]: 0 }));
+      setTodoPlan(null);
       await refreshSessions();
     } catch (err) {
       showToast(`创建会话失败：${err}`, "error");
@@ -489,6 +497,9 @@ export function App() {
   const handleSelectSession = useCallback(async (id: string) => {
     if (id === currentSessionId) return;
     setCurrentSessionId(id);
+    // 切换会话后清空计划进度条：计划不随会话历史持久化，切回后将于该会话
+    // 下次调用 todo tool 时由后端重新推送。
+    setTodoPlan(null);
 
     // 已有缓存（含正在运行的会话）：保留实时视图，切回即恢复思考/流式与工具卡片。
     if (buffersRef.current[id]) {
@@ -657,6 +668,7 @@ export function App() {
         onRename={handleRenameSession}
       />
       <div class="app-main">
+        <TodoPlanProgress plan={todoPlan} />
         <StatusBar
           status={{ messages, model, connected, busy, turnCount, pendingPermission: permission }}
           workDir={workDir}

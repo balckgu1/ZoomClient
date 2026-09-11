@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"zoomClient/tools"
 )
 
 // ApiEmitter 将 agent 事件转为 NDJSON 输出，供 Tauri Sidecar 前端消费
@@ -115,10 +117,11 @@ func (e *ApiEmitter) EmitHookBlocked(toolName, reason string) {
 
 // ─── 计划 / 压缩 ───
 
-func (e *ApiEmitter) EmitTodoPanel(rendered string) {
-	e.emit("agent", map[string]string{
+func (e *ApiEmitter) EmitTodoPanel(rendered string, items []tools.PlanItem) {
+	e.emit("agent", map[string]any{
 		"type":    "todo_panel",
 		"content": rendered,
+		"items":   items,
 	})
 }
 

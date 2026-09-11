@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,9 +15,23 @@ import (
 
 const (
 	StatusPending    = "pending"
-	StatusInprogress = "in_progress"
+	StatusInProgress = "in_progress"
 	StatusCompleted  = "completed"
 )
+
+// statusIcon 返回状态对应的可读图标，用于 list_tasks 渲染
+func statusIcon(status string) string {
+	switch status {
+	case StatusPending:
+		return "○"
+	case StatusInProgress:
+		return "●"
+	case StatusCompleted:
+		return "✓"
+	default:
+		return "?"
+	}
+}
 
 type Task struct {
 	ID          string   `json:"id"`          // 任务ID
@@ -60,6 +75,137 @@ func (m *TaskManager) CreateTask(subject string, description string, blockedBy [
 		return nil, err
 	}
 	return task, nil
+}
+
+// GetTask 根据 ID 获取单个任务
+func (m *TaskManager) GetTask(id string) (*Task, error) {
+	path, err := m.taskPath(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var t Task
+	if err := json.Unmarshal(data, &t); err != nil {
+		return nil, fmt.Errorf("corrupted task file %s: %w", path, err)
+	}
+	return &t, nil
+}
+
+// ListTasks 返回全部任务，按 ID 排序以保证输出稳定。目录不存在时返回空列表。
+func (m *TaskManager) ListTasks() ([]*Task, error) {
+	entries, err := os.ReadDir(m.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	tasks := make([]*Task, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		t, lerr := m.GetTask(id)
+		if lerr != nil {
+			continue // 跳过损坏文件，避免单个坏文件导致整体列举失败
+		}
+		tasks = append(tasks, t)
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID < tasks[j].ID })
+	return tasks, nil
+}
+
+// ClaimTask 认领任务：设置 owner，状态 pending → in_progress。
+// 已非 pending（被他人认领/已完成）或依赖未完成时拒绝认领，返回可读原因。
+func (m *TaskManager) ClaimTask(id, owner string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	t, err := m.GetTask(id)
+	if err != nil {
+		return "", err
+	}
+	if t.Status != StatusPending {
+		return fmt.Sprintf("Task %s is %s, cannot claim", id, t.Status), nil
+	}
+	ok, err := m.CanStart(id)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		// 收集仍未完成的依赖，给模型明确反馈
+		blocked := make([]string, 0, len(t.BlockedBy))
+		for _, dep := range t.BlockedBy {
+			d, derr := m.GetTask(dep)
+			if derr != nil || d.Status != StatusCompleted {
+				blocked = append(blocked, dep)
+			}
+		}
+		return fmt.Sprintf("Blocked by: %s", strings.Join(blocked, ", ")), nil
+	}
+	if strings.TrimSpace(owner) == "" {
+		owner = "agent"
+	}
+	t.Owner = owner
+	t.Status = StatusInProgress
+	if err := m.save(t); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Claimed %s (%s)", t.ID, t.Subject), nil
+}
+
+// CompleteTask 完成任务：in_progress → completed，并扫描报告刚被解锁的下游任务。
+func (m *TaskManager) CompleteTask(id string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	t, err := m.GetTask(id)
+	if err != nil {
+		return "", err
+	}
+	if t.Status != StatusInProgress {
+		return fmt.Sprintf("Task %s is %s, cannot complete", id, t.Status), nil
+	}
+	t.Status = StatusCompleted
+	if err := m.save(t); err != nil {
+		return "", err
+	}
+	// 找出因本次完成而变为可开始的 pending 下游任务
+	unblocked := make([]string, 0)
+	all, _ := m.ListTasks()
+	for _, other := range all {
+		if other.Status != StatusPending || len(other.BlockedBy) == 0 {
+			continue
+		}
+		if ok, _ := m.CanStart(other.ID); ok {
+			unblocked = append(unblocked, other.Subject)
+		}
+	}
+	msg := fmt.Sprintf("Completed %s (%s)", t.ID, t.Subject)
+	if len(unblocked) > 0 {
+		msg += "\nUnblocked: " + strings.Join(unblocked, ", ")
+	}
+	return msg, nil
+}
+
+// CanStart 判断任务的所有 blockedBy 依赖是否都已 completed。
+// 缺失或损坏的依赖一律视为"阻塞"，避免引用错误 ID 时被误判为可开始。
+func (m *TaskManager) CanStart(id string) (bool, error) {
+	t, err := m.GetTask(id)
+	if err != nil {
+		return false, err
+	}
+	for _, dep := range t.BlockedBy {
+		d, derr := m.GetTask(dep)
+		if derr != nil || d.Status != StatusCompleted {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // save 将任务写入 {dir}/{id}.json，必要时创建目录。

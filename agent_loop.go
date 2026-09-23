@@ -25,6 +25,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 	pipeline, registry, toolCtx := s.Pipeline, s.Registry, s.ToolCtx
 	todoManager, compactManager := s.TodoManager, s.CompactManager
 	hookRunner, em := s.HookRunner, s.Em
+	bgMgr := s.BgMgr
 	logs := logger.Log
 
 	// Get tool list
@@ -42,6 +43,18 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		}
 		// Context compact: micro-compact, replace older tool results with placeholders
 		state.Messages = compactManager.MicroCompact(state.Messages)
+
+		// 收集已完成的后台任务，生成通知并以一次性提醒注入本轮提示词
+		if bgMgr != nil {
+			for _, notif := range bgMgr.CollectCompleted() {
+				logs.Info("Background task completed, injecting notification")
+				pipeline.AddReminder(prompt.Reminder{
+					Content: notif,
+					Source:  "background_task",
+					OneShot: true,
+				})
+			}
+		}
 
 		// Pipeline assemble: system prompt + state.messages + reminders + attachments
 		payload := pipeline.AssemblePayload(state.Messages)
@@ -70,6 +83,25 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 		// Check if there are any tool calls, if not, render the reasoning+assistant text to user
 		if len(response.Message.ToolCalls) == 0 {
+			// 若仍有后台任务在运行则不能结束对话：注入等待提醒并继续下一轮
+			if bgMgr != nil && bgMgr.PendingCount() > 0 {
+				logs.Info("Background task(s) still running, continue loop", zap.Int("pending", bgMgr.PendingCount()))
+				pipeline.AddReminder(prompt.Reminder{
+					Content: fmt.Sprintf("There are %d background task(s) still running. Do NOT end the conversation yet. Wait for their completion notifications before reporting the final result.", bgMgr.PendingCount()),
+					Source:  "background_task",
+					OneShot: true,
+				})
+				state.TurnCount++
+				reason := "waiting_background"
+				state.TransitionReason = &reason
+				// 等待分支同样受最大轮数约束，防止后台任务异常时无限空转
+				if state.TurnCount >= cfg.AgentLoop.MaxTurns {
+					logs.Warn("Reaching the maximum round while waiting for background task, stop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
+					em.EmitInfo(fmt.Sprintf("reached max turns (%d) waiting for background task, stop", cfg.AgentLoop.MaxTurns))
+					break
+				}
+				continue
+			}
 			// Render reasoning
 			if response.Message.ReasoningContent != "" {
 				em.EmitReasoning(response.Message.ReasoningContent)
@@ -147,10 +179,9 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			}
 		}
 
-		// Execute all batches
+		// Execute all batches（后台任务异步执行并回填占位结果，其余同步执行）
 		allowedCalls, allowedIndex := filterAllowedCalls(toolCalls, preDecisions)
-		allowedBatches := tools.PartitionToolCalls(allowedCalls)
-		allowedResults := tools.ExecuteBatches(allowedBatches, registry, toolCtx)
+		allowedResults := tools.ExecuteWithBackground(allowedCalls, bgMgr, registry, toolCtx)
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
 		// Write Tool Result back to state.messages in the order of call

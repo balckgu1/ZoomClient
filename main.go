@@ -135,12 +135,16 @@ func main() {
 	hookRunner := initHookRunner()
 	log.Info("Hook system has been enabled")
 
+	// Background task manager: slow bash commands run asynchronously
+	bgMgr := tools.NewBackgroundTaskManager(registry, toolCtx)
+
 	// Assemble session & start
 	sess := &AgentSession{
 		State: state, Cfg: cfg, Client: client, ModelName: modelname,
 		ModelRegistry: modelRegistry,
 		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
 		SkillRegistry: skillregistry,
+		BgMgr:         bgMgr,
 		TodoManager:   todoManager, CompactManager: compactManager,
 		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
 	}

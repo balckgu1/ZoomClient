@@ -28,6 +28,7 @@ type AgentSession struct {
 	SkillRegistry   *skills.SkillRegistry // skill 注册表（Web 模式对外提供技能目录）
 	Registry        *tools.ToolRegister
 	ToolCtx         *tools.ToolContext
+	BgMgr           *tools.BackgroundTaskManager // 后台任务管理器（慢命令异步执行）
 	TodoManager     *tools.TodoManager
 	CompactManager  *compact.CompactManager
 	HookRunner      *hook.Runner

@@ -260,6 +260,24 @@ func (c *GeminiClient) Chat(model string, messages []fsm.Message, toolList []too
 			Content:   strings.Join(textParts, ""),
 			ToolCalls: toolCalls,
 		},
+		Usage: geminiUsage(resp.UsageMetadata),
 	}
 	return chatResp, nil
+}
+
+// geminiUsage 将 Gemini 响应的 UsageMetadata 归一化为通用 TokenUsage。
+// 后端未携带用量元数据（nil）时返回零值；total 缺失时以分项之和兜底。
+func geminiUsage(m *genai.GenerateContentResponseUsageMetadata) TokenUsage {
+	if m == nil {
+		return TokenUsage{}
+	}
+	total := int(m.TotalTokenCount)
+	if total == 0 {
+		total = int(m.PromptTokenCount + m.CandidatesTokenCount)
+	}
+	return TokenUsage{
+		PromptTokens:     int(m.PromptTokenCount),
+		CompletionTokens: int(m.CandidatesTokenCount),
+		TotalTokens:      total,
+	}
 }

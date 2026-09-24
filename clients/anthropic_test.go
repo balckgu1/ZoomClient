@@ -5,6 +5,8 @@ import (
 
 	"zoomClient/fsm"
 	"zoomClient/tools"
+
+	anthropic "github.com/anthropics/anthropic-sdk-go"
 )
 
 func TestAnthropicContentStr(t *testing.T) {
@@ -26,6 +28,26 @@ func TestAnthropicContentStr(t *testing.T) {
 				t.Errorf("expected %q, got %q", tt.expected, result)
 			}
 		})
+	}
+}
+
+// TestAnthropicUsage_Normalization 验证 Anthropic 用量分项计数归一化（总量 = 输入 + 输出）
+func TestAnthropicUsage_Normalization(t *testing.T) {
+	got := anthropicUsage(anthropic.Usage{InputTokens: 7, OutputTokens: 3})
+	if got.PromptTokens != 7 {
+		t.Errorf("PromptTokens = %d, want 7", got.PromptTokens)
+	}
+	if got.CompletionTokens != 3 {
+		t.Errorf("CompletionTokens = %d, want 3", got.CompletionTokens)
+	}
+	if got.TotalTokens != 10 {
+		t.Errorf("TotalTokens = %d, want 10 (input + output)", got.TotalTokens)
+	}
+
+	// 后端未上报时保持零值
+	zero := anthropicUsage(anthropic.Usage{})
+	if zero.PromptTokens != 0 || zero.CompletionTokens != 0 || zero.TotalTokens != 0 {
+		t.Errorf("empty usage should map to zero value, got %+v", zero)
 	}
 }
 

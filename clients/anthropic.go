@@ -196,6 +196,17 @@ func (c *AnthropicClient) Chat(model string, messages []fsm.Message, toolList []
 			Content:   strings.Join(textParts, ""),
 			ToolCalls: toolCalls,
 		},
+		Usage: anthropicUsage(msg.Usage),
 	}
 	return chatResp, nil
+}
+
+// anthropicUsage 将 Anthropic 响应的 Usage 归一化为通用 TokenUsage。
+// Anthropic 协议只回传 input/output 分项计数，总量以两者之和计算。
+func anthropicUsage(u anthropic.Usage) TokenUsage {
+	return TokenUsage{
+		PromptTokens:     int(u.InputTokens),
+		CompletionTokens: int(u.OutputTokens),
+		TotalTokens:      int(u.InputTokens + u.OutputTokens),
+	}
 }

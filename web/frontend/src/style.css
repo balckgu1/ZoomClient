@@ -42,6 +42,7 @@
   --red:      #f38ba8;  /* 错误 / 拒绝 / 拦截 */
 
   /* 权限模式色调：暖=放宽、冷=收紧，与"越暖越需要留意"的直觉一致 */
+  --tone-danger:  var(--red);
   --tone-warn:    var(--yellow);
   --tone-neutral: var(--fg-2);
   --tone-safe:    var(--green);
@@ -832,9 +833,11 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .chip > .icon { width: 13px; height: 13px; }
 .chip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.chip--tone-danger { color: var(--tone-danger); }
 .chip--tone-warn    { color: var(--tone-warn); }
 .chip--tone-neutral { color: var(--fg-2); }
 .chip--tone-safe    { color: var(--tone-safe); }
+.chip--tone-danger:hover,
 .chip--tone-warn:hover,
 .chip--tone-neutral:hover,
 .chip--tone-safe:hover {
@@ -1539,6 +1542,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .mode-btn:hover { color: var(--fg-2); background: var(--ink-2); }
 /* 选中态取该模式自身的色调：暖=放宽、冷=收紧，与 chip 徽章同一套语义 */
 .mode-btn--active { font-weight: 500; color: var(--ink-0); background: var(--fg-2); }
+.mode-btn--active.tone-danger  { background: var(--tone-danger); }
 .mode-btn--active.tone-warn    { background: var(--tone-warn); }
 .mode-btn--active.tone-neutral { background: var(--fg-2); }
 .mode-btn--active.tone-safe    { background: var(--tone-safe); }

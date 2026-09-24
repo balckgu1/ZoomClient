@@ -131,9 +131,19 @@ func main() {
 	registry, todoManager, compactManager := initTools(cfg, client, modelname, skillregistry, toolCtx, state, permitMgr)
 	registry.SetPermissionDecider(permitMgr.Decide)
 
-	// Hook system
-	hookRunner := initHookRunner()
+	// Hook system（启用指标采集时返回文件句柄，退出时关闭）
+	hookRunner, metricsFile := initHookRunner(cfg)
+	if metricsFile != nil {
+		defer func() {
+			if err := metricsFile.Close(); err != nil {
+				log.Warn("metrics file close failed", zap.Error(err))
+			}
+		}()
+	}
 	log.Info("Hook system has been enabled")
+
+	// Background task manager: slow bash commands run asynchronously
+	bgMgr := tools.NewBackgroundTaskManager(registry, toolCtx)
 
 	// Assemble session & start
 	sess := &AgentSession{
@@ -141,11 +151,12 @@ func main() {
 		ModelRegistry: modelRegistry,
 		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
 		SkillRegistry: skillregistry,
+		BgMgr:         bgMgr,
 		TodoManager:   todoManager, CompactManager: compactManager,
 		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
 	}
 
-	hookRunner.HookRun(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active"})
+	hookRunner.HookRun(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active", "session_id": toolCtx.SessionID})
 	if em != nil {
 		em.EmitSessionStart(modelname, logger.LogFilePath)
 	}

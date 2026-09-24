@@ -65,6 +65,10 @@ func (t RunBashTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Command to execute",
 			},
+			"run_in_background": map[string]any{
+				"type":        "boolean",
+				"description": "Set to true to run this command in the background without waiting. Use for long-running commands (install, build, test, deploy). A placeholder result is returned immediately, and the final output is delivered later as a task notification.",
+			},
 		},
 		"required": []string{"command"},
 	}

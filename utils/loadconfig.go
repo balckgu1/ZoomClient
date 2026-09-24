@@ -9,19 +9,32 @@ import (
 
 // Config config struct
 type Config struct {
-	OpenAI     OpenAIConfig     `mapstructure:"openai"`
-	Ollama     OllamaConfig     `mapstructure:"ollama"`
-	Anthropic  AnthropicConfig  `mapstructure:"anthropic"`
-	Gemini     GeminiConfig     `mapstructure:"gemini"`
-	Subagent   SubagentConfig   `mapstructure:"subagent"`
-	Skills     SkillsConfig     `mapstructure:"skills"`
-	Memory     MemoryConfig     `mapstructure:"memory"`
-	Session    SessionConfig    `mapstructure:"session"`
-	Tasks      TasksConfig      `mapstructure:"tasks"`
-	AgentLoop  AgentLoopConfig  `mapstructure:"agentloop"`
-	Compact    CompactConfig    `mapstructure:"compact"`
-	Permission PermissionConfig `mapstructure:"permission"`
-	Tools      ToolsConfig      `mapstructure:"tools"`
+	OpenAI         OpenAIConfig         `mapstructure:"openai"`
+	Ollama         OllamaConfig         `mapstructure:"ollama"`
+	Anthropic      AnthropicConfig      `mapstructure:"anthropic"`
+	Gemini         GeminiConfig         `mapstructure:"gemini"`
+	Subagent       SubagentConfig       `mapstructure:"subagent"`
+	Skills         SkillsConfig         `mapstructure:"skills"`
+	Memory         MemoryConfig         `mapstructure:"memory"`
+	Session        SessionConfig        `mapstructure:"session"`
+	Tasks          TasksConfig          `mapstructure:"tasks"`
+	AgentLoop      AgentLoopConfig      `mapstructure:"agentloop"`
+	Compact        CompactConfig        `mapstructure:"compact"`
+	Permission     PermissionConfig     `mapstructure:"permission"`
+	Tools          ToolsConfig          `mapstructure:"tools"`
+	Observability  ObservabilityConfig  `mapstructure:"observability"`
+}
+
+// ObservabilityConfig 可观测性配置
+type ObservabilityConfig struct {
+	Metrics MetricsConfig `mapstructure:"metrics"`
+}
+
+// MetricsConfig 指标采集配置：基于 hook 埋点将运行指标以 JSONL 落盘，
+// 供评测 harness 与 LangSmith 上报消费
+type MetricsConfig struct {
+	Enabled bool   `mapstructure:"enabled"` // 是否启用，默认关闭
+	Path    string `mapstructure:"path"`    // 输出文件路径，默认 logs/metrics.jsonl
 }
 
 // OpenAIConfig OpenAI 兼容后端配置

@@ -330,6 +330,7 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 			"tool_name": tc.Name,
 			"input":     tc.Arguments,
 			"output":    results[i].Content,
+			"is_error":  results[i].IsError,
 		})
 	}
 }
@@ -388,6 +389,7 @@ func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model str
 			"model":            model,
 			"content":          messageContentToString(response.Message.Content),
 			"tool_calls_count": len(response.Message.ToolCalls),
+			"usage":            response.Usage,
 			"retry_count":      attempt,
 			"max_retries":      maxRetries,
 		})

@@ -187,8 +187,79 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 	}
 }
 
-func TestOllamaClient_Chat_ErrorStatus(t *testing.T) {
+// TestOllamaClient_Chat_UsageParsed 验证 done 行携带的 prompt_eval_count / eval_count 被归一化为 Usage
+func TestOllamaClient_Chat_UsageParsed(t *testing.T) {
+	lines := []ChatResponse{
+		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "He"}},
+		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "llo"}, Done: true, PromptEvalCount: 12, EvalCount: 8},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		for _, line := range lines {
+			data, err := json.Marshal(line)
+			if err != nil {
+				t.Fatalf("marshal line failed: %v", err)
+			}
+			if _, err := w.Write(data); err != nil {
+				t.Fatalf("write line failed: %v", err)
+			}
+			if _, err := w.Write([]byte("\n")); err != nil {
+				t.Fatalf("write newline failed: %v", err)
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := NewOllamaClient(server.URL)
+	resp, err := client.Chat("qwen3:8b", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Message.Content != "Hello" {
+		t.Errorf("content = %v, want 'Hello'", resp.Message.Content)
+	}
+	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 8 || resp.Usage.TotalTokens != 20 {
+		t.Errorf("usage = %+v, want {12 8 20}", resp.Usage)
+	}
+}
+
+// TestOllamaClient_Chat_UsageAbsent 响应未回传用量计数时 Usage 保持零值
+func TestOllamaClient_Chat_UsageAbsent(t *testing.T) {
+	lines := []ChatResponse{
+		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "Hello"}, Done: true},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		for _, line := range lines {
+			data, err := json.Marshal(line)
+			if err != nil {
+				t.Fatalf("marshal line failed: %v", err)
+			}
+			if _, err := w.Write(data); err != nil {
+				t.Fatalf("write line failed: %v", err)
+			}
+			if _, err := w.Write([]byte("\n")); err != nil {
+				t.Fatalf("write newline failed: %v", err)
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := NewOllamaClient(server.URL)
+	resp, err := client.Chat("qwen3:8b", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Usage != (TokenUsage{}) {
+		t.Errorf("usage = %+v, want zero value when ollama omits counts", resp.Usage)
+	}
+}
+
+func TestOllamaClient_Chat_ErrorStatus(t *testing.T) {	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "model not found"}`))
 	}))

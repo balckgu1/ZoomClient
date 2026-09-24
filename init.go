@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"zoomClient/clients"
@@ -13,6 +14,7 @@ import (
 	"zoomClient/hook"
 	"zoomClient/logger"
 	"zoomClient/memory"
+	"zoomClient/metrics"
 	"zoomClient/permission"
 	"zoomClient/skills"
 	"zoomClient/subagent"
@@ -232,10 +234,47 @@ func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Se
 	)
 }
 
-// buildHookRunner constructs a hook runner
-func initHookRunner() *hook.Runner {
+// defaultMetricsPath 指标 JSONL 默认输出路径
+const defaultMetricsPath = "logs/metrics.jsonl"
+
+// openMetricsFile 打开指标 JSONL 输出文件（目录不存在时自动创建）。
+// path 为空时使用默认路径；返回实际使用的路径供日志输出。
+func openMetricsFile(path string) (*os.File, string, error) {
+	if path == "" {
+		path = defaultMetricsPath
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, path, err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, path, err
+	}
+	return f, path, nil
+}
+
+// initHookRunner 构建 hook Runner；启用指标采集时一并创建采集器并最先注册，
+// 返回写句柄（未启用或打开失败时为 nil），由调用方在退出时关闭。
+func initHookRunner(cfg *utils.Config) (*hook.Runner, io.WriteCloser) {
+	log := logger.Log
 	// Build a new hook runner instance
 	runner := hook.NewRunner()
+
+	// 指标采集（可选）：纯观察者，必须先于业务 handler 注册，
+	// 否则业务 handler 返回 Block/Retry 时 Runner 短路会跳过采集造成漏记
+	var metricsWC io.WriteCloser
+	if mcfg := cfg.Observability.Metrics; mcfg.Enabled {
+		f, path, err := openMetricsFile(mcfg.Path)
+		if err != nil {
+			log.Warn("Metrics collector disabled", zap.String("path", path), zap.Error(err))
+		} else {
+			metricsWC = f
+			metrics.NewCollector(f).Register(runner)
+			log.Info("Metrics collector enabled", zap.String("path", path))
+		}
+	}
 
 	// Register hooks for session start
 	runner.HookRegister(hook.EventSessionStart, hook.OnSessionStart)
@@ -256,7 +295,7 @@ func initHookRunner() *hook.Runner {
 
 	// Register hooks for session end
 	runner.HookRegister(hook.EventSessionEnd, hook.OnSessionEnd)
-	return runner
+	return runner, metricsWC
 }
 
 // buildAsker selects the interaction method when ask is triggered based on config.

@@ -406,3 +406,92 @@ func TestToolsSchemaBytes_MatchesWireMarshal(t *testing.T) {
 		t.Errorf("ToolsSchemaBytes(nil) = %d, want %d (空列表序列化为 [])", got, len("[]"))
 	}
 }
+
+// TestOpenAIClient_Chat_UsageParsed 验证响应携带 usage 时被完整解析
+func TestOpenAIClient_Chat_UsageParsed(t *testing.T) {
+	mockResponse := OpenAIChatResponse{
+		ID:    "resp_usage",
+		Model: "gpt-4o",
+		Choices: []OpenAIChoice{
+			{Message: OpenAIMessage{Role: "assistant", Content: "ok"}},
+		},
+		Usage: OpenAIUsage{PromptTokens: 25, CompletionTokens: 10, TotalTokens: 35},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
+			t.Fatalf("encode mock response failed: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(server.URL, "test-key")
+	resp, err := client.Chat("gpt-4o", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Usage.PromptTokens != 25 || resp.Usage.CompletionTokens != 10 || resp.Usage.TotalTokens != 35 {
+		t.Errorf("usage = %+v, want {25 10 35}", resp.Usage)
+	}
+}
+
+// TestOpenAIClient_Chat_UsageMissingTotal 兼容后端缺失 total_tokens 时以分项之和兜底
+func TestOpenAIClient_Chat_UsageMissingTotal(t *testing.T) {
+	mockResponse := OpenAIChatResponse{
+		ID:    "resp_usage2",
+		Model: "gpt-4o",
+		Choices: []OpenAIChoice{
+			{Message: OpenAIMessage{Role: "assistant", Content: "ok"}},
+		},
+		Usage: OpenAIUsage{PromptTokens: 25, CompletionTokens: 10},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
+			t.Fatalf("encode mock response failed: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(server.URL, "test-key")
+	resp, err := client.Chat("gpt-4o", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Usage.TotalTokens != 35 {
+		t.Errorf("TotalTokens = %d, want 35 (sum fallback)", resp.Usage.TotalTokens)
+	}
+}
+
+// TestOpenAIClient_Chat_UsageAbsent 响应无 usage 字段时保持零值
+func TestOpenAIClient_Chat_UsageAbsent(t *testing.T) {
+	mockResponse := OpenAIChatResponse{
+		ID:    "resp_usage3",
+		Model: "gpt-4o",
+		Choices: []OpenAIChoice{
+			{Message: OpenAIMessage{Role: "assistant", Content: "ok"}},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
+			t.Fatalf("encode mock response failed: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(server.URL, "test-key")
+	resp, err := client.Chat("gpt-4o", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Usage != (TokenUsage{}) {
+		t.Errorf("usage = %+v, want zero value when backend omits usage", resp.Usage)
+	}
+}

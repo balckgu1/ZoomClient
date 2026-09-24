@@ -15,3 +15,11 @@ import (
 type ChatClient interface {
 	Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error)
 }
+
+// TokenUsage 表示一次 LLM 调用的 token 用量，由各后端 API 返回的用量字段归一化而来。
+// 后端未上报用量时保持零值，调用方以此判断用量数据是否可用。
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`     // 输入侧 token 数
+	CompletionTokens int `json:"completion_tokens"` // 输出侧 token 数
+	TotalTokens      int `json:"total_tokens"`      // 总 token 数（后端缺失时以分项之和兜底）
+}

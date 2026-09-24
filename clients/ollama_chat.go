@@ -26,6 +26,12 @@ type ChatResponse struct {
 	CreatedAt string      `json:"created_at"`
 	Message   fsm.Message `json:"message"`
 	Done      bool        `json:"done"`
+	Usage     TokenUsage  `json:"usage"` // token 用量，由各后端响应归一化填充；后端未上报时为零值
+
+	// Ollama 原生用量字段：done 行携带 prompt_eval_count / eval_count，
+	// 仅用于协议解析，对外统一通过 Usage 访问
+	PromptEvalCount int `json:"prompt_eval_count"`
+	EvalCount       int `json:"eval_count"`
 }
 
 // Chat 发起聊天请求
@@ -95,6 +101,14 @@ func (c *OllamaClient) Chat(model string, messages []fsm.Message, toolList []too
 	// 将拼接后的完整内容和工具调用设置回响应
 	chatResp.Message.Content = fullContent.String()
 	chatResp.Message.ToolCalls = allToolCalls
+
+	// 归一化 token 用量：Ollama 在 done 行回传 prompt_eval_count / eval_count，
+	// Ollama 协议无总量字段，以分项之和作为 TotalTokens
+	chatResp.Usage = TokenUsage{
+		PromptTokens:     chatResp.PromptEvalCount,
+		CompletionTokens: chatResp.EvalCount,
+		TotalTokens:      chatResp.PromptEvalCount + chatResp.EvalCount,
+	}
 
 	return &chatResp, nil
 }

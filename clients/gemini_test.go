@@ -9,6 +9,33 @@ import (
 	"google.golang.org/genai"
 )
 
+// TestGeminiUsage_Normalization 验证 Gemini 用量元数据归一化与零值/缺总量边界
+func TestGeminiUsage_Normalization(t *testing.T) {
+	// 常规路径：total 已回传
+	got := geminiUsage(&genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     100,
+		CandidatesTokenCount: 40,
+		TotalTokenCount:      140,
+	})
+	if got.PromptTokens != 100 || got.CompletionTokens != 40 || got.TotalTokens != 140 {
+		t.Errorf("usage = %+v, want {100 40 140}", got)
+	}
+
+	// total 缺失时以分项之和兜底
+	fallback := geminiUsage(&genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     60,
+		CandidatesTokenCount: 25,
+	})
+	if fallback.TotalTokens != 85 {
+		t.Errorf("TotalTokens = %d, want 85 (sum fallback)", fallback.TotalTokens)
+	}
+
+	// nil 元数据保持零值
+	if nilUsage := geminiUsage(nil); nilUsage != (TokenUsage{}) {
+		t.Errorf("nil metadata should map to zero value, got %+v", nilUsage)
+	}
+}
+
 func TestGeminiContentStr(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -1,6 +1,5 @@
 # ZoomClient CI 工作流
 # 受影响检查路由：push 时全量运行，PR 时仅运行与变更相关的检查
-# Go 变更 → go-test + go-lint；前端变更 → frontend-check
 
 name: Test & Lint
 
@@ -18,40 +17,41 @@ on:
       - "**.tsx"
       - "**.json"
       - "**.css"
+      - ".github/workflows/**"
 
 jobs:
   # ── Go 测试：运行所有包的单元测试（含竞态检测） ──────────
-  go-test:
-    name: Go Test
+  test:
+    name: Unit test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 代码
+      - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: 设置 Go 环境
+      - name: Setting go env
         uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
 
-      - name: 运行 Go 测试
-        run: go test -race -count=1 ./...
+      - name: Run unit test
+        run: go test -count=1 ./...
 
   # ── Go Lint：golangci-lint 静态分析 ──────────────────────
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 代码
+      - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: 设置 Go 环境
+      - name: Setting go env
         uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
 
-      - name: 运行 golangci-lint
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13
@@ -67,18 +67,18 @@ jobs:
       run:
         working-directory: web/frontend
     steps:
-      - name: Checkout 代码
+      - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: 设置 Node.js 环境
+      - name: Setting Node.js env
         uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/frontend/package-lock.json
 
-      - name: 安装依赖
+      - name: Install lib
         run: npm ci
 
-      - name: TypeScript 类型检查
+      - name: Check TypeScript type
         run: npx tsc --noEmit

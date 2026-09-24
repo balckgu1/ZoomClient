@@ -89,6 +89,28 @@ type OpenAIChatResponse struct {
 	ID      string         `json:"id"`
 	Model   string         `json:"model"`
 	Choices []OpenAIChoice `json:"choices"`
+	Usage   OpenAIUsage    `json:"usage"`
+}
+
+// OpenAIUsage OpenAI 兼容协议返回的 token 用量统计
+type OpenAIUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// openaiUsage 将 OpenAI 兼容响应的 usage 归一化为通用 TokenUsage。
+// 部分兼容后端（如早期 vLLM / 各类代理）不回传 total_tokens，缺失时以分项之和兜底。
+func openaiUsage(u OpenAIUsage) TokenUsage {
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.PromptTokens + u.CompletionTokens
+	}
+	return TokenUsage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      total,
+	}
 }
 
 // OpenAIChoice 单个候选结果
@@ -260,6 +282,7 @@ func (c *OpenAIClient) Chat(model string, messages []fsm.Message, toolList []too
 			ToolCalls:        convertFromOpenAIToolCalls(choice.Message.ToolCalls),
 			ReasoningContent: choice.Message.ReasoningContent,
 		},
+		Usage: openaiUsage(openaiResp.Usage),
 	}
 	// content 为空时，设置为空字符串，避免类型断言失败
 	if chatResp.Message.Content == nil {

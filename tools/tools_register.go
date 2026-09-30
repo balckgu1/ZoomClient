@@ -26,16 +26,16 @@ type ToolResult struct {
 	Ok          bool   // 是否成功
 }
 
-type ToolRegister struct {
-	tools             map[string]Tool
-	permissionDecider func(string, map[string]any) (bool, string)
-}
-
 // ToolCall 表示模型返回的工具调用
 type ToolCall struct {
 	ID        string                 `json:"id,omitempty"`
 	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"arguments"`
+}
+
+type ToolRegister struct {
+	tools             map[string]Tool
+	permissionDecider func(string, map[string]any) (bool, string)
 }
 
 // NewToolRegister 创建一个新的工具注册表实例

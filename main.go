@@ -35,7 +35,7 @@ func main() {
 	utils.InitConfigWithDir(flags.ConfigDir)
 	cfg := utils.GetConfig()
 
-	// Context
+	// Initialize signal handler context for graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
@@ -132,7 +132,7 @@ func main() {
 	registry, todoManager, compactManager := initTools(cfg, client, modelname, skillregistry, toolCtx, state, permitMgr)
 	registry.SetPermissionDecider(permitMgr.Decide)
 
-	// Hook system（启用指标采集时返回文件句柄，退出时关闭）
+	// Hook system
 	hookRunner, metricsFile := initHookRunner(cfg)
 	if metricsFile != nil {
 		defer func() {
@@ -148,13 +148,20 @@ func main() {
 
 	// Assemble session & start
 	sess := &AgentSession{
-		State: state, Cfg: cfg, Client: client, ModelName: modelname,
+		State:         state,
+		Cfg:           cfg,
+		Client:        client,
+		ModelName:     modelname,
 		ModelRegistry: modelRegistry,
-		Pipeline:      pipeline, Registry: registry, ToolCtx: toolCtx,
+		Pipeline:      pipeline,
+		Registry:      registry,
+		ToolCtx:       toolCtx,
 		SkillRegistry: skillregistry,
 		BgMgr:         bgMgr,
 		TodoManager:   todoManager, CompactManager: compactManager,
 		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
+		Temperature: 0.7,
+		ReasonLevel: "high",
 	}
 
 	hookRunner.HookRun(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active", "session_id": toolCtx.SessionID})
@@ -163,7 +170,7 @@ func main() {
 	}
 	log.Info("Agent REPL start")
 
-	// Initialize session manager (all modes)
+	// Initialize session manager
 	var sessMgr *session.Manager
 	sessMgr, serr := session.NewManager(cfg.Session.Dir, client, modelname)
 	if serr != nil {

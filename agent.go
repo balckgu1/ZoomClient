@@ -32,6 +32,8 @@ type AgentSession struct {
 	TodoManager     *tools.TodoManager
 	CompactManager  *compact.CompactManager
 	HookRunner      *hook.Runner
+	Temperature     float64
+	ReasonLevel     string
 	Em              emitter.Emitter
 	PermissionMgr   *permission.Manager // 权限管理器
 	SessionMgr      *session.Manager    // 会话持久化管理器

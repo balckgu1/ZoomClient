@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"zoomClient/fsm"
 	"zoomClient/tools"
 )
 
@@ -63,7 +62,7 @@ func TestBuildOllamaTools(t *testing.T) {
 func TestOllamaClient_Chat_Success(t *testing.T) {
 	mockResponse := ChatResponse{
 		Model:   "qwen3:8b",
-		Message: fsm.Message{Role: "assistant", Content: "Hello from Ollama!"},
+		Message: Message{Role: "assistant", Content: "Hello from Ollama!"},
 		Done:    true,
 	}
 
@@ -82,7 +81,7 @@ func TestOllamaClient_Chat_Success(t *testing.T) {
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "user", Content: "Say hello"},
 	}
 
@@ -107,9 +106,9 @@ func TestOllamaClient_Chat_Success(t *testing.T) {
 func TestOllamaClient_Chat_NDJSON(t *testing.T) {
 	// Ollama may return NDJSON even with stream:false
 	lines := []ChatResponse{
-		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "Hello"}},
-		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: " world"}},
-		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "!"}, Done: true},
+		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: "Hello"}},
+		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: " world"}},
+		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: "!"}, Done: true},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +123,7 @@ func TestOllamaClient_Chat_NDJSON(t *testing.T) {
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	messages := []fsm.Message{{Role: "user", Content: "Say hello"}}
+	messages := []Message{{Role: "user", Content: "Say hello"}}
 
 	resp, err := client.Chat("qwen3:8b", messages, nil, nil)
 	if err != nil {
@@ -139,7 +138,7 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 	lines := []ChatResponse{
 		{
 			Model: "qwen3:8b",
-			Message: fsm.Message{
+			Message: Message{
 				Role: "assistant",
 				ToolCalls: []tools.ToolCall{
 					{ID: "call_1", Name: "read_file", Arguments: map[string]interface{}{"path": "/tmp/a.txt"}},
@@ -148,7 +147,7 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 		},
 		{
 			Model: "qwen3:8b",
-			Message: fsm.Message{
+			Message: Message{
 				Role: "assistant",
 				ToolCalls: []tools.ToolCall{
 					{ID: "call_2", Name: "read_file", Arguments: map[string]interface{}{"path": "/tmp/b.txt"}},
@@ -170,7 +169,7 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	messages := []fsm.Message{{Role: "user", Content: "Read files"}}
+	messages := []Message{{Role: "user", Content: "Read files"}}
 
 	resp, err := client.Chat("qwen3:8b", messages, nil, nil)
 	if err != nil {
@@ -190,8 +189,8 @@ func TestOllamaClient_Chat_NDJSON_WithToolCalls(t *testing.T) {
 // TestOllamaClient_Chat_UsageParsed 验证 done 行携带的 prompt_eval_count / eval_count 被归一化为 Usage
 func TestOllamaClient_Chat_UsageParsed(t *testing.T) {
 	lines := []ChatResponse{
-		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "He"}},
-		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "llo"}, Done: true, PromptEvalCount: 12, EvalCount: 8},
+		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: "He"}},
+		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: "llo"}, Done: true, PromptEvalCount: 12, EvalCount: 8},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +212,7 @@ func TestOllamaClient_Chat_UsageParsed(t *testing.T) {
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	resp, err := client.Chat("qwen3:8b", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	resp, err := client.Chat("qwen3:8b", []Message{{Role: "user", Content: "hi"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,7 +227,7 @@ func TestOllamaClient_Chat_UsageParsed(t *testing.T) {
 // TestOllamaClient_Chat_UsageAbsent 响应未回传用量计数时 Usage 保持零值
 func TestOllamaClient_Chat_UsageAbsent(t *testing.T) {
 	lines := []ChatResponse{
-		{Model: "qwen3:8b", Message: fsm.Message{Role: "assistant", Content: "Hello"}, Done: true},
+		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: "Hello"}, Done: true},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +249,7 @@ func TestOllamaClient_Chat_UsageAbsent(t *testing.T) {
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	resp, err := client.Chat("qwen3:8b", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	resp, err := client.Chat("qwen3:8b", []Message{{Role: "user", Content: "hi"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -259,14 +258,15 @@ func TestOllamaClient_Chat_UsageAbsent(t *testing.T) {
 	}
 }
 
-func TestOllamaClient_Chat_ErrorStatus(t *testing.T) {	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestOllamaClient_Chat_ErrorStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "model not found"}`))
 	}))
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	messages := []fsm.Message{{Role: "user", Content: "Hello"}}
+	messages := []Message{{Role: "user", Content: "Hello"}}
 
 	_, err := client.Chat("qwen3:8b", messages, nil, nil)
 	if err == nil {
@@ -285,7 +285,7 @@ func TestOllamaClient_Chat_InvalidJSON(t *testing.T) {
 		// write a valid line after invalid ones
 		resp := ChatResponse{
 			Model:   "qwen3:8b",
-			Message: fsm.Message{Role: "assistant", Content: "valid"},
+			Message: Message{Role: "assistant", Content: "valid"},
 			Done:    true,
 		}
 		data, _ := json.Marshal(resp)
@@ -294,7 +294,7 @@ func TestOllamaClient_Chat_InvalidJSON(t *testing.T) {
 	defer server.Close()
 
 	client := NewOllamaClient(server.URL)
-	messages := []fsm.Message{{Role: "user", Content: "Hello"}}
+	messages := []Message{{Role: "user", Content: "Hello"}}
 
 	resp, err := client.Chat("qwen3:8b", messages, nil, nil)
 	if err != nil {
@@ -308,7 +308,7 @@ func TestOllamaClient_Chat_InvalidJSON(t *testing.T) {
 func TestOllamaClient_Chat_WithTools(t *testing.T) {
 	mockResponse := ChatResponse{
 		Model: "qwen3:8b",
-		Message: fsm.Message{
+		Message: Message{
 			Role:    "assistant",
 			Content: "I'll help you",
 		},
@@ -338,7 +338,7 @@ func TestOllamaClient_Chat_WithTools(t *testing.T) {
 	toolList := []tools.Tool{
 		mockTool{name: "read_file", description: "Read file", params: map[string]interface{}{"type": "object"}},
 	}
-	messages := []fsm.Message{{Role: "user", Content: "Read a file"}}
+	messages := []Message{{Role: "user", Content: "Read a file"}}
 
 	resp, err := client.Chat("qwen3:8b", messages, toolList, nil)
 	if err != nil {

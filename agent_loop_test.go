@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"zoomClient/clients"
-	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
 	"zoomClient/prompt"
@@ -37,7 +36,7 @@ type mockChatClient struct {
 }
 
 // Chat 记录调用次数并按步骤顺序返回结果；步骤耗尽后返回错误。
-func (m *mockChatClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
+func (m *mockChatClient) Chat(model string, messages []clients.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
 	i := m.calls
 	m.calls++
 	if i >= len(m.steps) {
@@ -53,12 +52,12 @@ func newTestPipeline() *prompt.MessagePipeline {
 
 // validResponse 返回一个非空文本回复。
 func validResponse() *clients.ChatResponse {
-	return &clients.ChatResponse{Model: "test", Message: fsm.Message{Role: "assistant", Content: "hello"}}
+	return &clients.ChatResponse{Model: "test", Message: clients.Message{Role: "assistant", Content: "hello"}}
 }
 
 // emptyResponse 返回一个空回复（无文本、无工具调用）。
 func emptyResponse() *clients.ChatResponse {
-	return &clients.ChatResponse{Model: "test", Message: fsm.Message{Role: "assistant", Content: ""}}
+	return &clients.ChatResponse{Model: "test", Message: clients.Message{Role: "assistant", Content: ""}}
 }
 
 // TestChatWithHooks_NoHandlers_ReturnsFirstResponse 未注册 handler 时直接透传首次调用结果。
@@ -170,7 +169,7 @@ func TestChatWithHooks_PostChatInject_AddsReminder(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assembled := pipeline.AssemblePayload([]fsm.Message{})
+	assembled := pipeline.AssemblePayload([]clients.Message{})
 	found := false
 	for _, m := range assembled.Messages {
 		if m.Content == "INJECTED-REMINDER" {
@@ -184,7 +183,7 @@ func TestChatWithHooks_PostChatInject_AddsReminder(t *testing.T) {
 
 // TestEstimateTokens_SimpleContent 验证 token 估算启发式：总字符数/4 向上取整。
 func TestEstimateTokens_SimpleContent(t *testing.T) {
-	msgs := []fsm.Message{
+	msgs := []clients.Message{
 		{Role: "user", Content: "hello"},    // 5 字符
 		{Role: "user", Content: "01234567"}, // 8 字符
 	}

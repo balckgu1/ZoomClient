@@ -1,12 +1,12 @@
 package prompt
 
-import "zoomClient/fsm"
+import "zoomClient/clients"
 
 // normalizeMessages 统一消息格式：
 //  1. 去除首条 system 消息（system prompt 由 Builder 独立生成）
 //  2. 滤掉空内容消息（但保留有 ToolCalls 的 assistant 消息）
-func (p *MessagePipeline) normalizeMessages(raw []fsm.Message) []fsm.Message {
-	var result []fsm.Message
+func (p *MessagePipeline) normalizeMessages(raw []clients.Message) []clients.Message {
+	var result []clients.Message
 	for i, msg := range raw {
 		// 跳过首条 system 消息
 		if i == 0 && msg.Role == "system" {

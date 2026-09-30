@@ -196,13 +196,13 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	subAgent := subagent.NewSubAgent(client, modelname, cfg.Subagent.DefaultSystemPrompt, cfg.Subagent.ForkSubtaskPromptPrefix,
 		subagent.BuildSubAgentRegistry(), toolCtx, cfg.Subagent.DefaultMaxTurns, options)
 
-	subAgentRunner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+	subAgentRunner := func(prompt string, parentMessages []clients.Message) (string, error) {
 		if parentMessages == nil {
 			return subAgent.Run(prompt)
 		}
 		return subAgent.RunWithFork(prompt, parentMessages)
 	}
-	parentMessagesProvider := func() []fsm.Message {
+	parentMessagesProvider := func() []clients.Message {
 		return state.Messages
 	}
 	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))

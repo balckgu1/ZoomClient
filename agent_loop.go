@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"zoomClient/clients"
-	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
 	"zoomClient/prompt"
@@ -63,7 +62,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		pipeline.ClearOneShotReminders()
 
 		// Add system prompt at the beginning of state.messages
-		fullMessages := append([]fsm.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
+		fullMessages := append([]clients.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
 
 		// LLM chat（带 hook 干预：PreChat / LLMError / PostChat，失败或空回复时自动重试）
 		response, err := chatWithHooks(hookRunner, client, model, fullMessages, toolList, map[string]interface{}{"temperature": 0.7}, cfg.AgentLoop.MaxLLMRetries, pipeline)
@@ -74,7 +73,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		}
 
 		// Add the assistant's response to state.messages
-		state.Messages = append(state.Messages, fsm.Message{
+		state.Messages = append(state.Messages, clients.Message{
 			Role:             "assistant",
 			Content:          response.Message.Content,
 			ToolCalls:        response.Message.ToolCalls,
@@ -212,7 +211,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			}
 
 			// Add toolCallID to state.messages
-			state.Messages = append(state.Messages, fsm.Message{
+			state.Messages = append(state.Messages, clients.Message{
 				Role:       "tool",
 				Content:    persistedContent,
 				ToolCallID: toolCalls[resultIndex].ID,
@@ -344,7 +343,7 @@ func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, result
 //   - 两条重试路径共享同一个 maxRetries 预算，防止无限重试；
 //   - PreChat / PostChat 返回 ExitInject 时，消息以 OneShot reminder 注入，在下一轮组装提示词时生效。
 func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model string,
-	fullMessages []fsm.Message, toolList []tools.Tool, options map[string]interface{},
+	fullMessages []clients.Message, toolList []tools.Tool, options map[string]interface{},
 	maxRetries int, pipeline *prompt.MessagePipeline) (*clients.ChatResponse, error) {
 
 	logs := logger.Log
@@ -418,7 +417,7 @@ func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model str
 
 // estimateTokens 以字符数/4 的启发式粗略估算消息序列的 token 数。
 // 仅用于 PreChat 审计日志与预算提示，不参与任何拦截决策，允许存在误差。
-func estimateTokens(messages []fsm.Message) int {
+func estimateTokens(messages []clients.Message) int {
 	totalChars := 0
 	for _, m := range messages {
 		switch c := m.Content.(type) {
@@ -436,7 +435,7 @@ func estimateTokens(messages []fsm.Message) int {
 	return totalChars/4 + 1
 }
 
-// messageContentToString safely converts fsm.Message.Content (interface{}) to a readable string.
+// messageContentToString safely converts clients.Message.Content (interface{}) to a readable string.
 func messageContentToString(content any) string {
 	switch v := content.(type) {
 	case nil:

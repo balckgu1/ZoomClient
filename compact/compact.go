@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"zoomClient/clients"
-	"zoomClient/fsm"
 	"zoomClient/utils"
 )
 
@@ -121,7 +120,7 @@ func (m *CompactManager) saveToDisk(toolUseID, output string) (string, error) {
 }
 
 // MicroCompact 把较早的 ToolResult替换为占位，只保留最近 KeepRecentToolResults 条的完整内容
-func (m *CompactManager) MicroCompact(messages []fsm.Message) []fsm.Message {
+func (m *CompactManager) MicroCompact(messages []clients.Message) []clients.Message {
 	keep := m.Config.KeepRecentToolResults
 
 	// 收集message中所有 role=tool 消息的下标
@@ -138,7 +137,7 @@ func (m *CompactManager) MicroCompact(messages []fsm.Message) []fsm.Message {
 	}
 
 	// 复制一份，避免修改原始 slice
-	result := make([]fsm.Message, len(messages))
+	result := make([]clients.Message, len(messages))
 	copy(result, messages)
 
 	// 把前面 (len - keep) 条替换成占位
@@ -154,7 +153,7 @@ func (m *CompactManager) MicroCompact(messages []fsm.Message) []fsm.Message {
 }
 
 // EstimateSize 估算一份消息历史在上下文里占用的字节数
-func (m *CompactManager) EstimateSize(messages []fsm.Message) int {
+func (m *CompactManager) EstimateSize(messages []clients.Message) int {
 	total := 0
 	for _, msg := range messages {
 		total += len(msg.Role)
@@ -177,7 +176,7 @@ func (m *CompactManager) EstimateSize(messages []fsm.Message) int {
 }
 
 // ShouldAutoCompact 由AgentLoop每轮结束时调用，决定是否要触发完整压缩
-func (m *CompactManager) ShouldAutoCompact(messages []fsm.Message) bool {
+func (m *CompactManager) ShouldAutoCompact(messages []clients.Message) bool {
 	// 如果标记了 pendingManualCompact，直接返回true
 	if m.pendingManualCompact {
 		return true
@@ -206,7 +205,7 @@ type UsageSnapshot struct {
 
 // ComputeUsage 汇总各部分字节占用生成上下文占用快照。
 // 总占用 = system prompt 主体 + skills 段 + 工具 schema + 消息历史估算。
-func (m *CompactManager) ComputeUsage(parts UsageParts, messages []fsm.Message) UsageSnapshot {
+func (m *CompactManager) ComputeUsage(parts UsageParts, messages []clients.Message) UsageSnapshot {
 	messagesBytes := m.EstimateSize(messages)
 	return UsageSnapshot{
 		LimitBytes:        m.Config.ContextLimit,
@@ -222,7 +221,7 @@ func (m *CompactManager) ComputeUsage(parts UsageParts, messages []fsm.Message) 
 // CompactHistory 调模型生成一份摘要，用 system + 摘要消息替换原始长历史。
 // 若原始历史尾部存在带 tool_calls 的 assistant 消息及其配对的 tool 结果，
 // 会将它们一并保留在摘要之后，确保 OpenAI 协议的配对关系不被破坏。
-func (m *CompactManager) CompactHistory(messages []fsm.Message) ([]fsm.Message, error) {
+func (m *CompactManager) CompactHistory(messages []clients.Message) ([]clients.Message, error) {
 	summary, err := m.summarize(messages)
 	if err != nil {
 		return messages, err
@@ -235,11 +234,11 @@ func (m *CompactManager) CompactHistory(messages []fsm.Message) ([]fsm.Message, 
 	m.State.LastSummary = summary
 
 	// 保留原始 system prompt
-	newMessages := make([]fsm.Message, 0, 4)
+	newMessages := make([]clients.Message, 0, 4)
 	if len(messages) > 0 && messages[0].Role == "system" {
 		newMessages = append(newMessages, messages[0])
 	}
-	newMessages = append(newMessages, fsm.Message{
+	newMessages = append(newMessages, clients.Message{
 		Role:    "user",
 		Content: "This conversation was compacted for continuity.\n\n" + summary,
 	})
@@ -254,7 +253,7 @@ func (m *CompactManager) CompactHistory(messages []fsm.Message) ([]fsm.Message, 
 }
 
 // findPendingToolCallBoundary 从后往前找到最后一个 len(tool_calls)>0 的 assistant 消息下标
-func findPendingToolCallBoundary(messages []fsm.Message) int {
+func findPendingToolCallBoundary(messages []clients.Message) int {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
 			return i
@@ -264,7 +263,7 @@ func findPendingToolCallBoundary(messages []fsm.Message) int {
 }
 
 // summarize 调一次模型生成摘要。
-func (m *CompactManager) summarize(messages []fsm.Message) (string, error) {
+func (m *CompactManager) summarize(messages []clients.Message) (string, error) {
 	prompt := `Please read the dialogue history below and output a 'Continuous Compression Summary'. The following key points must be kept (none of which are missing):
 1. Current task objective
 2. Completed key actions
@@ -274,7 +273,7 @@ func (m *CompactManager) summarize(messages []fsm.Message) (string, error) {
 Requirement: Only output the main body of the abstract, without any explanation, no marking down of the title, and no small talk.`
 
 	history := renderForSummary(messages)
-	summaryMsgs := []fsm.Message{
+	summaryMsgs := []clients.Message{
 		{Role: "system", Content: prompt},
 		{Role: "user", Content: history},
 	}
@@ -292,7 +291,7 @@ Requirement: Only output the main body of the abstract, without any explanation,
 }
 
 // renderForSummary 把 messages 渲染成一段纯文本，喂给摘要请求
-func renderForSummary(messages []fsm.Message) string {
+func renderForSummary(messages []clients.Message) string {
 	var sb strings.Builder
 	for _, msg := range messages {
 		if msg.Role == "system" {

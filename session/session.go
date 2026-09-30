@@ -2,19 +2,19 @@ package session
 
 import (
 	"time"
-	"zoomClient/fsm"
+	"zoomClient/clients"
 )
 
 // SessionRecord 表示一个完整的session记录，包含消息历史，持久化为 {id}.json 文件
 type SessionRecord struct {
-	ID        string        `json:"id"`
-	Title     string        `json:"title"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
-	Model     string        `json:"model"`
-	TurnCount int           `json:"turn_count"`
-	WorkDir   string        `json:"workdir"`
-	Messages  []fsm.Message `json:"messages"`
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	Model     string            `json:"model"`
+	TurnCount int               `json:"turn_count"`
+	WorkDir   string            `json:"workdir"`
+	Messages  []clients.Message `json:"messages"`
 }
 
 // SessionMeta 仅包含session元信息，用于 index.json 中的列表显示

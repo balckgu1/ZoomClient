@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"zoomClient/fsm"
+	"zoomClient/clients"
 	"zoomClient/model"
 	"zoomClient/permission"
 	"zoomClient/skills"
@@ -406,7 +406,7 @@ func (s *Server) handleModelTest(w http.ResponseWriter, r *http.Request) {
 	client, modelName := model.BuildClient(preset)
 
 	// 发送一条最小消息测试连通性
-	_, err := client.Chat(modelName, []fsm.Message{
+	_, err := client.Chat(modelName, []clients.Message{
 		{Role: "user", Content: "hi"},
 	}, nil, nil)
 	if err != nil {

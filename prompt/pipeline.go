@@ -1,11 +1,11 @@
 package prompt
 
-import "zoomClient/fsm"
+import "zoomClient/clients"
 
 // APIPayload 最终组装的模型输入载荷。
 type APIPayload struct {
 	SystemPrompt string
-	Messages     []fsm.Message // normalize + reminders + attachments
+	Messages     []clients.Message // normalize + reminders + attachments
 }
 
 // MessagePipeline 模型输入的完整组装管道 ==> prompt blocks / normalized messages / reminders / attachments。
@@ -25,7 +25,7 @@ func NewPipeline(builder *SystemPromptBuilder) *MessagePipeline {
 }
 
 // AssemblePayload 执行完整组装流水线，返回可直接传给 client.Chat 的载荷。
-func (p *MessagePipeline) AssemblePayload(rawMessages []fsm.Message) APIPayload {
+func (p *MessagePipeline) AssemblePayload(rawMessages []clients.Message) APIPayload {
 	// 1. 构建 system prompt（走已有的 Builder）
 	systemPrompt := p.builder.Build()
 
@@ -42,9 +42,9 @@ func (p *MessagePipeline) AssemblePayload(rawMessages []fsm.Message) APIPayload 
 }
 
 // injectReminders 将所有 reminder 以 role="system" 追加到消息列表末尾。
-func (p *MessagePipeline) injectReminders(msgs []fsm.Message) []fsm.Message {
+func (p *MessagePipeline) injectReminders(msgs []clients.Message) []clients.Message {
 	for _, r := range p.reminders {
-		msgs = append(msgs, fsm.Message{
+		msgs = append(msgs, clients.Message{
 			Role:    "system",
 			Content: r.Content,
 		})
@@ -53,7 +53,7 @@ func (p *MessagePipeline) injectReminders(msgs []fsm.Message) []fsm.Message {
 }
 
 // injectAttachments 注入附件（当前为占位实现）。
-func (p *MessagePipeline) injectAttachments(msgs []fsm.Message) []fsm.Message {
+func (p *MessagePipeline) injectAttachments(msgs []clients.Message) []clients.Message {
 	// 预留：后续可将 attachment 作为 user 消息追加
 	return msgs
 }

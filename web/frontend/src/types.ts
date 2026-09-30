@@ -39,7 +39,7 @@ export interface PersistedToolCall {
   arguments?: Record<string, unknown>;
 }
 
-// 后端持久化的原始消息（对应 Go 的 fsm.Message）。
+// 后端持久化的原始消息（对应 Go 的 clients.Message）。
 // 与前端展示用的 ChatMessage 不同：调用工具的 assistant 轮次 content 为空、
 // 调用信息在 tool_calls 中，工具结果单独以 role:"tool" + tool_call_id 存储。
 export interface PersistedMessage {

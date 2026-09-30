@@ -7,36 +7,21 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"zoomClient/fsm"
 	"zoomClient/tools"
 )
 
 // ChatRequest 表示聊天请求的结构
 type ChatRequest struct {
 	Model    string                 `json:"model"`
-	Messages []fsm.Message          `json:"messages"`
+	Messages []Message              `json:"messages"`
 	Tools    []OllamaTool           `json:"tools,omitempty"`
 	Stream   bool                   `json:"stream,omitempty"`
 	Options  map[string]interface{} `json:"options,omitempty"`
 }
 
-// ChatResponse 表示聊天响应的结构
-type ChatResponse struct {
-	Model     string      `json:"model"`
-	CreatedAt string      `json:"created_at"`
-	Message   fsm.Message `json:"message"`
-	Done      bool        `json:"done"`
-	Usage     TokenUsage  `json:"usage"` // token 用量，由各后端响应归一化填充；后端未上报时为零值
-
-	// Ollama 原生用量字段：done 行携带 prompt_eval_count / eval_count，
-	// 仅用于协议解析，对外统一通过 Usage 访问
-	PromptEvalCount int `json:"prompt_eval_count"`
-	EvalCount       int `json:"eval_count"`
-}
-
 // Chat 发起聊天请求
 // 入参中的 toolList 为通用工具接口列表，本方法内部将其转换为 Ollama 所需的 OllamaTool 格式。
-func (c *OllamaClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
+func (c *OllamaClient) Chat(model string, messages []Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
 	// 将通用工具列表转换为 Ollama API 格式
 	ollamaTools := BuildOllamaTools(toolList)
 

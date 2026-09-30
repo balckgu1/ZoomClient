@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"zoomClient/fsm"
 	"zoomClient/tools"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -49,7 +48,7 @@ func buildAnthropicTools(toolList []tools.Tool) []anthropic.ToolUnionParam {
 	return result
 }
 
-// anthropicContentStr 将 fsm.Message.Content 安全转为字符串
+// anthropicContentStr 将 Message.Content 安全转为字符串
 func anthropicContentStr(c interface{}) string {
 	switch v := c.(type) {
 	case nil:
@@ -62,7 +61,7 @@ func anthropicContentStr(c interface{}) string {
 	}
 }
 
-// convertToAnthropicMessages 将内部 fsm.Message 列表转换为 Anthropic 协议消息列表
+// convertToAnthropicMessages 将内部 Message 列表转换为 Anthropic 协议消息列表
 // 同时返回提取出的 system 文本（Anthropic 要求 system 作为顶层参数）
 //
 // 处理规则：
@@ -70,7 +69,7 @@ func anthropicContentStr(c interface{}) string {
 //  2. user    → NewUserMessage(NewTextBlock(...))
 //  3. assistant + ToolCalls → AssistantMessageParam，含 ToolUseBlock + 可选 TextBlock
 //  4. tool    → 收集连续多条，合并为单条 NewUserMessage(NewToolResultBlock(...)...)
-func convertToAnthropicMessages(messages []fsm.Message) ([]anthropic.MessageParam, string) {
+func convertToAnthropicMessages(messages []Message) ([]anthropic.MessageParam, string) {
 	var result []anthropic.MessageParam
 	var systemText string
 
@@ -140,7 +139,7 @@ func convertToAnthropicMessages(messages []fsm.Message) ([]anthropic.MessagePara
 //  1. system 消息提取为顶层 System 参数；
 //  2. tool 结果消息合并为 user 消息的 ToolResultBlock；
 //  3. 响应 ContentBlock 数组中 TextBlock 拼接为文本，ToolUseBlock 转为 ToolCall。
-func (c *AnthropicClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
+func (c *AnthropicClient) Chat(model string, messages []Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
 	ctx := context.Background()
 
 	// 1. 协议转换
@@ -191,7 +190,7 @@ func (c *AnthropicClient) Chat(model string, messages []fsm.Message, toolList []
 	chatResp := &ChatResponse{
 		Model: string(msg.Model),
 		Done:  true,
-		Message: fsm.Message{
+		Message: Message{
 			Role:      "assistant",
 			Content:   strings.Join(textParts, ""),
 			ToolCalls: toolCalls,

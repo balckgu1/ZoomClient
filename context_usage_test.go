@@ -32,7 +32,7 @@ func newUsageTestSession(t *testing.T) *AgentSession {
 	registry.Register(stubUsageTool{name: "read_file"})
 	cfg := &compact.CompactConfig{ContextLimit: 1000, PersistDir: t.TempDir()}
 	return &AgentSession{
-		State:          &fsm.State{Messages: []fsm.Message{{Role: "user", Content: "hi"}}},
+		State:          &fsm.State{Messages: []clients.Message{{Role: "user", Content: "hi"}}},
 		Pipeline:       newTestPipeline(),
 		Registry:       registry,
 		CompactManager: compact.NewCompactManager(cfg, nil, "test-model"),

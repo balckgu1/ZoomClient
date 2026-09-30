@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"zoomClient/clients"
-	"zoomClient/fsm"
 	"zoomClient/logger"
 	"zoomClient/tools"
 
@@ -60,7 +59,7 @@ func (subagent *SubAgent) Run(prompt string) (string, error) {
 
 	// system prompt + 子任务 user prompt
 	systemPrompt := subagent.resolveSystemPrompt()
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: prompt},
 	}
@@ -69,22 +68,17 @@ func (subagent *SubAgent) Run(prompt string) (string, error) {
 	return subagent.subagentLoop(messages)
 }
 
-// deepCopyMessages 深拷贝消息切片
-func deepCopyMessages(messages []fsm.Message) []fsm.Message {
-	return append([]fsm.Message(nil), messages...)
-}
-
 // RunWithFork 以 fork 模式运行子智能体
 // 继承父 agent 的消息上下文，在其末尾追加当前子任务 prompt
-func (subagent *SubAgent) RunWithFork(prompt string, parentMessages []fsm.Message) (string, error) {
+func (subagent *SubAgent) RunWithFork(prompt string, parentMessages []clients.Message) (string, error) {
 	if err := subagent.validateDependencies(); err != nil {
 		return "", err
 	}
 
 	// 字段级深复制 parentMessages，避免子智能体追加/修改污染父消息
-	forked := make([]fsm.Message, len(parentMessages))
-	for i, m := range parentMessages {
-		forked[i] = deepCopyMessage(m)
+	forked := make([]clients.Message, 0, len(parentMessages)+1)
+	for _, m := range parentMessages {
+		forked = append(forked, deepCopyMessage(m))
 	}
 
 	// 裁剪末尾的 assistant 消息（它就是触发本次 sub_task 调用的那一轮）
@@ -93,7 +87,7 @@ func (subagent *SubAgent) RunWithFork(prompt string, parentMessages []fsm.Messag
 	}
 
 	// 末尾追加 fork 子任务 user 消息
-	forked = append(forked, fsm.Message{
+	forked = append(forked, clients.Message{
 		Role:    "user",
 		Content: subagent.ForkSubtaskPromptPrefix + prompt,
 	})
@@ -143,7 +137,7 @@ func (subagent *SubAgent) resolveTemperature() map[string]interface{} {
 }
 
 // runLoop 子智能体 loop
-func (subagent *SubAgent) subagentLoop(messages []fsm.Message) (string, error) {
+func (subagent *SubAgent) subagentLoop(messages []clients.Message) (string, error) {
 	maxTurns := subagent.resolveMaxTurns()
 	toolList := subagent.Registry.GetAll()
 	options := subagent.resolveTemperature()
@@ -188,7 +182,7 @@ func (subagent *SubAgent) subagentLoop(messages []fsm.Message) (string, error) {
 			lastAssistantText = contentStr
 		}
 
-		messages = append(messages, fsm.Message{
+		messages = append(messages, clients.Message{
 			Role:             "assistant",
 			Content:          response.Message.Content,
 			ToolCalls:        response.Message.ToolCalls,
@@ -211,7 +205,7 @@ func (subagent *SubAgent) subagentLoop(messages []fsm.Message) (string, error) {
 		results := tools.ExecuteToolCalls(response.Message.ToolCalls, subagent.Registry, subagent.ToolCtx)
 
 		for i, result := range results {
-			messages = append(messages, fsm.Message{
+			messages = append(messages, clients.Message{
 				Role:       "tool",
 				Content:    result.Content,
 				ToolCallID: response.Message.ToolCalls[i].ID,
@@ -252,8 +246,8 @@ func logWarn(msg string, fields ...zap.Field) {
 	}
 }
 
-// deepCopyMessage 对 fsm.Message 做字段级深拷贝
-func deepCopyMessage(m fsm.Message) fsm.Message {
+// deepCopyMessage 对 clients.Message 做字段级深拷贝
+func deepCopyMessage(m clients.Message) clients.Message {
 	copied := m
 	// 深拷贝 ToolCalls 切片
 	if len(m.ToolCalls) > 0 {

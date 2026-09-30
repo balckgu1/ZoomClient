@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"zoomClient/fsm"
 	"zoomClient/tools"
 
 	"google.golang.org/genai"
@@ -26,7 +25,7 @@ func NewGeminiClient(apiKey string) *GeminiClient {
 
 // ===================== 转换辅助函数 =====================
 
-// geminiContentStr 将 fsm.Message.Content 安全转为字符串。
+// geminiContentStr 将 Message.Content 安全转为字符串。
 func geminiContentStr(c interface{}) string {
 	switch v := c.(type) {
 	case nil:
@@ -98,7 +97,7 @@ func buildGeminiTools(toolList []tools.Tool) []*genai.Tool {
 
 // buildIDToNameMap 从消息历史中构建 ToolCallID → 函数名 的映射，
 // 用于将 role:"tool" 消息转换为 FunctionResponse 时查找函数名。
-func buildIDToNameMap(messages []fsm.Message) map[string]string {
+func buildIDToNameMap(messages []Message) map[string]string {
 	m := make(map[string]string)
 	for _, msg := range messages {
 		if msg.Role == "assistant" {
@@ -110,7 +109,7 @@ func buildIDToNameMap(messages []fsm.Message) map[string]string {
 	return m
 }
 
-// convertToGeminiContents 将内部 fsm.Message 列表转换为 Gemini Contents。
+// convertToGeminiContents 将内部 Message 列表转换为 Gemini Contents。
 // 同时返回提取出的 system 文本。
 //
 // 处理规则：
@@ -118,7 +117,7 @@ func buildIDToNameMap(messages []fsm.Message) map[string]string {
 //  2. user      → Content{Role:"user", Parts:[{Text:...}]}
 //  3. assistant → Content{Role:"model", Parts:[{Text:...}, {FunctionCall:...}]}
 //  4. tool      → 收集连续多条，合并为单条 Content{Role:"user", Parts:[{FunctionResponse:...}...]}
-func convertToGeminiContents(messages []fsm.Message) ([]*genai.Content, string) {
+func convertToGeminiContents(messages []Message) ([]*genai.Content, string) {
 	var contents []*genai.Content
 	var systemText string
 	idToName := buildIDToNameMap(messages)
@@ -191,7 +190,7 @@ func convertToGeminiContents(messages []fsm.Message) ([]*genai.Content, string) 
 //  2. assistant 角色映射为 Gemini 的 "model" 角色；
 //  3. 连续 tool 消息合并为单条含 FunctionResponsePart 的 user 消息；
 //  4. 响应 Parts 中 Text 拼接为内容，FunctionCall 转为 ToolCall。
-func (c *GeminiClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
+func (c *GeminiClient) Chat(model string, messages []Message, toolList []tools.Tool, options map[string]interface{}) (*ChatResponse, error) {
 	ctx := context.Background()
 
 	// 1. 创建 SDK 客户端（每次调用创建，保持构造函数零错误的惯例）
@@ -255,7 +254,7 @@ func (c *GeminiClient) Chat(model string, messages []fsm.Message, toolList []too
 	chatResp := &ChatResponse{
 		Model: model,
 		Done:  true,
-		Message: fsm.Message{
+		Message: Message{
 			Role:      "assistant",
 			Content:   strings.Join(textParts, ""),
 			ToolCalls: toolCalls,

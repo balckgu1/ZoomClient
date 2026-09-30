@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 	"zoomClient/clients"
-	"zoomClient/fsm"
 	"zoomClient/logger"
 	"zoomClient/tools"
 
@@ -19,9 +18,9 @@ func init() {
 // mockClient 是一个 mock ChatClient，用于测试
 type mockClient struct{}
 
-func (m *mockClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
+func (m *mockClient) Chat(model string, messages []clients.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
 	return &clients.ChatResponse{
-		Message: fsm.Message{Content: "Explaining Sorting Algorithms in Go"},
+		Message: clients.Message{Content: "Explaining Sorting Algorithms in Go"},
 	}, nil
 }
 
@@ -56,7 +55,7 @@ func TestManager_SaveAndLoad(t *testing.T) {
 	mgr := tempManager(t)
 
 	r := mgr.CreateSession()
-	r.Messages = []fsm.Message{
+	r.Messages = []clients.Message{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hello! How can I help you today?"},
 	}
@@ -98,12 +97,12 @@ func TestManager_Delete(t *testing.T) {
 
 	r1 := mgr.CreateSession()
 	r1.TurnCount = 1
-	r1.Messages = []fsm.Message{{Role: "user", Content: "test"}}
+	r1.Messages = []clients.Message{{Role: "user", Content: "test"}}
 	mgr.Save(r1)
 
 	r2 := mgr.CreateSession()
 	r2.TurnCount = 1
-	r2.Messages = []fsm.Message{{Role: "user", Content: "test2"}}
+	r2.Messages = []clients.Message{{Role: "user", Content: "test2"}}
 	mgr.Save(r2)
 
 	// Delete current (r2), should switch to r1
@@ -125,7 +124,7 @@ func TestManager_DeleteLastCreatesNew(t *testing.T) {
 
 	r := mgr.CreateSession()
 	r.TurnCount = 1
-	r.Messages = []fsm.Message{{Role: "user", Content: "test"}}
+	r.Messages = []clients.Message{{Role: "user", Content: "test"}}
 	mgr.Save(r)
 
 	mgr.Delete(r.ID)
@@ -160,7 +159,7 @@ func TestManager_Rename(t *testing.T) {
 			manager := tempManager(t)
 			r := manager.CreateSession()
 			r.TurnCount = 1
-			r.Messages = []fsm.Message{{Role: "user", Content: "test"}}
+			r.Messages = []clients.Message{{Role: "user", Content: "test"}}
 			manager.Save(r)
 
 			err := manager.Rename(r.ID, tt.newTitle)
@@ -185,14 +184,14 @@ func TestManager_GenerateTitle(t *testing.T) {
 	testcases := []struct {
 		name          string
 		fallbackTitle string
-		messages      []fsm.Message
+		messages      []clients.Message
 		wantErr       bool
 		wantTitle     string
 	}{
 		{
 			name:          "generate from messages",
 			fallbackTitle: "NewSession",
-			messages: []fsm.Message{
+			messages: []clients.Message{
 				{Role: "user", Content: "Please implement quicksort in Go"},
 				{Role: "assistant", Content: "Alright, here's the code for implementing quicksort in Go..."},
 			},
@@ -202,7 +201,7 @@ func TestManager_GenerateTitle(t *testing.T) {
 		{
 			name:          "fallback when no messages",
 			fallbackTitle: "NewSession",
-			messages:      []fsm.Message{},
+			messages:      []clients.Message{},
 			wantErr:       false,
 			wantTitle:     "NewSession",
 		},

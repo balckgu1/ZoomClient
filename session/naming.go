@@ -7,7 +7,7 @@ package session
 import (
 	"fmt"
 	"strings"
-	"zoomClient/fsm"
+	"zoomClient/clients"
 	"zoomClient/logger"
 
 	"go.uber.org/zap"
@@ -41,7 +41,7 @@ func (m *Manager) GenerateTitle(record *SessionRecord) (string, error) {
 
 	// 构造命名请求 message
 	prompt := fmt.Sprintf(namingPrompt, truncate(userMsg, maxUserPrompt), truncate(assistantMsg, maxAssistPrompt))
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "user", Content: prompt},
 	}
 
@@ -65,7 +65,7 @@ func (m *Manager) GenerateTitle(record *SessionRecord) (string, error) {
 }
 
 // extractFirstExchange 从 []message 中提取 user 首条消息和 assistant 首条回复
-func extractFirstExchange(messages []fsm.Message) (userMsg, assistantMsg string) {
+func extractFirstExchange(messages []clients.Message) (userMsg, assistantMsg string) {
 	for _, msg := range messages {
 		switch msg.Role {
 		case "user":
@@ -97,7 +97,7 @@ func cleanTitle(s string) string {
 }
 
 // fallbackTitle 降级方案, 截断 user 首条消息前 maxTitleLen 个字符作为标题
-func fallbackTitle(messages []fsm.Message) string {
+func fallbackTitle(messages []clients.Message) string {
 	for _, msg := range messages {
 		if msg.Role == "user" {
 			text := contentToString(msg.Content)
@@ -113,7 +113,7 @@ func fallbackTitle(messages []fsm.Message) string {
 	return "NewSession"
 }
 
-// contentToString 安全地将 fsm.Message.Content (interface{}) 转为 string
+// contentToString 安全地将 clients.Message.Content (interface{}) 转为 string
 func contentToString(content interface{}) string {
 	switch v := content.(type) {
 	case nil:

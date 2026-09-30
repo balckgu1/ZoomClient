@@ -3,7 +3,7 @@ package prompt
 import (
 	"strings"
 	"testing"
-	"zoomClient/fsm"
+	"zoomClient/clients"
 	"zoomClient/skills"
 	"zoomClient/tools"
 )
@@ -17,7 +17,7 @@ func newTestPipeline() *MessagePipeline {
 // TestAssemblePayload_BasicFlow 基本组装流程
 func TestAssemblePayload_BasicFlow(t *testing.T) {
 	p := newTestPipeline()
-	msgs := []fsm.Message{
+	msgs := []clients.Message{
 		{Role: "user", Content: "hello"},
 	}
 
@@ -37,7 +37,7 @@ func TestAssemblePayload_BasicFlow(t *testing.T) {
 // TestAssemblePayload_RemovesLeadingSystem 验证 normalize 去除首条 system
 func TestAssemblePayload_RemovesLeadingSystem(t *testing.T) {
 	p := newTestPipeline()
-	msgs := []fsm.Message{
+	msgs := []clients.Message{
 		{Role: "system", Content: "old system prompt"},
 		{Role: "user", Content: "hi"},
 	}
@@ -85,7 +85,7 @@ func TestAssemblePayload_WithReminders(t *testing.T) {
 	p := newTestPipeline()
 	p.AddReminder(Reminder{Content: "update your plan", Source: "todo", OneShot: true})
 
-	msgs := []fsm.Message{
+	msgs := []clients.Message{
 		{Role: "user", Content: "do something"},
 	}
 
@@ -103,7 +103,7 @@ func TestAssemblePayload_WithReminders(t *testing.T) {
 // TestAssemblePayload_EmptyMessages 空消息列表不 panic
 func TestAssemblePayload_EmptyMessages(t *testing.T) {
 	p := newTestPipeline()
-	payload := p.AssemblePayload([]fsm.Message{})
+	payload := p.AssemblePayload([]clients.Message{})
 
 	if payload.SystemPrompt == "" {
 		t.Error("SystemPrompt should still be built even with empty messages")
@@ -116,7 +116,7 @@ func TestAssemblePayload_EmptyMessages(t *testing.T) {
 // TestNormalize_PreservesToolCallsWithEmptyContent assistant 有 ToolCalls 但 content 为空时应保留
 func TestNormalize_PreservesToolCallsWithEmptyContent(t *testing.T) {
 	p := newTestPipeline()
-	msgs := []fsm.Message{
+	msgs := []clients.Message{
 		{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "1", Name: "test"}}},
 	}
 

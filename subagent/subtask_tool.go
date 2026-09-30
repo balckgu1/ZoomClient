@@ -3,15 +3,15 @@ package subagent
 import (
 	"errors"
 	"strings"
-	"zoomClient/fsm"
+	"zoomClient/clients"
 	"zoomClient/tools"
 )
 
 // SubAgentRunner 子智能体运行器签名
-type SubAgentRunner func(prompt string, parentMessages []fsm.Message) (string, error)
+type SubAgentRunner func(prompt string, parentMessages []clients.Message) (string, error)
 
 // ParentMessagesProvider 父消息提供者
-type ParentMessagesProvider func() []fsm.Message
+type ParentMessagesProvider func() []clients.Message
 
 // TaskTool 实现 Tool 接口，把子任务委托给子智能体执行
 type TaskTool struct {
@@ -84,7 +84,7 @@ func (t *TaskTool) Call(args map[string]any, ctx *tools.ToolContext) tools.ToolR
 	fork := parseBoolArg(args, "fork")
 
 	// fork 模式下取父消息快照
-	var parentMessages []fsm.Message
+	var parentMessages []clients.Message
 	if fork {
 		if t.parentMessagesProvider == nil {
 			return tools.ToolResult{

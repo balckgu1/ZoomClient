@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"zoomClient/fsm"
 	"zoomClient/tools"
 )
 
@@ -60,7 +59,7 @@ func TestBuildOpenAITools(t *testing.T) {
 }
 
 func TestConvertToOpenAIMessages(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "system", Content: "You are a helpful assistant"},
 		{Role: "user", Content: "Hello"},
 		{
@@ -121,7 +120,7 @@ func TestConvertToOpenAIMessages(t *testing.T) {
 }
 
 func TestConvertToOpenAIMessages_WithReasoningContent(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{
 			Role:             "assistant",
 			Content:          "The answer is 42",
@@ -223,7 +222,7 @@ func TestOpenAIClient_Chat_Success(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "test-key")
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "user", Content: "Say hello"},
 	}
 
@@ -280,7 +279,7 @@ func TestOpenAIClient_Chat_WithToolCalls(t *testing.T) {
 	toolList := []tools.Tool{
 		mockTool{name: "read_file", description: "Read file", params: map[string]interface{}{"type": "object"}},
 	}
-	messages := []fsm.Message{{Role: "user", Content: "Read a file"}}
+	messages := []Message{{Role: "user", Content: "Read a file"}}
 
 	resp, err := client.Chat("gpt-4o", messages, toolList, nil)
 	if err != nil {
@@ -305,7 +304,7 @@ func TestOpenAIClient_Chat_ErrorStatus(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "bad-key")
-	messages := []fsm.Message{{Role: "user", Content: "Hello"}}
+	messages := []Message{{Role: "user", Content: "Hello"}}
 
 	_, err := client.Chat("gpt-4o", messages, nil, nil)
 	if err == nil {
@@ -331,7 +330,7 @@ func TestOpenAIClient_Chat_EmptyChoices(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "test-key")
-	messages := []fsm.Message{{Role: "user", Content: "Hello"}}
+	messages := []Message{{Role: "user", Content: "Hello"}}
 
 	_, err := client.Chat("gpt-4o", messages, nil, nil)
 	if err == nil {
@@ -364,7 +363,7 @@ func TestOpenAIClient_Chat_NilContentFallback(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "test-key")
-	messages := []fsm.Message{{Role: "user", Content: "Hello"}}
+	messages := []Message{{Role: "user", Content: "Hello"}}
 
 	resp, err := client.Chat("gpt-4o", messages, nil, nil)
 	if err != nil {
@@ -428,7 +427,7 @@ func TestOpenAIClient_Chat_UsageParsed(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "test-key")
-	resp, err := client.Chat("gpt-4o", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	resp, err := client.Chat("gpt-4o", []Message{{Role: "user", Content: "hi"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -458,7 +457,7 @@ func TestOpenAIClient_Chat_UsageMissingTotal(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "test-key")
-	resp, err := client.Chat("gpt-4o", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	resp, err := client.Chat("gpt-4o", []Message{{Role: "user", Content: "hi"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -487,11 +486,90 @@ func TestOpenAIClient_Chat_UsageAbsent(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(server.URL, "test-key")
-	resp, err := client.Chat("gpt-4o", []fsm.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	resp, err := client.Chat("gpt-4o", []Message{{Role: "user", Content: "hi"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.Usage != (TokenUsage{}) {
 		t.Errorf("usage = %+v, want zero value when backend omits usage", resp.Usage)
+	}
+}
+
+// TestOpenAIClient_Chat_OptionsMappedToRequestBody 可选参数存在且类型匹配时应写入请求体对应字段
+func TestOpenAIClient_Chat_OptionsMappedToRequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body failed: %v", err)
+		}
+		// JSON 解码后数字统一为 float64，因此与 float64 比较
+		if got := body["temperature"]; got != float64(0.5) {
+			t.Errorf("temperature = %v, want 0.5", got)
+		}
+		if got := body["max_tokens"]; got != float64(100) {
+			t.Errorf("max_tokens = %v, want 100", got)
+		}
+		if got := body["reasoning_effort"]; got != "high" {
+			t.Errorf("reasoning_effort = %v, want %q", got, "high")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(OpenAIChatResponse{
+			Model: "gpt-4o",
+			Choices: []OpenAIChoice{
+				{Message: OpenAIMessage{Role: "assistant", Content: "ok"}},
+			},
+		}); err != nil {
+			t.Fatalf("encode mock response failed: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(server.URL, "test-key")
+	options := map[string]interface{}{
+		"temperature":      0.5,
+		"max_tokens":       100,
+		"reasoning_effort": "high",
+	}
+	if _, err := client.Chat("gpt-4o", []Message{{Role: "user", Content: "hi"}}, nil, options); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestOpenAIClient_Chat_OptionsInvalidTypeIgnored 类型不符或未支持的参数应被静默忽略，不写入请求体
+func TestOpenAIClient_Chat_OptionsInvalidTypeIgnored(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body failed: %v", err)
+		}
+		for _, key := range []string{"temperature", "max_tokens", "unknown_option"} {
+			if _, ok := body[key]; ok {
+				t.Errorf("%s should be omitted when type mismatches or unsupported", key)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(OpenAIChatResponse{
+			Model: "gpt-4o",
+			Choices: []OpenAIChoice{
+				{Message: OpenAIMessage{Role: "assistant", Content: "ok"}},
+			},
+		}); err != nil {
+			t.Fatalf("encode mock response failed: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(server.URL, "test-key")
+	options := map[string]interface{}{
+		"temperature":    "0.5", // 字符串而非 float64
+		"max_tokens":     100.0, // float64 而非 int
+		"unknown_option": true,  // 未支持的可选参数
+	}
+	if _, err := client.Chat("gpt-4o", []Message{{Role: "user", Content: "hi"}}, nil, options); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

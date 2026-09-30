@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"zoomClient/fsm"
+	"zoomClient/clients"
 	"zoomClient/logger"
 	"zoomClient/session"
 	"zoomClient/ui"
@@ -88,7 +88,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 			case "chat":
 				webSess.Busy.Store(true)
 				s.Em.EmitEmotion("thinking", nil)
-				s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: cmd.Message})
+				s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: cmd.Message})
 				// Create a fresh stop channel for this generation
 				webSess.StopCh = make(chan struct{})
 				agentLoop(s, webSess.StopCh)
@@ -220,7 +220,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 			continue
 		}
 		// Append user message and run agentLoop
-		s.State.Messages = append(s.State.Messages, fsm.Message{Role: "user", Content: input})
+		s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: input})
 		agentLoop(s, nil)
 
 		// Save session after each turn

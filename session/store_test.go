@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"zoomClient/fsm"
+	"zoomClient/clients"
 	"zoomClient/logger"
 
 	"go.uber.org/zap"
@@ -51,7 +51,7 @@ func TestStore_SaveAndLoad(t *testing.T) {
 				UpdatedAt: time.Now(),
 				Model:     "gpt-4o",
 				TurnCount: 2,
-				Messages: []fsm.Message{
+				Messages: []clients.Message{
 					{Role: "user", Content: "hello"},
 					{Role: "assistant", Content: "hi! how can I help?"},
 				},

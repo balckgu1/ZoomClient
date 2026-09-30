@@ -3,7 +3,6 @@ package clients
 import (
 	"testing"
 
-	"zoomClient/fsm"
 	"zoomClient/tools"
 
 	"google.golang.org/genai"
@@ -130,7 +129,7 @@ func TestParamsToGeminiSchema_RequiredAsInterfaceSlice(t *testing.T) {
 }
 
 func TestBuildIDToNameMap(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
@@ -187,7 +186,7 @@ func TestBuildGeminiTools(t *testing.T) {
 }
 
 func TestConvertToGeminiContents_SystemOnly(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "system", Content: "You are helpful"},
 	}
 
@@ -201,7 +200,7 @@ func TestConvertToGeminiContents_SystemOnly(t *testing.T) {
 }
 
 func TestConvertToGeminiContents_UserAndAssistant(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "system", Content: "You are helpful"},
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi!"},
@@ -227,7 +226,7 @@ func TestConvertToGeminiContents_UserAndAssistant(t *testing.T) {
 }
 
 func TestConvertToGeminiContents_AssistantWithToolCalls(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "user", Content: "Read files"},
 		{
 			Role:    "assistant",
@@ -258,7 +257,7 @@ func TestConvertToGeminiContents_AssistantWithToolCalls(t *testing.T) {
 }
 
 func TestConvertToGeminiContents_ToolResults(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
@@ -287,7 +286,7 @@ func TestConvertToGeminiContents_ToolResults(t *testing.T) {
 }
 
 func TestConvertToGeminiContents_MultipleToolResults(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
@@ -312,7 +311,7 @@ func TestConvertToGeminiContents_MultipleToolResults(t *testing.T) {
 }
 
 func TestConvertToGeminiContents_UnknownToolName(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "tool", Content: "orphan result", ToolCallID: "unknown_id"},
 	}
 

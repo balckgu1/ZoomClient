@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"zoomClient/clients"
-	"zoomClient/fsm"
 	"zoomClient/tools"
 
 	"go.uber.org/zap"
@@ -18,24 +17,24 @@ import (
 
 // stubChatClient 用于在不连真实模型的前提下测试整体压缩
 type stubChatClient struct {
-	summaryContent string        // 模型要返回的摘要文本；为空则走 returnErr
-	returnErr      error         // 模拟模型调用失败
-	lastMessages   []fsm.Message // 记录最近一次收到的消息列表
-	callCount      int           // 被调用的次数
+	summaryContent string            // 模型要返回的摘要文本；为空则走 returnErr
+	returnErr      error             // 模拟模型调用失败
+	lastMessages   []clients.Message // 记录最近一次收到的消息列表
+	callCount      int               // 被调用的次数
 }
 
 // Chat 实现 clients.ChatClient 接口
-func (s *stubChatClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
+func (s *stubChatClient) Chat(model string, messages []clients.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
 	s.callCount++
 	// 复制一份避免外部修改
-	s.lastMessages = append([]fsm.Message{}, messages...)
+	s.lastMessages = append([]clients.Message{}, messages...)
 	if s.returnErr != nil {
 		return nil, s.returnErr
 	}
 	return &clients.ChatResponse{
 		Model: model,
 		Done:  true,
-		Message: fsm.Message{
+		Message: clients.Message{
 			Role:    "assistant",
 			Content: s.summaryContent,
 		},
@@ -152,7 +151,7 @@ func TestMicroCompact_FewerThanKeep_NoChange(t *testing.T) {
 	cfg := defaultTestConfig() // KeepRecentToolResults = 3
 	m := newTestManager(t, cfg, &stubChatClient{})
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "q"},
 		{Role: "assistant", Content: "a"},
@@ -177,7 +176,7 @@ func TestMicroCompact_MoreThanKeep_ReplaceEarlier(t *testing.T) {
 	m := newTestManager(t, cfg, &stubChatClient{})
 
 	// 5 条 tool 消息：前 2 条应被占位替换，后 3 条保留
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "tool", Content: "old-1", ToolCallID: "c1"},
 		{Role: "user", Content: "中间穿插一条 user"},
@@ -232,7 +231,7 @@ func TestMicroCompact_Idempotent(t *testing.T) {
 	cfg := defaultTestConfig()
 	m := newTestManager(t, cfg, &stubChatClient{})
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "tool", Content: microCompactPlaceholder, ToolCallID: "c1"},
 		{Role: "tool", Content: "old", ToolCallID: "c2"},
 		{Role: "tool", Content: "keep-1", ToolCallID: "c3"},
@@ -259,7 +258,7 @@ func TestMicroCompact_NoSideEffect(t *testing.T) {
 	cfg := defaultTestConfig() // KeepRecentToolResults = 3
 	m := newTestManager(t, cfg, &stubChatClient{})
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "tool", Content: "old-1", ToolCallID: "c1"},
 		{Role: "tool", Content: "old-2", ToolCallID: "c2"},
@@ -292,7 +291,7 @@ func TestMicroCompact_NoSideEffect(t *testing.T) {
 func TestEstimateSize_IncludesAllFields(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "user", Content: "hi"},
 		{
 			Role:             "assistant",
@@ -323,7 +322,7 @@ func TestShouldAutoCompact_UnderLimit_False(t *testing.T) {
 	cfg := defaultTestConfig() // ContextLimit = 500
 	m := newTestManager(t, cfg, &stubChatClient{})
 
-	messages := []fsm.Message{{Role: "user", Content: "short"}}
+	messages := []clients.Message{{Role: "user", Content: "short"}}
 	if m.ShouldAutoCompact(messages) {
 		t.Error("上下文很小且无手动请求，不应触发压缩")
 	}
@@ -334,7 +333,7 @@ func TestShouldAutoCompact_OverLimit_True(t *testing.T) {
 	cfg := defaultTestConfig() // ContextLimit = 500
 	m := newTestManager(t, cfg, &stubChatClient{})
 
-	messages := []fsm.Message{{Role: "user", Content: strings.Repeat("x", 600)}}
+	messages := []clients.Message{{Role: "user", Content: strings.Repeat("x", 600)}}
 	if !m.ShouldAutoCompact(messages) {
 		t.Error("上下文超过 ContextLimit 应触发压缩")
 	}
@@ -345,7 +344,7 @@ func TestShouldAutoCompact_ManualRequest_True(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
 	m.RequestManualCompact()
 
-	messages := []fsm.Message{{Role: "user", Content: "short"}}
+	messages := []clients.Message{{Role: "user", Content: "short"}}
 	if !m.ShouldAutoCompact(messages) {
 		t.Error("手动请求后应触发压缩，无视上下文大小")
 	}
@@ -358,7 +357,7 @@ func TestCompactHistory_Success_ReplaceWithSummary(t *testing.T) {
 	stub := &stubChatClient{summaryContent: "SUMMARY: goal=X; files=a.go; next=run tests"}
 	m := newTestManager(t, defaultTestConfig(), stub)
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: "you are helpful"},
 		{Role: "user", Content: "帮我修 bug"},
 		{Role: "assistant", Content: "好的"},
@@ -410,7 +409,7 @@ func TestCompactHistory_ClientError_FallbackToOriginal(t *testing.T) {
 	stub := &stubChatClient{returnErr: fmt.Errorf("network down")}
 	m := newTestManager(t, defaultTestConfig(), stub)
 
-	original := []fsm.Message{
+	original := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "hi"},
 	}
@@ -437,7 +436,7 @@ func TestCompactHistory_ConsumesManualFlag(t *testing.T) {
 		t.Fatal("RequestManualCompact 后标记应为 true")
 	}
 
-	_, err := m.CompactHistory([]fsm.Message{{Role: "user", Content: "hi"}})
+	_, err := m.CompactHistory([]clients.Message{{Role: "user", Content: "hi"}})
 	if err != nil {
 		t.Fatalf("压缩应成功：%v", err)
 	}
@@ -445,7 +444,7 @@ func TestCompactHistory_ConsumesManualFlag(t *testing.T) {
 		t.Error("CompactHistory 执行后手动标记应被消费为 false")
 	}
 	// 再判断 ShouldAutoCompact，不应再因手动标记返回 true
-	if m.ShouldAutoCompact([]fsm.Message{{Role: "user", Content: "short"}}) {
+	if m.ShouldAutoCompact([]clients.Message{{Role: "user", Content: "short"}}) {
 		t.Error("手动标记消费后不应再触发")
 	}
 }
@@ -455,7 +454,7 @@ func TestCompactHistory_PreservesPendingToolCalls(t *testing.T) {
 	stub := &stubChatClient{summaryContent: "SUMMARY: working on bug fix"}
 	m := newTestManager(t, defaultTestConfig(), stub)
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: "you are helpful"},
 		{Role: "user", Content: "帮我修 bug"},
 		{Role: "assistant", Content: "好的，我来看看"},
@@ -507,7 +506,7 @@ func TestCompactHistory_NoTrailingToolCalls_Unchanged(t *testing.T) {
 	stub := &stubChatClient{summaryContent: "SUMMARY: done"}
 	m := newTestManager(t, defaultTestConfig(), stub)
 
-	messages := []fsm.Message{
+	messages := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "任务完成了"},
 		{Role: "assistant", Content: "好的，任务已完成"},
@@ -534,17 +533,17 @@ func TestCompactHistory_NoTrailingToolCalls_Unchanged(t *testing.T) {
 func TestFindPendingToolCallBoundary(t *testing.T) {
 	tests := []struct {
 		name     string
-		messages []fsm.Message
+		messages []clients.Message
 		want     int
 	}{
 		{
 			name:     "空消息",
-			messages: []fsm.Message{},
+			messages: []clients.Message{},
 			want:     -1,
 		},
 		{
 			name: "无 assistant 消息",
-			messages: []fsm.Message{
+			messages: []clients.Message{
 				{Role: "user", Content: "hi"},
 				{Role: "tool", Content: "result", ToolCallID: "c1"},
 			},
@@ -552,14 +551,14 @@ func TestFindPendingToolCallBoundary(t *testing.T) {
 		},
 		{
 			name: "assistant 但无 tool_calls",
-			messages: []fsm.Message{
+			messages: []clients.Message{
 				{Role: "assistant", Content: "hello"},
 			},
 			want: -1,
 		},
 		{
 			name: "最后一条是带 tool_calls 的 assistant",
-			messages: []fsm.Message{
+			messages: []clients.Message{
 				{Role: "user", Content: "hi"},
 				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c1"}}},
 			},
@@ -567,7 +566,7 @@ func TestFindPendingToolCallBoundary(t *testing.T) {
 		},
 		{
 			name: "assistant(tool_calls) 后跟 tool 结果",
-			messages: []fsm.Message{
+			messages: []clients.Message{
 				{Role: "user", Content: "hi"},
 				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c1"}}},
 				{Role: "tool", Content: "result", ToolCallID: "c1"},
@@ -576,7 +575,7 @@ func TestFindPendingToolCallBoundary(t *testing.T) {
 		},
 		{
 			name: "多个 assistant(tool_calls) 取最后一个",
-			messages: []fsm.Message{
+			messages: []clients.Message{
 				{Role: "assistant", Content: "", ToolCalls: []tools.ToolCall{{ID: "c1"}}},
 				{Role: "tool", Content: "r1", ToolCallID: "c1"},
 				{Role: "assistant", Content: "中间对话"},
@@ -627,7 +626,7 @@ func TestCompactTool_Call_TriggersCompactionViaShouldAutoCompact(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{summaryContent: "ok"})
 	tool := NewCompactTool(m)
 
-	shortMsgs := []fsm.Message{{Role: "user", Content: "短消息"}}
+	shortMsgs := []clients.Message{{Role: "user", Content: "短消息"}}
 	if m.ShouldAutoCompact(shortMsgs) {
 		t.Fatal("前置条件错误：短消息本不应触发压缩")
 	}
@@ -644,7 +643,7 @@ func TestCompactTool_Call_TriggersCompactionViaShouldAutoCompact(t *testing.T) {
 // TestComputeUsage_SumsAllParts 验证快照汇总：total=四部分之和，limit 透传配置。
 func TestComputeUsage_SumsAllParts(t *testing.T) {
 	m := newTestManager(t, defaultTestConfig(), &stubChatClient{})
-	msgs := []fsm.Message{{Role: "user", Content: "hello"}}
+	msgs := []clients.Message{{Role: "user", Content: "hello"}}
 
 	snap := m.ComputeUsage(UsageParts{
 		SystemPromptBytes: 100,

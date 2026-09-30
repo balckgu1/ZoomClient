@@ -3,7 +3,6 @@ package clients
 import (
 	"testing"
 
-	"zoomClient/fsm"
 	"zoomClient/tools"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -52,7 +51,7 @@ func TestAnthropicUsage_Normalization(t *testing.T) {
 }
 
 func TestConvertToAnthropicMessages_SystemOnly(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "system", Content: "You are a helpful assistant"},
 	}
 
@@ -66,7 +65,7 @@ func TestConvertToAnthropicMessages_SystemOnly(t *testing.T) {
 }
 
 func TestConvertToAnthropicMessages_UserAndAssistant(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "system", Content: "You are a helpful assistant"},
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there!"},
@@ -92,7 +91,7 @@ func TestConvertToAnthropicMessages_UserAndAssistant(t *testing.T) {
 }
 
 func TestConvertToAnthropicMessages_AssistantWithToolCalls(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "user", Content: "Read files"},
 		{
 			Role:    "assistant",
@@ -124,7 +123,7 @@ func TestConvertToAnthropicMessages_AssistantWithToolCalls(t *testing.T) {
 }
 
 func TestConvertToAnthropicMessages_ToolResults(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "user", Content: "Read files"},
 		{
 			Role: "assistant",
@@ -149,7 +148,7 @@ func TestConvertToAnthropicMessages_ToolResults(t *testing.T) {
 }
 
 func TestConvertToAnthropicMessages_MultipleToolResults(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{
 			Role: "assistant",
 			ToolCalls: []tools.ToolCall{
@@ -177,7 +176,7 @@ func TestConvertToAnthropicMessages_MultipleToolResults(t *testing.T) {
 }
 
 func TestConvertToAnthropicMessages_EmptyAssistant(t *testing.T) {
-	messages := []fsm.Message{
+	messages := []Message{
 		{Role: "assistant", Content: ""},
 	}
 

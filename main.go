@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"zoomClient/clients"
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
@@ -117,7 +118,7 @@ func main() {
 	log.Info("MessagePipeline initialized")
 
 	// Initialize Session state
-	state := &fsm.State{Messages: []fsm.Message{}, TurnCount: 0}
+	state := &fsm.State{Messages: []clients.Message{}, TurnCount: 0}
 
 	// Permission system
 	permitMgr := initPermissionManager(flags.OutputMode, cfg, webSess)

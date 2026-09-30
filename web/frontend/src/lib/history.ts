@@ -1,6 +1,6 @@
 import type { ChatMessage, PersistedMessage } from "../types";
 
-// 本文件把后端持久化的原始消息（fsm.Message[]）无损重建为前端展示用的
+// 本文件把后端持久化的原始消息（clients.Message[]）无损重建为前端展示用的
 // ChatMessage[]，使"从磁盘重载历史"的视图与"实时 SSE 渲染"的视图保持一致。
 //
 // 关键点：调用工具的 assistant 轮次持久化时 content 为空、调用信息在 tool_calls
@@ -14,7 +14,7 @@ function safeTruncate(str: string, maxLen: number): string {
   return chars.slice(0, maxLen).join("") + "…";
 }
 
-/** 把 fsm.Message.Content（可能是字符串、数组或 null）安全转为可读字符串。 */
+/** 把 clients.Message.Content（可能是字符串、数组或 null）安全转为可读字符串。 */
 export function contentToStr(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "string") return v;
@@ -41,7 +41,7 @@ export function previewArgs(args?: Record<string, unknown>): string {
 }
 
 /**
- * 把持久化的 fsm.Message[] 重建为 ChatMessage[]。
+ * 把持久化的 clients.Message[] 重建为 ChatMessage[]。
  *
  * @param raw    后端 SessionRecord.messages（原始 JSON）
  * @param genId  稳定 key 生成器（与实时渲染共用同一计数器）

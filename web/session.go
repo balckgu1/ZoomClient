@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"zoomClient/clients"
 	"zoomClient/compact"
 	"zoomClient/fsm"
 )
@@ -77,7 +78,7 @@ func NewSession(id, model string) *Session {
 	return &Session{
 		ID:      id,
 		Model:   model,
-		State:   &fsm.State{Messages: []fsm.Message{}, TurnCount: 0},
+		State:   &fsm.State{Messages: []clients.Message{}, TurnCount: 0},
 		CmdCh:   make(chan Command, 16),
 		EventCh: make(chan Event, 256),
 	}

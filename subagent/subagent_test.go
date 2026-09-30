@@ -22,14 +22,14 @@ type fakeChatClient struct {
 	responses         []*clients.ChatResponse // 预设响应序列
 	errors            []error                 // 预设错误序列（与 responses 同索引）
 	calls             int                     // 已调用次数
-	capturedMessages  [][]fsm.Message         // 每次调用时收到的 messages 快照（深拷贝）
+	capturedMessages  [][]clients.Message     // 每次调用时收到的 messages 快照（深拷贝）
 	capturedToolLists [][]tools.Tool          // 每次调用时收到的 toolList 快照
 }
 
 // Chat 实现 clients.ChatClient 接口
 // 对入参 messages 做深拷贝，避免子智能体后续 append 污染断言结果
-func (f *fakeChatClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
-	snapshot := make([]fsm.Message, len(messages))
+func (f *fakeChatClient) Chat(model string, messages []clients.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
+	snapshot := make([]clients.Message, len(messages))
 	copy(snapshot, messages)
 	f.capturedMessages = append(f.capturedMessages, snapshot)
 	f.capturedToolLists = append(f.capturedToolLists, toolList)
@@ -48,14 +48,14 @@ func (f *fakeChatClient) Chat(model string, messages []fsm.Message, toolList []t
 // finalResponse 构造"不含工具调用"的最终回复
 func finalResponse(text string) *clients.ChatResponse {
 	return &clients.ChatResponse{
-		Message: fsm.Message{Role: "assistant", Content: text},
+		Message: clients.Message{Role: "assistant", Content: text},
 	}
 }
 
 // toolCallResponse 构造"含单个工具调用"的中间回复
 func toolCallResponse(toolName string, args map[string]interface{}, id string) *clients.ChatResponse {
 	return &clients.ChatResponse{
-		Message: fsm.Message{
+		Message: clients.Message{
 			Role:    "assistant",
 			Content: "",
 			ToolCalls: []tools.ToolCall{
@@ -129,7 +129,7 @@ func TestRunWithFork_InheritsParentAndAppendsForkPrompt(t *testing.T) {
 	}
 	sub := newForkSubAgent(fake, t.TempDir(), 3)
 
-	parentMessages := []fsm.Message{
+	parentMessages := []clients.Message{
 		{Role: "system", Content: "parent-system"},
 		{Role: "user", Content: "parent-user-1"},
 		{Role: "assistant", Content: "parent-assistant-1"},
@@ -179,7 +179,7 @@ func TestRunWithFork_TrimsTrailingAssistant(t *testing.T) {
 	}
 	sub := newForkSubAgent(fake, t.TempDir(), 3)
 
-	parentMessages := []fsm.Message{
+	parentMessages := []clients.Message{
 		{Role: "system", Content: "parent-system"},
 		{Role: "user", Content: "parent-user"},
 		{Role: "assistant", Content: "parent-assistant（触发 sub_task 的那一轮）"},
@@ -216,7 +216,7 @@ func TestRunWithFork_KeepsTrailingTool(t *testing.T) {
 	}
 	sub := newForkSubAgent(fake, t.TempDir(), 3)
 
-	parentMessages := []fsm.Message{
+	parentMessages := []clients.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "tool", Content: "tool-result", ToolCallID: "call_1"},
 	}
@@ -244,7 +244,7 @@ func TestRunWithFork_DoesNotMutateParentMessages(t *testing.T) {
 	}
 	sub := newForkSubAgent(fake, t.TempDir(), 3)
 
-	parentMessages := []fsm.Message{
+	parentMessages := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"}, // 会被 fork 裁剪
@@ -270,7 +270,7 @@ func TestRunWithFork_DoesNotMutateParentMessages(t *testing.T) {
 // TestRunWithFork_ReturnsErrorOnMissingDependencies
 // 依赖校验：Client 或 Registry 为 nil 时应报错
 func TestRunWithFork_ReturnsErrorOnMissingDependencies(t *testing.T) {
-	parentMessages := []fsm.Message{{Role: "user", Content: "x"}}
+	parentMessages := []clients.Message{{Role: "user", Content: "x"}}
 
 	// 缺 Client
 	subNoClient := &SubAgent{Registry: BuildSubAgentRegistry()}
@@ -303,7 +303,7 @@ func TestRunWithFork_ExecutesToolCallsInForkedContext(t *testing.T) {
 	}
 	sub := newForkSubAgent(fake, tmpDir, 5)
 
-	parentMessages := []fsm.Message{
+	parentMessages := []clients.Message{
 		{Role: "user", Content: "parent-user"},
 	}
 
@@ -339,7 +339,7 @@ func TestRunWithFork_HitsMaxTurns(t *testing.T) {
 	fake := &fakeChatClient{responses: responses}
 
 	sub := newForkSubAgent(fake, tmpDir, 2)
-	parentMessages := []fsm.Message{{Role: "user", Content: "p"}}
+	parentMessages := []clients.Message{{Role: "user", Content: "p"}}
 
 	summary, err := sub.RunWithFork("死循环读文件", parentMessages)
 	if !errors.Is(err, ErrMaxTurnsReached) {
@@ -360,19 +360,19 @@ func TestRunWithFork_HitsMaxTurns(t *testing.T) {
 // TestTaskTool_Call_ForkTrue_PassesParentMessagesToRunner
 // 正常路径：fork=true 时 TaskTool 应从 provider 取父消息并传给 runner
 func TestTaskTool_Call_ForkTrue_PassesParentMessagesToRunner(t *testing.T) {
-	providerMessages := []fsm.Message{
+	providerMessages := []clients.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "u1"},
 	}
 
 	var capturedPrompt string
-	var capturedParent []fsm.Message
-	runner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+	var capturedParent []clients.Message
+	runner := func(prompt string, parentMessages []clients.Message) (string, error) {
 		capturedPrompt = prompt
 		capturedParent = parentMessages
 		return "ok-summary", nil
 	}
-	provider := func() []fsm.Message { return providerMessages }
+	provider := func() []clients.Message { return providerMessages }
 
 	tool := NewTaskTool(runner, provider)
 	result := tool.Call(map[string]any{"prompt": "子任务", "fork": true}, nil)
@@ -404,14 +404,14 @@ func TestTaskTool_Call_ForkFalseOrMissing_PassesNilParentMessages(t *testing.T) 
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			var capturedParent []fsm.Message
-			runner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+			var capturedParent []clients.Message
+			runner := func(prompt string, parentMessages []clients.Message) (string, error) {
 				capturedParent = parentMessages
 				return "done", nil
 			}
 			// provider 给非空，但 fork=false 时不应被使用
-			provider := func() []fsm.Message {
-				return []fsm.Message{{Role: "user", Content: "should-not-be-used"}}
+			provider := func() []clients.Message {
+				return []clients.Message{{Role: "user", Content: "should-not-be-used"}}
 			}
 
 			tool := NewTaskTool(runner, provider)
@@ -430,7 +430,7 @@ func TestTaskTool_Call_ForkFalseOrMissing_PassesNilParentMessages(t *testing.T) 
 // TestTaskTool_Call_ForkTrue_WithoutProvider_ReturnsError
 // 异常：fork=true 但未配置 provider
 func TestTaskTool_Call_ForkTrue_WithoutProvider_ReturnsError(t *testing.T) {
-	runner := func(string, []fsm.Message) (string, error) { return "x", nil }
+	runner := func(string, []clients.Message) (string, error) { return "x", nil }
 
 	tool := NewTaskTool(runner, nil) // provider 为 nil
 	result := tool.Call(map[string]any{"prompt": "p", "fork": true}, nil)
@@ -446,8 +446,8 @@ func TestTaskTool_Call_ForkTrue_WithoutProvider_ReturnsError(t *testing.T) {
 // TestTaskTool_Call_ForkTrue_EmptyParent_ReturnsError
 // 异常：fork=true 但 provider 返回空切片
 func TestTaskTool_Call_ForkTrue_EmptyParent_ReturnsError(t *testing.T) {
-	runner := func(string, []fsm.Message) (string, error) { return "x", nil }
-	provider := func() []fsm.Message { return []fsm.Message{} }
+	runner := func(string, []clients.Message) (string, error) { return "x", nil }
+	provider := func() []clients.Message { return []clients.Message{} }
 
 	tool := NewTaskTool(runner, provider)
 	result := tool.Call(map[string]any{"prompt": "p", "fork": true}, nil)
@@ -464,14 +464,14 @@ func TestTaskTool_Call_ForkTrue_EmptyParent_ReturnsError(t *testing.T) {
 // 兼容性：fork="true"（字符串）应被识别为 true
 func TestTaskTool_Call_ForkStringTrue_TreatedAsBool(t *testing.T) {
 	called := false
-	runner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+	runner := func(prompt string, parentMessages []clients.Message) (string, error) {
 		called = true
 		if parentMessages == nil {
 			t.Error("fork 字符串 'true' 应触发 fork 逻辑，runner 应收到非 nil parentMessages")
 		}
 		return "ok", nil
 	}
-	provider := func() []fsm.Message { return []fsm.Message{{Role: "user", Content: "x"}} }
+	provider := func() []clients.Message { return []clients.Message{{Role: "user", Content: "x"}} }
 
 	tool := NewTaskTool(runner, provider)
 	result := tool.Call(map[string]any{"prompt": "p", "fork": "true"}, nil)
@@ -487,12 +487,12 @@ func TestTaskTool_Call_ForkStringTrue_TreatedAsBool(t *testing.T) {
 // TestTaskTool_Call_ForkInvalidType_TreatedAsFalse
 // 兼容性：fork 为非法类型（数字）时退化为 false，runner 收到 nil parentMessages
 func TestTaskTool_Call_ForkInvalidType_TreatedAsFalse(t *testing.T) {
-	var capturedParent []fsm.Message
-	runner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+	var capturedParent []clients.Message
+	runner := func(prompt string, parentMessages []clients.Message) (string, error) {
 		capturedParent = parentMessages
 		return "ok", nil
 	}
-	provider := func() []fsm.Message { return []fsm.Message{{Role: "user", Content: "x"}} }
+	provider := func() []clients.Message { return []clients.Message{{Role: "user", Content: "x"}} }
 
 	tool := NewTaskTool(runner, provider)
 	result := tool.Call(map[string]any{"prompt": "p", "fork": 123}, nil)
@@ -515,9 +515,9 @@ func TestTaskTool_Call_ForkInvalidType_TreatedAsFalse(t *testing.T) {
 func TestParentMessagesProvider_ClosureCapturesByReference(t *testing.T) {
 	// 模拟 main.go 中通过闭包暴露 state.Messages 的做法
 	state := &fsm.State{
-		Messages: []fsm.Message{{Role: "user", Content: "snapshot-v1"}},
+		Messages: []clients.Message{{Role: "user", Content: "snapshot-v1"}},
 	}
-	provider := func() []fsm.Message { return state.Messages }
+	provider := func() []clients.Message { return state.Messages }
 
 	// 首次调用：应拿到 v1
 	first := provider()
@@ -526,7 +526,7 @@ func TestParentMessagesProvider_ClosureCapturesByReference(t *testing.T) {
 	}
 
 	// 模拟 agentLoop 运行过程中往 state.Messages 追加新消息
-	state.Messages = append(state.Messages, fsm.Message{Role: "assistant", Content: "snapshot-v2"})
+	state.Messages = append(state.Messages, clients.Message{Role: "assistant", Content: "snapshot-v2"})
 
 	// 再次调用：应拿到 v2（证明 provider 是闭包，读的是引用）
 	second := provider()
@@ -542,12 +542,12 @@ func TestParentMessagesProvider_ClosureCapturesByReference(t *testing.T) {
 // 集成：TaskTool 多次触发 fork 时，每次都拿到最新的 state 快照
 func TestTaskTool_WithLiveProvider_ReadsLatestState(t *testing.T) {
 	state := &fsm.State{
-		Messages: []fsm.Message{{Role: "user", Content: "round-1"}},
+		Messages: []clients.Message{{Role: "user", Content: "round-1"}},
 	}
-	provider := func() []fsm.Message { return state.Messages }
+	provider := func() []clients.Message { return state.Messages }
 
 	var observedLengths []int
-	runner := func(prompt string, parentMessages []fsm.Message) (string, error) {
+	runner := func(prompt string, parentMessages []clients.Message) (string, error) {
 		observedLengths = append(observedLengths, len(parentMessages))
 		return "ok", nil
 	}
@@ -557,7 +557,7 @@ func TestTaskTool_WithLiveProvider_ReadsLatestState(t *testing.T) {
 	// 第一次调用：state 有 1 条
 	_ = tool.Call(map[string]any{"prompt": "p1", "fork": true}, nil)
 	// 模拟主循环追加消息
-	state.Messages = append(state.Messages, fsm.Message{Role: "user", Content: "round-2"})
+	state.Messages = append(state.Messages, clients.Message{Role: "user", Content: "round-2"})
 	// 第二次调用：state 有 2 条
 	_ = tool.Call(map[string]any{"prompt": "p2", "fork": true}, nil)
 
@@ -622,7 +622,7 @@ type cancelAfterFirstClient struct {
 	calls  int
 }
 
-func (c *cancelAfterFirstClient) Chat(model string, messages []fsm.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
+func (c *cancelAfterFirstClient) Chat(model string, messages []clients.Message, toolList []tools.Tool, options map[string]interface{}) (*clients.ChatResponse, error) {
 	c.calls++
 	resp, err := c.inner.Chat(model, messages, toolList, options)
 	// 第一轮返回后取消 context
@@ -639,7 +639,7 @@ func (c *cancelAfterFirstClient) Chat(model string, messages []fsm.Message, tool
 // TestDeepCopyMessage_ToolCallsIsolation
 // 验证：修改副本的 ToolCalls 不影响原始消息
 func TestDeepCopyMessage_ToolCallsIsolation(t *testing.T) {
-	original := fsm.Message{
+	original := clients.Message{
 		Role:    "assistant",
 		Content: "",
 		ToolCalls: []tools.ToolCall{
@@ -665,7 +665,7 @@ func TestDeepCopyMessage_ToolCallsIsolation(t *testing.T) {
 // TestDeepCopyMessage_SliceContentIsolation
 // 验证：修改副本的 []interface{} Content 不影响原始消息
 func TestDeepCopyMessage_SliceContentIsolation(t *testing.T) {
-	original := fsm.Message{
+	original := clients.Message{
 		Role:    "user",
 		Content: []interface{}{"text part", "image part"},
 	}
@@ -686,7 +686,7 @@ func TestDeepCopyMessage_SliceContentIsolation(t *testing.T) {
 // TestDeepCopyMessage_StringContentPreserved
 // 验证：字符串 Content 正常保留（string 不可变，无需深拷贝）
 func TestDeepCopyMessage_StringContentPreserved(t *testing.T) {
-	original := fsm.Message{
+	original := clients.Message{
 		Role:    "user",
 		Content: "hello world",
 	}

@@ -152,6 +152,8 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	skillregistry *skills.SkillRegistry, toolCtx *tools.ToolContext, state *fsm.State,
 	permitMgr *permission.Manager) (*tools.ToolRegister, *tools.TodoManager, *compact.CompactManager) {
+
+	// logger
 	log := logger.Log
 
 	registry := tools.NewToolRegister()

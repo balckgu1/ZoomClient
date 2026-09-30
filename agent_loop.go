@@ -25,6 +25,8 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 	todoManager, compactManager := s.TodoManager, s.CompactManager
 	hookRunner, em := s.HookRunner, s.Em
 	bgMgr := s.BgMgr
+	temp := s.Temperature
+	reasonLevel := s.ReasonLevel
 	logs := logger.Log
 
 	// Get tool list
@@ -65,7 +67,13 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		fullMessages := append([]clients.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
 
 		// LLM chat（带 hook 干预：PreChat / LLMError / PostChat，失败或空回复时自动重试）
-		response, err := chatWithHooks(hookRunner, client, model, fullMessages, toolList, map[string]interface{}{"temperature": 0.7}, cfg.AgentLoop.MaxLLMRetries, pipeline)
+		response, err := chatWithHooks(hookRunner, client, model, fullMessages, toolList,
+			map[string]interface{}{
+				"temperature":      temp,
+				"reasoning_effort": reasonLevel,
+			},
+			cfg.AgentLoop.MaxLLMRetries, pipeline)
+
 		if err != nil {
 			logs.Error("call llm failed", zap.Error(err))
 			em.EmitError("LLM", err.Error())
@@ -178,8 +186,10 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			}
 		}
 
-		// Execute all batches（后台任务异步执行并回填占位结果，其余同步执行）
+		// 过滤掉被hook阻止的工具调用
 		allowedCalls, allowedIndex := filterAllowedCalls(toolCalls, preDecisions)
+
+		// 执行所有的工具批次（后台任务异步执行并回填占位结果，其余同步执行）
 		allowedResults := tools.ExecuteWithBackground(allowedCalls, bgMgr, registry, toolCtx)
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
@@ -273,7 +283,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 	}
 }
 
-// filterAllowedCalls filters out tool calls not blocked by hook, and preserves their mapping to original indices.
+// filterAllowedCalls 过滤掉被hook阻止的工具调用，只留下可以运行的工具。
 func filterAllowedCalls(toolCalls []tools.ToolCall, decisions []hook.HookResult) ([]tools.ToolCall, []int) {
 	allowedCalls := make([]tools.ToolCall, 0, len(toolCalls))
 	allowedIndex := make([]int, 0, len(toolCalls))

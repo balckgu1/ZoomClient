@@ -95,7 +95,10 @@ func LoadMemorySection(memoryDir string) string {
 	// 输出摘要列表 name + description + type
 	var sb strings.Builder
 	sb.WriteString("## Memories from previous sessions\n")
-	sb.WriteString("Use `search_memory` tool to retrieve full content when needed.\n\n")
+	sb.WriteString(fmt.Sprintf("Memory files live in `%s/`. Retrieve via:\n", memoryDir))
+	sb.WriteString("- search_memory(keyword) — match name/description; add full_text=true to also search body.\n")
+	sb.WriteString(fmt.Sprintf("- read_file(%s/<name>.md) — read one memory in full.\n", memoryDir))
+	sb.WriteString(fmt.Sprintf("- glob_search(%s/*.md) / list_directory(%s) — browse all.\n\n", memoryDir, memoryDir))
 
 	displayCount := len(entries)
 	truncated := false

@@ -213,6 +213,15 @@ func TestLoadMemorySection(t *testing.T) {
 		if !strings.Contains(result, "search_memory") {
 			t.Error("expected search_memory tool hint")
 		}
+		if !strings.Contains(result, "Memory files live in") {
+			t.Error("expected memory dir path exposure")
+		}
+		if !strings.Contains(result, "read_file") {
+			t.Error("expected read_file retrieval hint")
+		}
+		if !strings.Contains(result, "glob_search") {
+			t.Error("expected glob_search retrieval hint")
+		}
 		if !strings.Contains(result, "prefer_tabs") {
 			t.Error("expected prefer_tabs in output")
 		}

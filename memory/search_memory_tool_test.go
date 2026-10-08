@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -141,6 +143,58 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 				buildIndex(t, dir)
 			},
 		},
+		{
+			name:        "full_text matches body",
+			memDir:      "temp",
+			args:        map[string]any{"keyword": "pytest", "full_text": true},
+			wantOk:      true,
+			wantErr:     false,
+			wantContain: "test_framework",
+			setupFunc: func(t *testing.T, dir string) {
+				writeMemoryFile(t, dir, "test_framework", "test_framework", "Test preferences", "user", "Use pytest for testing")
+				buildIndex(t, dir)
+			},
+		},
+		{
+			name:        "full_text still matches name",
+			memDir:      "temp",
+			args:        map[string]any{"keyword": "redis", "full_text": true},
+			wantOk:      true,
+			wantErr:     false,
+			wantContain: "redis_config",
+			setupFunc: func(t *testing.T, dir string) {
+				writeMemoryFile(t, dir, "redis_config", "redis_config", "Redis settings", "project", "host=localhost")
+				buildIndex(t, dir)
+			},
+		},
+		{
+			name:        "full_text wrong type defaults to false",
+			memDir:      "temp",
+			args:        map[string]any{"keyword": "pytest", "full_text": "true"},
+			wantOk:      true,
+			wantErr:     false,
+			wantContain: "No memories found",
+			setupFunc: func(t *testing.T, dir string) {
+				writeMemoryFile(t, dir, "test_framework", "test_framework", "Test preferences", "user", "Use pytest for testing")
+				buildIndex(t, dir)
+			},
+		},
+		{
+			name:        "full_text with missing body file returns summary",
+			memDir:      "temp",
+			args:        map[string]any{"keyword": "orphan", "full_text": true},
+			wantOk:      true,
+			wantErr:     false,
+			wantContain: "orphan",
+			setupFunc: func(t *testing.T, dir string) {
+				writeMemoryFile(t, dir, "orphan", "orphan", "Orphan memory", "user", "body text")
+				buildIndex(t, dir)
+				// 删除正文文件，模拟索引项对应文件缺失
+				if err := os.Remove(filepath.Join(dir, "orphan.md")); err != nil {
+					t.Fatalf("failed to remove orphan.md: %v", err)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -171,4 +225,44 @@ func TestSearchMemoryTool_Call(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSearchMemoryTool_BodyTruncation 验证正文按 MaxBodyChars（15KB）截断的行为。
+func TestSearchMemoryTool_BodyTruncation(t *testing.T) {
+	toolCtx := newTestToolCtx(t)
+
+	t.Run("body over limit is truncated with note", func(t *testing.T) {
+		dir := createTempMemoryDir(t)
+		longBody := strings.Repeat("a", MaxBodyChars+1)
+		writeMemoryFile(t, dir, "big", "big", "A big memory", "user", longBody)
+		buildIndex(t, dir)
+
+		tool := NewSearchMemoryTool(dir)
+		res := tool.Call(map[string]any{"keyword": "big"}, toolCtx)
+		if !res.Ok || res.IsError {
+			t.Fatalf("expected ok result, got Ok=%v IsError=%v", res.Ok, res.IsError)
+		}
+		if !strings.Contains(res.Content, "[truncated at 15KB") {
+			t.Errorf("expected truncation note, got %q", res.Content)
+		}
+		if !strings.Contains(res.Content, "read_file") {
+			t.Errorf("expected read_file hint in note, got %q", res.Content)
+		}
+	})
+
+	t.Run("body exactly at limit is not truncated", func(t *testing.T) {
+		dir := createTempMemoryDir(t)
+		exactBody := strings.Repeat("a", MaxBodyChars)
+		writeMemoryFile(t, dir, "exact", "exact", "Exact size memory", "user", exactBody)
+		buildIndex(t, dir)
+
+		tool := NewSearchMemoryTool(dir)
+		res := tool.Call(map[string]any{"keyword": "exact"}, toolCtx)
+		if !res.Ok || res.IsError {
+			t.Fatalf("expected ok result, got Ok=%v IsError=%v", res.Ok, res.IsError)
+		}
+		if strings.Contains(res.Content, "[truncated") {
+			t.Errorf("expected no truncation at exact limit, got %q", res.Content)
+		}
+	})
 }

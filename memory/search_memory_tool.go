@@ -23,7 +23,7 @@ func (s *SearchMemoryTool) Name() string {
 }
 
 func (s *SearchMemoryTool) Description() string {
-	return "Search for memories by keyword. Returns matching memory entries from previous sessions."
+	return "Search for memories by keyword. Matches name and description by default; set full_text=true to also search body content. Returns matching memory entries from previous sessions."
 }
 
 func (s *SearchMemoryTool) Parameters() map[string]any {
@@ -32,7 +32,11 @@ func (s *SearchMemoryTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"keyword": map[string]any{
 				"type":        "string",
-				"description": "The keyword to search for in memory name and description.",
+				"description": "The keyword to search for in memory name and description (and body when full_text is true).",
+			},
+			"full_text": map[string]any{
+				"type":        "boolean",
+				"description": "When true, also match the keyword against memory body content (full-text search). Default false matches only name and description.",
 			},
 		},
 		"required": []string{"keyword"},
@@ -65,15 +69,38 @@ func (s *SearchMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		return tools.ToolResult{Ok: false, Content: "Error: failed to read MEMORY.md", IsError: true}
 	}
 
+	// full_text 默认 false：仅匹配 name/description，省 IO；
+	// 为 true 时读取正文参与匹配，实现全文检索。
+	fullText, _ := args["full_text"].(bool)
+
 	entries := parseIndex(string(indexData))
 
 	var results []string
 	for _, entry := range entries {
-		// 搜索 name、description 是否匹配，都不匹配则跳过
 		nameLower := strings.ToLower(entry.Name)
 		descLower := strings.ToLower(entry.Description)
+		matched := strings.Contains(nameLower, keyword) || strings.Contains(descLower, keyword)
 
-		if !strings.Contains(nameLower, keyword) && !strings.Contains(descLower, keyword) {
+		// 定位正文文件（sanitizeFilename 保证路径安全）
+		safeName := sanitizeFilename(entry.Name)
+		memoryPath := filepath.Join(s.memoryDir, safeName+".md")
+
+		// full_text 需要读所有正文参与匹配；否则仅在元数据命中后才读正文（省 IO）
+		var body string
+		bodyExists := false
+		if fullText || matched {
+			if bodyData, err := os.ReadFile(memoryPath); err == nil {
+				body = ParseFrontMatter(string(bodyData)).Body
+				bodyExists = true
+			}
+		}
+
+		// full_text 开启时正文也参与匹配
+		if fullText && !matched && bodyExists {
+			matched = strings.Contains(strings.ToLower(body), keyword)
+		}
+
+		if !matched {
 			continue
 		}
 
@@ -82,27 +109,14 @@ func (s *SearchMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		if entry.Description != "" {
 			formatted += fmt.Sprintf("_%s_\n", entry.Description)
 		}
-
-		// 按需读取 body（使用 sanitizeFilename 保证路径正确）
-		safeName := sanitizeFilename(entry.Name)
-		memoryPath := filepath.Join(s.memoryDir, safeName+".md")
-		if bodyData, err := os.ReadFile(memoryPath); err == nil {
-			// 解析 frontmatter 只取 body 内容
-			doc := ParseFrontMatter(string(bodyData))
-			body := doc.Body
-			runes := []rune(body)
-			if len(runes) > MaxBodyPreviewChars {
-				body = string(runes[:MaxBodyPreviewChars]) + "..."
-			}
-			if body != "" {
-				formatted += fmt.Sprintf("\n%s\n", body)
-			}
+		if body != "" {
+			formatted += fmt.Sprintf("\n%s\n", truncateBody(body, s.memoryDir, safeName))
 		}
 		// 如果文件不存在，仍返回索引中的摘要（不报错）
 		results = append(results, formatted)
 	}
 
-	toolCtx.Logger.Info("Search memory", zap.String("keyword", keyword), zap.Int("matches", len(results)))
+	toolCtx.Logger.Info("Search memory", zap.String("keyword", keyword), zap.Bool("full_text", fullText), zap.Int("matches", len(results)))
 
 	if len(results) == 0 {
 		return tools.ToolResult{
@@ -118,4 +132,16 @@ func (s *SearchMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		Content: header + strings.Join(results, "\n"),
 		IsError: false,
 	}
+}
+
+// truncateBody 将正文按 rune 截断到 MaxBodyChars，超出时追加提示，
+// 指引模型改用 read_file 读取完整 memory 文件。
+func truncateBody(body, memoryDir, safeName string) string {
+	runes := []rune(body)
+	if len(runes) <= MaxBodyChars {
+		return body
+	}
+	note := fmt.Sprintf("...[truncated at %dKB; use read_file on %s/%s.md for the full memory]",
+		MaxBodyChars/1024, memoryDir, safeName)
+	return string(runes[:MaxBodyChars]) + note
 }

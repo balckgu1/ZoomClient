@@ -24,14 +24,15 @@ const memorySaveRules = `**Save Memories:**
 func (b *SystemPromptBuilder) buildMemory() string {
 	var parts []string
 
-	// 1. 加载历史 memory
+	// 加载 memory
 	if b.memoryDir != "" {
-		if memSection := memory.LoadMemorySection(b.memoryDir); memSection != "" {
+		memSection := memory.LoadMemorySection(b.memoryDir)
+		if memSection != "" {
 			parts = append(parts, memSection)
 		}
 	}
 
-	// 2. 追加 memory 保存规则
+	// 追加 memory 保存规则
 	parts = append(parts, memorySaveRules)
 
 	return strings.Join(parts, "\n\n")

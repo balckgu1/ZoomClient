@@ -20,13 +20,13 @@ var MemoryPriority = map[string]int{
 	MTypeReference: 3,
 }
 
+type MemoryDocument struct {
+	FrontMatter MemoryFrontMatter
+	Body        string
+}
+
 type MemoryFrontMatter struct {
 	Name        string
 	Description string
 	Type        string
-}
-
-type MemoryDocument struct {
-	FrontMatter MemoryFrontMatter
-	Body        string
 }

@@ -76,7 +76,7 @@ func LoadMemorySection(memoryDir string) string {
 		return ""
 	}
 
-	// 读索引文件（单次轻量 IO）
+	// 读 MEMORY.md 索引文件
 	indexPath := filepath.Join(memoryDir, "MEMORY.md")
 	indexData, err := os.ReadFile(indexPath)
 	if err != nil {
@@ -92,7 +92,7 @@ func LoadMemorySection(memoryDir string) string {
 	// 按优先级排序
 	sortByPriority(entries)
 
-	// 输出摘要列表 name + description + type（限制条目数）
+	// 输出摘要列表 name + description + type
 	var sb strings.Builder
 	sb.WriteString("## Memories from previous sessions\n")
 	sb.WriteString("Use `search_memory` tool to retrieve full content when needed.\n\n")

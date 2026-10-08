@@ -67,6 +67,7 @@ func IsWrite(toolName string) bool {
 	return writeTools[toolName]
 }
 
+// ====================权限管理器类============================
 // Manager 权限管理器
 type Manager struct {
 	mu         sync.RWMutex // mu 保护 mode / DenyRules / AllowRules 的并发读写

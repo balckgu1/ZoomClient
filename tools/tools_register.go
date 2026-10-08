@@ -73,8 +73,7 @@ func (r *ToolRegister) SetPermissionDecider(decider func(string, map[string]any)
 	r.permissionDecider = decider
 }
 
-// RunTool 按名称执行单个工具。
-// 若已通过 SetPermissionDecider 注入权限闸门，会先做一次权限判定；拒绝时直接返回，不调用工具
+// RunTool 按名称执行单个工具。若已注入权限闸门，会先做一次权限判定；拒绝时直接返回，不调用工具
 func (r *ToolRegister) RunTool(toolName string, args map[string]interface{}, toolCtx *ToolContext) ToolResult {
 	tool, ok := r.tools[toolName]
 	if !ok {

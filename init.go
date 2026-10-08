@@ -223,6 +223,7 @@ func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Se
 	var asker permission.Asker
 	switch outputMode {
 	case "web":
+		// Web 模式创建一个新的 asker
 		asker = web.NewWebAsker(webSess)
 	default:
 		// CLI 模式使用 StdinAsker 进行终端文本交互

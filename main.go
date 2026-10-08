@@ -143,27 +143,27 @@ func main() {
 	}
 	log.Info("Hook system has been enabled")
 
-	// Background task manager: slow bash commands run asynchronously
-	bgMgr := tools.NewBackgroundTaskManager(registry, toolCtx)
-
 	// Assemble session & start
 	sess := &AgentSession{
-		State:         state,
-		Cfg:           cfg,
-		Client:        client,
-		ModelName:     modelname,
-		ModelRegistry: modelRegistry,
-		Pipeline:      pipeline,
-		Registry:      registry,
-		ToolCtx:       toolCtx,
-		SkillRegistry: skillregistry,
-		BgMgr:         bgMgr,
-		TodoManager:   todoManager, CompactManager: compactManager,
-		HookRunner: hookRunner, Em: em, PermissionMgr: permitMgr,
-		Temperature: 0.7,
-		ReasonLevel: "high",
+		State:          state,
+		Cfg:            cfg,
+		Client:         client,
+		ModelName:      modelname,
+		ModelRegistry:  modelRegistry,
+		Pipeline:       pipeline,
+		Registry:       registry,
+		ToolCtx:        toolCtx,
+		SkillRegistry:  skillregistry,
+		TodoManager:    todoManager,
+		CompactManager: compactManager,
+		HookRunner:     hookRunner,
+		Em:             em,
+		PermissionMgr:  permitMgr,
+		Temperature:    0.7,
+		ReasonLevel:    "high",
 	}
 
+	// hook1: 会话开始时
 	hookRunner.HookRun(hook.EventSessionStart, map[string]any{"model": modelname, "pipeline": "active", "session_id": toolCtx.SessionID})
 	if em != nil {
 		em.EmitSessionStart(modelname, logger.LogFilePath)

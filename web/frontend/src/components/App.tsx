@@ -311,6 +311,10 @@ export function App() {
       if (d.state === "thinking") {
         setAgentPhase("thinking");
         setCurrentToolName("");
+      } else if (d.state === "memory") {
+        // 回合生成已结束、同步记忆抽取进行中：显示“记忆更新中…”，busy 保持到 done 事件
+        setAgentPhase("memory");
+        setCurrentToolName("");
       }
       return;
     }

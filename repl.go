@@ -23,6 +23,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// isStopChClosed 报告 stop 通道是否已被关闭（用户主动中断了本轮生成）。
+// nil 通道视为未中断。用于回合结束时决定是否跳过同步记忆抽取。
+func isStopChClosed(stopCh <-chan struct{}) bool {
+	if stopCh == nil {
+		return false
+	}
+	select {
+	case <-stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
 // runWebREPL starts the web server and runs the web mode REPL loop.
 func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webPort int, sessMgr *session.Manager) {
 	log := logger.Log
@@ -92,7 +106,12 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				// Create a fresh stop channel for this generation
 				webSess.StopCh = make(chan struct{})
 				agentLoop(s, webSess.StopCh)
+				// 每轮结束后同步执行记忆抽取，跑完才结束该轮（用户主动中断时跳过抽取）
+				if !isStopChClosed(webSess.StopCh) {
+					s.runMemoryExtraction(true)
+				}
 				webSess.Busy.Store(false)
+				s.Em.EmitDone()
 
 				// Save session after each turn
 				title := webSess.ExistingTitle
@@ -222,6 +241,9 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 		// Append user message and run agentLoop
 		s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: input})
 		agentLoop(s, nil)
+		// 每轮结束后同步执行记忆抽取（阻塞），随后补发 done（api/Tauri 模式需要真实 done 事件）
+		s.runMemoryExtraction(true)
+		s.Em.EmitDone()
 
 		// Save session after each turn
 		if s.SessionMgr != nil {

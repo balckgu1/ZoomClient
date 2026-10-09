@@ -18,6 +18,8 @@ import (
 func handleSessionCommand(action string, s *AgentSession) bool {
 	switch action {
 	case "clear":
+		// 清空历史前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		if len(s.State.Messages) > 0 && s.State.Messages[0].Role == "system" {
 			s.State.Messages = s.State.Messages[:1]
 		} else {
@@ -28,6 +30,8 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 		// 历史已清空，推送最新占用快照刷新前端指示器
 		emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
 	case "compact":
+		// 压缩替换消息序列前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		if len(s.State.Messages) <= 1 {
 			s.Em.EmitInfo("no history to compact")
 			return false
@@ -244,6 +248,8 @@ func handleSessionCmd(args []string, s *AgentSession) {
 			s.Em.EmitInfo("Usage: /session load <id>")
 			return
 		}
+		// 替换当前消息序列前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		id := args[1]
 		record, err := s.SessionMgr.Load(id)
 		if err != nil {
@@ -259,6 +265,8 @@ func handleSessionCmd(args []string, s *AgentSession) {
 			record.Title, len(record.Messages), record.TurnCount))
 
 	case "new":
+		// 丢弃当前消息序列前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		record := s.SessionMgr.CreateSession()
 		s.State.Messages = nil
 		s.State.TurnCount = 0

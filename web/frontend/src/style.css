@@ -675,6 +675,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* 记忆相位：区别于 mauve 的强调色（遵循 Catppuccin Mocha 调色板） */
+.agent-status--memory::before { background: var(--teal); }
+.agent-status--memory .agent-status__spin { border-top-color: var(--teal); }
+
 /* 流式光标 */
 .caret {
   display: inline-block;

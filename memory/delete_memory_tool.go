@@ -40,6 +40,10 @@ func (d *DeleteMemoryTool) Parameters() map[string]any {
 }
 
 func (d *DeleteMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext) tools.ToolResult {
+	// 串行化对 memory 目录的读-改-写，避免与后台抽取 / 并行工具批次的并发写入丢失索引更新
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
 	nameRaw, exist := args["name"]
 	if !exist {
 		return tools.ToolResult{Ok: false, Content: "Error: name parameter is required", IsError: true}

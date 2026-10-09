@@ -9,20 +9,20 @@ import (
 
 // Config config struct
 type Config struct {
-	OpenAI         OpenAIConfig         `mapstructure:"openai"`
-	Ollama         OllamaConfig         `mapstructure:"ollama"`
-	Anthropic      AnthropicConfig      `mapstructure:"anthropic"`
-	Gemini         GeminiConfig         `mapstructure:"gemini"`
-	Subagent       SubagentConfig       `mapstructure:"subagent"`
-	Skills         SkillsConfig         `mapstructure:"skills"`
-	Memory         MemoryConfig         `mapstructure:"memory"`
-	Session        SessionConfig        `mapstructure:"session"`
-	Tasks          TasksConfig          `mapstructure:"tasks"`
-	AgentLoop      AgentLoopConfig      `mapstructure:"agentloop"`
-	Compact        CompactConfig        `mapstructure:"compact"`
-	Permission     PermissionConfig     `mapstructure:"permission"`
-	Tools          ToolsConfig          `mapstructure:"tools"`
-	Observability  ObservabilityConfig  `mapstructure:"observability"`
+	OpenAI        OpenAIConfig        `mapstructure:"openai"`
+	Ollama        OllamaConfig        `mapstructure:"ollama"`
+	Anthropic     AnthropicConfig     `mapstructure:"anthropic"`
+	Gemini        GeminiConfig        `mapstructure:"gemini"`
+	Subagent      SubagentConfig      `mapstructure:"subagent"`
+	Skills        SkillsConfig        `mapstructure:"skills"`
+	Memory        MemoryConfig        `mapstructure:"memory"`
+	Session       SessionConfig       `mapstructure:"session"`
+	Tasks         TasksConfig         `mapstructure:"tasks"`
+	AgentLoop     AgentLoopConfig     `mapstructure:"agentloop"`
+	Compact       CompactConfig       `mapstructure:"compact"`
+	Permission    PermissionConfig    `mapstructure:"permission"`
+	Tools         ToolsConfig         `mapstructure:"tools"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
 // ObservabilityConfig 可观测性配置
@@ -72,7 +72,8 @@ type SkillsConfig struct {
 }
 
 type MemoryConfig struct {
-	Dir string `mapstructure:"dir"`
+	Dir               string `mapstructure:"dir"`
+	AutoExtractOnTurn bool   `mapstructure:"autoExtractOnTurn"` // 每轮对话结束后后台增量抽取记忆，默认开启
 }
 
 // SessionConfig 会话持久化配置
@@ -143,6 +144,8 @@ func InitConfigWithDir(configDir string) {
 		viper.SetConfigName("config")
 		// Config file type
 		viper.SetConfigType("yaml")
+		// memory 自动抽取默认开启：旧配置文件缺少该字段时仍保持 per-turn 行为
+		viper.SetDefault("memory.autoExtractOnTurn", true)
 		// config file path
 		if configDir != "" {
 			viper.AddConfigPath(configDir)

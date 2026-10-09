@@ -37,7 +37,6 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		select {
 		case <-stopCh:
 			em.EmitInfo("Generation stopped by user")
-			em.EmitDone()
 			return
 		default:
 		}
@@ -85,7 +84,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			em.EmitAssistant(messageContentToString(response.Message.Content))
 			// 本轮结束前推送上下文占用快照，覆盖最终 assistant 回复的增量
 			emitContextUsageWeb(s, payload.SystemPrompt, toolList)
-			em.EmitDone()
+			// done 事件由 REPL 在同步记忆抽取完成后统一补发（回合真正结束）
 			state.TransitionReason = nil
 			break
 		}

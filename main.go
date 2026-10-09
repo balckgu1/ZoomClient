@@ -11,6 +11,7 @@ import (
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
+	"zoomClient/memory"
 	"zoomClient/model"
 	"zoomClient/prompt"
 	"zoomClient/session"
@@ -161,6 +162,12 @@ func main() {
 		PermissionMgr:  permitMgr,
 		Temperature:    0.7,
 		ReasonLevel:    "high",
+	}
+
+	// Per-turn 同步增量记忆抽取器：回合结束时内联阻塞执行，跑完才结束该轮
+	if cfg.Memory.AutoExtractOnTurn && cfg.Memory.Dir != "" {
+		sess.MemoryExtractor = memory.NewExtractor(cfg.Memory.Dir, em)
+		log.Info("Per-turn memory extraction enabled (synchronous)")
 	}
 
 	// hook1: 会话开始时

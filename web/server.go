@@ -19,9 +19,6 @@ import (
 )
 
 // ServerDeps 聚合 Web Server 运行所需的全部后端依赖。
-//
-// 使用结构体而非一长串位置参数，便于后续扩展新能力（如新增管理器）时
-// 只需增加字段，而不必改动所有调用方的参数顺序，提升可维护性。
 type ServerDeps struct {
 	Session       *Session                // Web 会话（命令/事件通道、权限交互、工作目录镜像）
 	SessionMgr    *session.Manager        // 会话持久化管理器
@@ -43,10 +40,9 @@ type Server struct {
 	permissionMgr *permission.Manager
 	pipeline      *prompt.MessagePipeline
 	config        *utils.Config
-
-	mux        *http.ServeMux
-	port       int
-	httpServer *http.Server
+	mux           *http.ServeMux
+	port          int
+	httpServer    *http.Server
 }
 
 // NewServer 依据注入的依赖创建 HTTP Server
@@ -63,6 +59,8 @@ func NewServer(deps ServerDeps, port int) *Server {
 		mux:           http.NewServeMux(),
 		port:          port,
 	}
+
+	// 注册所有路由
 	s.registerRoutes()
 	addr := fmt.Sprintf(":%d", port)
 	s.httpServer = &http.Server{

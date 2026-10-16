@@ -37,10 +37,7 @@ var memoryIgnorePhrases = []string{
 }
 
 // extractMemoryFromWindow 对给定消息窗口执行一次同步记忆抽取。
-// em 为 nil 时静默；非 nil 时推送三态提示（正在保存 / 已更新 / 未完成 / 超时）。
-// 返回 nil 表示本次抽取完成（含"无新增记忆"）；error 表示失败或超时，
-// 调用方（Extractor）据此决定是否推进增量游标：失败/超时时游标不动，下轮触发自动重试；
-// 被放弃的 goroutine 随进程退出消亡，半成品记忆（部分已落盘）是合法状态。
+// 返回 nil 表示抽取记忆完成；error 表示失败或超时
 func extractMemoryFromWindow(client clients.ChatClient, model string, toolCtx *tools.ToolContext,
 	memoryDir string, window []clients.Message, em emitter.Emitter) error {
 
@@ -104,15 +101,16 @@ func extractMemoryFromWindow(client clients.ChatClient, model string, toolCtx *t
 	}
 }
 
-// shouldRunMemoryExtraction 判断给定消息窗口是否值得抽取
-// 满足任一 skip 条件则返回 (false, 原因)：
-//  1. 窗口内无有效用户散文（用户消息 rune 总数 < 阈值）；
-//  2. 窗口内用户要求忽略记忆；
-//  3. 窗口内模型已手写过 save_memory/update_memory（手写视为该窗口已被处理）。
+// shouldRunMemoryExtraction 判断给定消息窗口是否值得抽取。
+// 满足任一条件则返回 (false, 原因)：
+//  1. 窗口内用户消息总数 < 阈值；
+//  2. 用户要求忽略记忆；
+//  3. 模型已调用过 save_memory/update_memory
 func shouldRunMemoryExtraction(messages []clients.Message) (bool, string) {
 	var userRunes int
 	sawHandWrite := false
 
+	// 遍历每条消息
 	for _, m := range messages {
 		switch m.Role {
 		case "user":

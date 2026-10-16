@@ -40,7 +40,7 @@ type cliFlags struct {
 func parseFlags() cliFlags {
 	var f cliFlags
 	flag.StringVar(&f.ModelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
-	flag.StringVar(&f.OutputMode, "mode", "cli", "Output mode: cli (terminal) | api (NDJSON for Tauri sidecar) | web (browser UI)")
+	flag.StringVar(&f.OutputMode, "mode", "cli", "Output mode: cli (terminal) | web (browser UI)")
 	flag.StringVar(&f.ConfigDir, "config-dir", "", "Config directory path (default: ./config)")
 	flag.StringVar(&f.WorkDir, "workdir", "", "Project working directory (default: current directory)")
 	flag.IntVar(&f.WebPort, "port", 8080, "Web server port (web mode only)")
@@ -48,13 +48,11 @@ func parseFlags() cliFlags {
 	return f
 }
 
-// initEmitter creates the appropriate emitter and optional session based on output mode.
-// CLI 模式返回 ui.Renderer（同时充当 emitter），供 runCLIREPL 渲染与读取输入。
+// initEmitter 根据输出模式创建相应的发射器和可选会话。
+// CLI 模式返回 ui.Renderer，供 runCLIREPL 渲染与读取输入。
 func initEmitter(outputMode string) (emitter.Emitter, *ui.Renderer, *web.Session) {
 	log := logger.Log
 	switch strings.ToLower(outputMode) {
-	case "api":
-		return emitter.NewApiEmitter(os.Stdout), nil, nil
 	case "web":
 		sess := web.NewSession(uuid.NewString(), "")
 		return web.NewSseEmitter(sess), nil, sess

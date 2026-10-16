@@ -19,50 +19,32 @@ type Command struct {
 
 // Event 表示一条要推送给前端浏览器的 SSE 事件
 type Event struct {
-	CH   string `json:"ch"`   // "agent" | "system" | "emotion"
+	CH   string `json:"ch"`   // "agent" | "system" | "phase"
 	Data any    `json:"data"` // 事件负载
 }
 
 // Session 封装 Web 模式的一次 agent 会话
 type Session struct {
-	ID       string
-	RecordID string // 关联到 session.SessionRecord 的 ID
-	State    *fsm.State
-	Model    string
-
-	// IsNew 标记是否为新建会话（而非从磁盘加载的已有会话），用于控制是否触发自动命名
-	IsNew bool
-	// ExistingTitle 从已有会话加载时保留的原标题，用于后续保存时不被 "NewSession" 覆盖
-	ExistingTitle string
-	// ExistingCreatedAt 从已有会话加载时保留的创建时间
-	ExistingCreatedAt time.Time
-
-	// CmdCh 接收前端 HTTP POST 发来的命令，由 main 消费
-	CmdCh chan Command
-	// EventCh 由 SseEmitter 写入事件，由 SSE HTTP handler 消费
-	EventCh chan Event
-
-	// Busy 标记 agentLoop 是否正在运行（供 /api/status 查询）
-	Busy atomic.Bool
-
-	// StopCh 在收到 stop 命令时关闭，用于中断正在运行的 agentLoop
-	StopCh chan struct{}
-
+	ID                string
+	RecordID          string // 关联到 session.SessionRecord 的 ID
+	State             *fsm.State
+	Model             string
+	IsNew             bool          // 标记是否为新建会话
+	ExistingTitle     string        // 从已有会话加载时保留的原标题，用于后续保存时不被 "NewSession" 覆盖
+	ExistingCreatedAt time.Time     // 从已有会话加载时保留的创建时间
+	CmdCh             chan Command  // 接收前端 HTTP POST 发来的命令，由 main 消费
+	EventCh           chan Event    // 由 SseEmitter 写入事件，由 SSE HTTP handler 消费
+	Busy              atomic.Bool   // 标记 agentLoop 是否正在运行（供 /api/status 查询）
+	StopCh            chan struct{} // 在收到 stop 命令时关闭，用于中断正在运行的 agentLoop
 	// 权限交互（模仿 ApiAsker 的 pending map 模式）
 	permPending sync.Map // id -> chan permResponse
 	permIDSeq   atomic.Int64
-
-	// TurnCount 跟踪轮次
-	TurnCount int
-
-	// workDirMu 保护 workDir 镜像的并发读写
-	workDirMu sync.RWMutex
+	TurnCount   int          // 运行轮次
+	workDirMu   sync.RWMutex // 保护 workDir 镜像的并发读写
 	// workDir 当前工作目录镜像，供 GET /api/workdir 读取；
 	// 实际切换在 REPL 循环中串行更新 toolCtx.WorkPath 后同步到此，避免 HTTP 读取与 REPL 写入竞争
 	workDir string
-
-	// usageMu 保护 usage 缓存的并发读写
-	usageMu sync.RWMutex
+	usageMu sync.RWMutex // 保护 usage 缓存的并发读写
 	// usage 最近一次上下文占用快照缓存：由 SseEmitter 推送事件时同步写入，
 	// GET /api/context-usage 只读缓存，避免 HTTP goroutine 直接读 agent 消息历史产生数据竞争
 	usage compact.UsageSnapshot

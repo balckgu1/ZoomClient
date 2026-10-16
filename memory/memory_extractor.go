@@ -69,24 +69,19 @@ type ExtractionRequest struct {
 	ToolCtx  tools.ToolContext
 }
 
-// Extractor 在调用方 goroutine 内同步执行 per-turn 增量抽取。
-// 无内部并发：REPL 串行调用 Run，游标仅在该 goroutine 访问，故无需加锁；
-// 记忆目录写入串行化由调用时序 + 工具侧包级锁共同保证。
+// Extractor 在调用方 goroutine 内同步执行 per-turn 增量抽取
 type Extractor struct {
 	cursor    memoryCursor
 	memoryDir string
 	em        emitter.Emitter // info 提示；announce 时另发 memory 相位事件
 }
 
-// NewExtractor 创建同步抽取器。
+// NewExtractor 实例化一个Extractor
 func NewExtractor(memoryDir string, em emitter.Emitter) *Extractor {
 	return &Extractor{memoryDir: memoryDir, em: em}
 }
 
 // Run 阻塞执行一次增量抽取：算窗口 → skip 判定 → 抽取 → 推进游标。
-// announce=true（回合路径）时在真正开始抽取前推送 memory 相位事件，
-// 供前端显示"记忆更新中…"；skip 时不推送，避免琐碎轮次状态闪现。
-// 成功或 skip 推进游标；失败 / 超时不推进，使该窗口在下次触发时自动重试。
 func (e *Extractor) Run(req ExtractionRequest, announce bool) {
 	window := e.cursor.window(req.Messages)
 	if len(window) == 0 {
@@ -106,7 +101,7 @@ func (e *Extractor) Run(req ExtractionRequest, announce bool) {
 
 	// 抽取即将开始：回合路径通知前端进入"记忆更新中…"相位
 	if announce && e.em != nil {
-		e.em.EmitEmotion("memory", nil)
+		e.em.EmitPhase("memory", nil)
 	}
 
 	// 对窗口执行一次记忆抽取（阻塞，内部有 ExtractionTimeout 硬超时兜底）

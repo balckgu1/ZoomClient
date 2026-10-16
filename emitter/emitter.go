@@ -1,21 +1,13 @@
-// emitter/emitter.go
-//
-// Emitter 定义了 agentLoop 输出事件的统一接口。
-// CLI 模式由 ui.Renderer 实现（终端彩色渲染），API 模式由 ApiEmitter 实现（NDJSON stdout）。
 package emitter
 
 import "zoomClient/tools"
 
 // Emitter 是 agentLoop 所有用户可见事件的输出抽象
 type Emitter interface {
-	// Session生命周期
-
-	// EmitSessionStart 通知会话启动
-	EmitSessionStart(model, logPath string)
-	// EmitSessionEnd 通知会话结束
-	EmitSessionEnd(totalTurns int)
-	// EmitTurnSeparator 在两轮对话之间画分隔
-	EmitTurnSeparator()
+	// ----Session生命周期-------
+	EmitSessionStart(model, logPath string) // 通知会话启动
+	EmitSessionEnd(totalTurns int)          // 通知会话结束
+	EmitTurnSeparator()                     // 在两轮对话之间画分隔
 
 	// Agent 输出
 
@@ -51,8 +43,8 @@ type Emitter interface {
 	EmitError(scope, msg string)
 	// EmitInfo 输出普通提示信息。
 	EmitInfo(msg string)
-	// EmitEmotion 输出状态变更事件, API、Web 模式用，CLI 模式 no-op
-	EmitEmotion(state string, meta map[string]string)
+	// EmitPhase 输出 agent 相位变更事件, API、Web 模式用，CLI 模式 no-op
+	EmitPhase(state string, meta map[string]string)
 	// EmitSystem 输出系统级事件（heartbeat/ready/ack 等，API 模式专用，CLI 模式 no-op）。
 	EmitSystem(event string, data map[string]string)
 }

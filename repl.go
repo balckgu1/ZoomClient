@@ -100,13 +100,18 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 			}
 			switch cmd.Action {
 			case "chat":
+				// 将agent状态设置为忙碌
 				webSess.Busy.Store(true)
-				s.Em.EmitEmotion("thinking", nil)
+
+				// 推送一次思考事件到前端
+				s.Em.EmitPhase("thinking", nil)
+
+				// 追加用户消息到会话消息中
 				s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: cmd.Message})
 				// Create a fresh stop channel for this generation
 				webSess.StopCh = make(chan struct{})
 				agentLoop(s, webSess.StopCh)
-				// 每轮结束后同步执行记忆抽取，跑完才结束该轮（用户主动中断时跳过抽取）
+				// 每轮结束后同步执行记忆抽取，跑完才结束该轮。用户主动中断时跳过抽取
 				if !isStopChClosed(webSess.StopCh) {
 					s.runMemoryExtraction(true)
 				}

@@ -78,26 +78,26 @@ func nothingToSaveResponse() *clients.ChatResponse {
 }
 
 // recordingEmitter 是最小化的 emitter.Emitter 测试替身：
-// 记录 EmitEmotion 与 EmitInfo 调用，其余事件 no-op。
+// 记录 EmitPhase 与 EmitInfo 调用，其余事件 no-op。
 type recordingEmitter struct {
-	mu       sync.Mutex
-	emotions []string
-	infos    []string
+	mu     sync.Mutex
+	phases []string
+	infos  []string
 }
 
-func (e *recordingEmitter) emotionStates() []string {
+func (e *recordingEmitter) phaseStates() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := make([]string, len(e.emotions))
-	copy(out, e.emotions)
+	out := make([]string, len(e.phases))
+	copy(out, e.phases)
 	return out
 }
 
-func (e *recordingEmitter) countEmotion(state string) int {
+func (e *recordingEmitter) countPhase(state string) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	n := 0
-	for _, s := range e.emotions {
+	for _, s := range e.phases {
 		if s == state {
 			n++
 		}
@@ -126,10 +126,10 @@ func (e *recordingEmitter) EmitInfo(msg string) {
 	e.infos = append(e.infos, msg)
 }
 
-func (e *recordingEmitter) EmitEmotion(state string, meta map[string]string) {
+func (e *recordingEmitter) EmitPhase(state string, meta map[string]string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.emotions = append(e.emotions, state)
+	e.phases = append(e.phases, state)
 }
 
 // buildMessages 构造 n 条内容唯一的消息（user/assistant 交替）。
@@ -237,8 +237,8 @@ func TestExtractorSkipNoAnnounce(t *testing.T) {
 	if client.callCount() != 0 {
 		t.Fatalf("expected skip without LLM call")
 	}
-	if em.countEmotion("memory") != 0 {
-		t.Fatalf("skip should not announce memory phase, got %v", em.emotionStates())
+	if em.countPhase("memory") != 0 {
+		t.Fatalf("skip should not announce memory phase, got %v", em.phaseStates())
 	}
 }
 
@@ -251,15 +251,15 @@ func TestExtractorAnnounceEmitsMemoryPhase(t *testing.T) {
 	e := NewExtractor(dir, em)
 
 	e.Run(extractRequest(client, buildMessages(2)), true)
-	if em.countEmotion("memory") != 1 {
-		t.Fatalf("announce=true should emit exactly one memory phase, got %v", em.emotionStates())
+	if em.countPhase("memory") != 1 {
+		t.Fatalf("announce=true should emit exactly one memory phase, got %v", em.phaseStates())
 	}
 
 	em2 := &recordingEmitter{}
 	e2 := NewExtractor(dir, em2)
 	e2.Run(extractRequest(client, buildMessages(2)), false)
-	if em2.countEmotion("memory") != 0 {
-		t.Fatalf("announce=false should not emit memory phase, got %v", em2.emotionStates())
+	if em2.countPhase("memory") != 0 {
+		t.Fatalf("announce=false should not emit memory phase, got %v", em2.phaseStates())
 	}
 }
 

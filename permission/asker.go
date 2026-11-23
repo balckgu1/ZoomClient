@@ -43,12 +43,12 @@ func NewStdinAsker() *StdinAsker {
 
 // Ask 实现 Asker 接口
 func (asker *StdinAsker) Ask(toolName string, args map[string]any, reason string) (bool, string) {
-	// Set io.writer
+	// 设置 io.writer
 	out := asker.Out
 	if out == nil {
 		out = os.Stdout
 	}
-	// Set io.reader
+	// 设置 io.reader
 	in := asker.In
 	if in == nil {
 		in = os.Stdin

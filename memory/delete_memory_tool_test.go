@@ -17,7 +17,7 @@ func TestDeleteMemoryTool_Name(t *testing.T) {
 func TestDeleteMemoryTool_Call(t *testing.T) {
 	tests := []struct {
 		name        string
-		memDir      string // "temp" means create temp dir
+		memDir      string // "temp" 表示创建临时目录
 		args        map[string]any
 		wantOk      bool
 		wantErr     bool
@@ -80,11 +80,11 @@ func TestDeleteMemoryTool_Call(t *testing.T) {
 				buildIndex(t, dir)
 			},
 			verifyFunc: func(t *testing.T, dir string) {
-				// File should be gone
+				// 文件应当已被删除
 				if _, err := os.Stat(filepath.Join(dir, "old_memory.md")); !os.IsNotExist(err) {
 					t.Error("expected old_memory.md to be deleted")
 				}
-				// MEMORY.md should not contain it
+				// MEMORY.md 不应包含它
 				data, _ := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
 				if strings.Contains(string(data), "old_memory") {
 					t.Error("expected MEMORY.md to not contain old_memory after delete")
@@ -104,15 +104,15 @@ func TestDeleteMemoryTool_Call(t *testing.T) {
 				buildIndex(t, dir)
 			},
 			verifyFunc: func(t *testing.T, dir string) {
-				// Deleted file gone
+				// 被删除的文件已消失
 				if _, err := os.Stat(filepath.Join(dir, "to_delete.md")); !os.IsNotExist(err) {
 					t.Error("expected to_delete.md to be deleted")
 				}
-				// Kept file still there
+				// 保留的文件仍然存在
 				if _, err := os.Stat(filepath.Join(dir, "keep_this.md")); err != nil {
 					t.Error("expected keep_this.md to still exist")
 				}
-				// Index updated
+				// 索引已更新
 				data, _ := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
 				content := string(data)
 				if strings.Contains(content, "to_delete") {

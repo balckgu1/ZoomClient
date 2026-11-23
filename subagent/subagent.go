@@ -171,7 +171,7 @@ func (subagent *SubAgent) subagentLoop(messages []clients.Message) (string, erro
 			}
 		}
 
-		// chat with llm
+		// 与 LLM 对话
 		response, err := subagent.Client.Chat(subagent.Model, messages, toolList, options)
 		if err != nil {
 			return "", fmt.Errorf("subagent chat error: %w", err)

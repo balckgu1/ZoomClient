@@ -90,7 +90,7 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		if !ok || strings.TrimSpace(t) == "" {
 			return tools.ToolResult{Ok: false, Content: "Error: type parameter must be a non-empty string", IsError: true}
 		}
-		// Check typ parameter
+		// 检查 typ 参数
 		validTypes := map[string]bool{"user": true, "feedback": true, "project": true, "reference": true}
 		if !validTypes[t] {
 			return tools.ToolResult{
@@ -102,7 +102,7 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		typ = t
 	}
 
-	// Check Memory Directory parameter
+	// 检查 Memory 目录参数
 	if u.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}
@@ -116,21 +116,21 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		return tools.ToolResult{Ok: false, Content: "Error: The memory does not exist, please use save_memory to save it directly.", IsError: true}
 	}
 
-	// Generate a secure file path
+	// 生成安全的文件路径
 	safeName := sanitizeFilename(name)
 	filePath := filepath.Join(u.memoryDir, safeName+".md")
-	//check memory file exists
+	//检查 memory 文件是否存在
 
 	toolCtx.Logger.Info("Updating memory", zap.String("session", toolCtx.SessionID), zap.String("path", filePath))
 
-	// Read origin memory
+	// 读取原始 memory
 	originFileContent, err := os.ReadFile(filePath)
 	if err != nil {
 		return tools.ToolResult{Ok: false, Content: "Error: " + err.Error(), IsError: true}
 	}
-	// parse origin memory
+	// 解析原始 memory
 	doc := ParseFrontMatter(string(originFileContent))
-	// Update memory
+	// 更新 memory
 	if content != "" {
 		doc.Body = content
 	}
@@ -143,7 +143,7 @@ func (u *UpdateMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 	// Front Matter + Content（使用 yamlQuote 防止特殊字符破坏 frontmatter 解析）
 	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n",
 		yamlQuote(name), yamlQuote(doc.FrontMatter.Description), doc.FrontMatter.Type, doc.Body)
-	// Write file to disk
+	// 将文件写入磁盘
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
 		return tools.ToolResult{
 			Ok:      false,

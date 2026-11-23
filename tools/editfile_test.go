@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// ========== EditFileTool Basic Properties ==========
+// ========== EditFileTool 基本属性 ==========
 
-// TestEditFileTool_Name verifies the tool name is correct.
+// TestEditFileTool_Name 验证工具名称是否正确。
 func TestEditFileTool_Name(t *testing.T) {
 	tool := EditFileTool{}
 	if got := tool.Name(); got != "edit_file" {
@@ -17,7 +17,7 @@ func TestEditFileTool_Name(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Description verifies the description is not empty.
+// TestEditFileTool_Description 验证描述不为空。
 func TestEditFileTool_Description(t *testing.T) {
 	tool := EditFileTool{}
 	if desc := tool.Description(); desc == "" {
@@ -25,7 +25,7 @@ func TestEditFileTool_Description(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Parameters verifies the parameter schema is correct.
+// TestEditFileTool_Parameters 验证参数 schema 是否正确。
 func TestEditFileTool_Parameters(t *testing.T) {
 	tool := EditFileTool{}
 	params := tool.Parameters()
@@ -59,9 +59,9 @@ func TestEditFileTool_Parameters(t *testing.T) {
 	}
 }
 
-// ========== EditFileTool.Call Functional Tests ==========
+// ========== EditFileTool.Call 功能测试 ==========
 
-// TestEditFileTool_Call_Success verifies editing an existing file.
+// TestEditFileTool_Call_Success 验证编辑已存在的文件。
 func TestEditFileTool_Call_Success(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -85,7 +85,7 @@ func TestEditFileTool_Call_Success(t *testing.T) {
 		t.Error("success case should have IsError = false")
 	}
 
-	// Verify file content was updated.
+	// 验证文件内容已更新。
 	data, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("failed to read file after edit: %v", err)
@@ -95,7 +95,7 @@ func TestEditFileTool_Call_Success(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_FileNotExist verifies error when the file does not exist.
+// TestEditFileTool_Call_FileNotExist 验证文件不存在时的错误。
 func TestEditFileTool_Call_FileNotExist(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -118,7 +118,7 @@ func TestEditFileTool_Call_FileNotExist(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_MissingFilename verifies error when filename argument is missing.
+// TestEditFileTool_Call_MissingFilename 验证 filename 参数缺失时的错误。
 func TestEditFileTool_Call_MissingFilename(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -137,7 +137,7 @@ func TestEditFileTool_Call_MissingFilename(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_EmptyFilename verifies error when filename is an empty string.
+// TestEditFileTool_Call_EmptyFilename 验证 filename 为空字符串时的错误。
 func TestEditFileTool_Call_EmptyFilename(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -157,7 +157,7 @@ func TestEditFileTool_Call_EmptyFilename(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_FilenameWrongType verifies error when filename is not a string.
+// TestEditFileTool_Call_FilenameWrongType 验证 filename 不是字符串时的错误。
 func TestEditFileTool_Call_FilenameWrongType(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -177,7 +177,7 @@ func TestEditFileTool_Call_FilenameWrongType(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_MissingContent verifies error when content argument is missing.
+// TestEditFileTool_Call_MissingContent 验证 content 参数缺失时的错误。
 func TestEditFileTool_Call_MissingContent(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -201,7 +201,7 @@ func TestEditFileTool_Call_MissingContent(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_EmptyContent verifies error when content is an empty string.
+// TestEditFileTool_Call_EmptyContent 验证 content 为空字符串时的错误。
 func TestEditFileTool_Call_EmptyContent(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -226,7 +226,7 @@ func TestEditFileTool_Call_EmptyContent(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_ContentWrongType verifies error when content is not a string.
+// TestEditFileTool_Call_ContentWrongType 验证 content 不是字符串时的错误。
 func TestEditFileTool_Call_ContentWrongType(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -251,7 +251,7 @@ func TestEditFileTool_Call_ContentWrongType(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_PathTraversal verifies path traversal attempts are blocked.
+// TestEditFileTool_Call_PathTraversal 验证路径遍历尝试被阻止。
 func TestEditFileTool_Call_PathTraversal(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -271,7 +271,7 @@ func TestEditFileTool_Call_PathTraversal(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_AbsolutePathEscape verifies absolute paths outside workDir are blocked.
+// TestEditFileTool_Call_AbsolutePathEscape 验证 workDir 之外的绝对路径被阻止。
 func TestEditFileTool_Call_AbsolutePathEscape(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -292,7 +292,7 @@ func TestEditFileTool_Call_AbsolutePathEscape(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_UnicodeContent verifies editing with Unicode content.
+// TestEditFileTool_Call_UnicodeContent 验证使用 Unicode 内容进行编辑。
 func TestEditFileTool_Call_UnicodeContent(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -323,7 +323,7 @@ func TestEditFileTool_Call_UnicodeContent(t *testing.T) {
 	}
 }
 
-// TestEditFileTool_Call_LargeContent verifies editing with a large content.
+// TestEditFileTool_Call_LargeContent 验证使用较大内容进行编辑。
 func TestEditFileTool_Call_LargeContent(t *testing.T) {
 	workDir := t.TempDir()
 	tool := EditFileTool{}
@@ -358,9 +358,9 @@ func TestEditFileTool_Call_LargeContent(t *testing.T) {
 	}
 }
 
-// ========== Registry Integration ==========
+// ========== 注册器集成 ==========
 
-// TestEditFileTool_ViaRegistry verifies execution through the Registry.
+// TestEditFileTool_ViaRegistry 验证通过注册器执行。
 func TestEditFileTool_ViaRegistry(t *testing.T) {
 	workDir := t.TempDir()
 	registry := NewToolRegister()

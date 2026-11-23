@@ -54,12 +54,12 @@ func (s *SearchMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 	}
 	keyword = strings.ToLower(strings.TrimSpace(keyword))
 
-	// check memoryDir
+	// 检查 memoryDir
 	if s.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}
 
-	// read MEMORY.md
+	// 读取 MEMORY.md
 	indexPath := filepath.Join(s.memoryDir, "MEMORY.md")
 	if !fileExists(indexPath) {
 		return tools.ToolResult{Ok: false, Content: "Error: MEMORY.md does not exist", IsError: true}

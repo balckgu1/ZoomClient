@@ -32,7 +32,7 @@ func createFiles(t *testing.T, base string, paths []string) {
 	}
 }
 
-// ========== Basic Properties ==========
+// ========== 基本属性 ==========
 
 func TestGlobSearch_Name(t *testing.T) {
 	g := &GlobSearch{}
@@ -71,7 +71,7 @@ func TestGlobSearch_Parameters(t *testing.T) {
 	}
 }
 
-// ========== Call Functional Tests ==========
+// ========== 调用功能测试 ==========
 
 func TestGlobSearch_Call_AllGoFiles(t *testing.T) {
 	ctx, workDir := newTestGlobCtx(t)
@@ -302,7 +302,7 @@ func TestGlobSearch_Call_DeepNesting(t *testing.T) {
 	}
 }
 
-// ========== Registry Integration ==========
+// ========== 注册器集成 ==========
 
 func TestGlobSearch_ViaRegistry(t *testing.T) {
 	ctx, workDir := newTestGlobCtx(t)

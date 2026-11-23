@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config config struct
+// Config 配置结构体
 type Config struct {
 	OpenAI        OpenAIConfig        `mapstructure:"openai"`
 	Ollama        OllamaConfig        `mapstructure:"ollama"`
@@ -59,7 +59,7 @@ type GeminiConfig struct {
 	ModelName string `mapstructure:"model_name"`
 }
 
-// SubagentConfig subagent config
+// SubagentConfig subagent 配置
 type SubagentConfig struct {
 	DefaultMaxTurns         int     `mapstructure:"defaultMaxTurns"`
 	DefaultSystemPrompt     string  `mapstructure:"defaultSystemPrompt"`
@@ -126,7 +126,7 @@ type PermissionRuleConfig struct {
 	Content  string `mapstructure:"content"`
 }
 
-// global config variable
+// 全局配置变量
 var (
 	globalConfig *Config
 	configOnce   sync.Once
@@ -140,25 +140,25 @@ func InitConfig() {
 // InitConfigWithDir 初始化配置文件，可指定配置目录路径。
 func InitConfigWithDir(configDir string) {
 	configOnce.Do(func() {
-		// Config file name
+		// 配置文件名称
 		viper.SetConfigName("config")
-		// Config file type
+		// 配置文件类型
 		viper.SetConfigType("yaml")
 		// memory 自动抽取默认开启：旧配置文件缺少该字段时仍保持 per-turn 行为
 		viper.SetDefault("memory.autoExtractOnTurn", true)
-		// config file path
+		// 配置文件路径
 		if configDir != "" {
 			viper.AddConfigPath(configDir)
 		} else {
 			viper.AddConfigPath("./config")
 		}
-		// find config file and read it
+		// 查找配置文件并读取
 		err := viper.ReadInConfig()
 		if err != nil {
 			log.Fatalf("Fatal error config file: %s \n", err)
 		}
 
-		// parse config to struct `globalConfig` and save it to global variable
+		// 将配置解析到结构体 `globalConfig` 并保存到全局变量
 		globalConfig = &Config{}
 		if err := viper.Unmarshal(globalConfig); err != nil {
 			log.Fatalf("Fatal error unmarshaling config: %s \n", err)

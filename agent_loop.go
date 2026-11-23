@@ -16,8 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// agentLoop is the main agent reasoning loop.
-// stopCh is optional (nil for CLI/API mode). When closed, the loop aborts at the next safe point.
+// agentLoop 是主 Agent 推理循环。
+// stopCh 是可选的（CLI/API 模式下为 nil）。当它被关闭时，循环会在下一个安全点中止。
 func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 	cfg, client, state, model := s.Cfg, s.Client, s.State, s.ModelName
@@ -28,28 +28,28 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 	reasonLevel := s.ReasonLevel
 	logs := logger.Log
 
-	// Get tool list
+	// 获取工具列表
 	toolList := registry.GetAll()
 
-	// Infinite loop until no tool call or max turn count reached
+	// 无限循环，直到没有工具调用或达到最大回合数
 	for {
-		// Check for stop signal (web mode)
+		// 检查停止信号（Web 模式）
 		select {
 		case <-stopCh:
 			em.EmitInfo("Generation stopped by user")
 			return
 		default:
 		}
-		// Context compact: micro-compact, replace older tool results with placeholders
+		// 上下文压缩：微压缩，用占位符替换较旧的工具结果
 		state.Messages = compactManager.MicroCompact(state.Messages)
 
-		// Pipeline assemble: system prompt + state.messages + reminders + attachments
+		// 流水线组装：系统提示词 + state.messages + 提醒 + 附件
 		payload := pipeline.AssemblePayload(state.Messages)
 
-		// Clear OneShot reminder
+		// 清除 OneShot 提醒
 		pipeline.ClearOneShotReminders()
 
-		// Add system prompt at the beginning of state.messages
+		// 在 state.messages 开头添加系统提示词
 		fullMessages := append([]clients.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
 
 		// LLM chat（带 hook 干预：PreChat / LLMError / PostChat，失败或空回复时自动重试）
@@ -66,7 +66,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			break
 		}
 
-		// Add the assistant's response to state.messages
+		// 将 assistant 的回复添加到 state.messages
 		state.Messages = append(state.Messages, clients.Message{
 			Role:             "assistant",
 			Content:          response.Message.Content,
@@ -74,13 +74,13 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			ReasoningContent: response.Message.ReasoningContent,
 		})
 
-		// Check if there are any tool calls, if not, render the reasoning+assistant text to user
+		// 检查是否有任何工具调用，如果没有，则把 reasoning+assistant 文本渲染给用户
 		if len(response.Message.ToolCalls) == 0 {
-			// Render reasoning
+			// 渲染推理内容
 			if response.Message.ReasoningContent != "" {
 				em.EmitReasoning(response.Message.ReasoningContent)
 			}
-			// Render assistant
+			// 渲染 assistant 回复
 			em.EmitAssistant(messageContentToString(response.Message.Content))
 			// 本轮结束前推送上下文占用快照，覆盖最终 assistant 回复的增量
 			emitContextUsageWeb(s, payload.SystemPrompt, toolList)
@@ -91,12 +91,12 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 
 		logs.Info("Model requested tool call", zap.Int("tool count", len(response.Message.ToolCalls)))
 
-		// If reasoning is not empty, render to user
+		// 如果推理内容非空，渲染给用户
 		if response.Message.ReasoningContent != "" {
 			em.EmitReasoning(response.Message.ReasoningContent)
 		}
 
-		// Batch tools based on concurrency safety
+		// 根据并发安全性对工具进行分批
 		toolCalls := response.Message.ToolCalls
 		batches := tools.PartitionToolCalls(toolCalls)
 		logs.Info("Batch calling of tools", zap.Int("Batch number", len(batches)))
@@ -111,7 +111,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			)
 		}
 
-		// Render all tool calls
+		// 渲染所有工具调用
 		for _, tc := range toolCalls {
 			if tc.Name == "sub_task" {
 				prompt, _ := tc.Arguments["prompt"].(string)
@@ -121,7 +121,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			em.EmitToolCall(tc.Name, formatArgsPreview(tc.Arguments))
 		}
 
-		// Check if the Todo tool was called in this round
+		// 检查本轮是否调用了 Todo 工具
 		usedTodo := false
 		for _, tc := range toolCalls {
 			if tc.Name == "todo" {
@@ -130,7 +130,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			}
 		}
 
-		// Hook: Trigger EventPreToolUse for each tool before tool execution
+		// Hook：在工具执行前为每个工具触发 EventPreToolUse
 		preDecisions := make([]hook.HookResult, len(toolCalls))
 		for i, tc := range toolCalls {
 			preDecisions[i] = hookRunner.HookRun(hook.EventPreToolUse, map[string]any{
@@ -161,7 +161,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		allowedResults := tools.ExecuteBatches(allowedBatches, registry, toolCtx)
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
-		// Write Tool Result back to Messages in the order of call
+		// 按调用顺序将工具结果写回 Messages
 		for resultIndex, result := range results {
 			logs.Info("tool call finished",
 				zap.String("tool name", toolCalls[resultIndex].Name),
@@ -169,17 +169,17 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 				zap.String("result", result.Content),
 			)
 
-			// Render tool result summary
+			// 渲染工具结果摘要
 			if preDecisions[resultIndex].ExitCode != hook.ExitBlock {
 				em.EmitToolResult(toolCalls[resultIndex].Name, result.Content, result.IsError)
 			}
 
-			// If todo tool was called and succeeded, render the latest plan panel to user
+			// 如果调用了 todo 工具且成功，将最新计划面板渲染给用户
 			if toolCalls[resultIndex].Name == "todo" && result.Ok {
 				em.EmitTodoPanel(todoManager.Render(), todoManager.Items())
 			}
 
-			// Context compact: Layer 1 (large output persistence): when a single tool result is too large, write full content to disk and keep only a preview in the message
+			// 上下文压缩：第一层（大输出持久化）：当单个工具结果过大时，将完整内容写入磁盘，只在消息中保留预览
 			persistedContent := compactManager.PersistLargeOutput(toolCalls[resultIndex].ID, result.Content)
 			if persistedContent != result.Content {
 				logs.Info("tool result content too large, persisted to disk and replaced with preview",
@@ -188,7 +188,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 				)
 			}
 
-			// Add toolCallID to state.messages
+			// 将 toolCallID 添加到 state.messages
 			state.Messages = append(state.Messages, clients.Message{
 				Role:       "tool",
 				Content:    persistedContent,
@@ -196,10 +196,10 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			})
 		}
 
-		// Hook: PostToolUse
+		// Hook：PostToolUse
 		runPostToolUseHooks(hookRunner, toolCalls, results, pipeline)
 
-		// If the Todo tool is not used in this round, increase the count and inject a reminder through the pipeline when the threshold is exceeded
+		// 如果本轮未使用 Todo 工具，则增加计数，并在超过阈值时通过流水线注入提醒
 		if !usedTodo {
 			todoManager.IncrementRoundsSinceUpdate()
 			if reminder := todoManager.Reminder(cfg.AgentLoop.TodoRoundsThreshold); reminder != "" {
@@ -218,9 +218,9 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		reason := "tool_result"
 		state.TransitionReason = &reason
 
-		// Full Context compact
-		// Determine whether to trigger full compression after all tool results have been appended to state.messages
-		// After successful compression, state.Messages will be replaced with system + a continuity summary
+		// 完整上下文压缩
+		// 在所有工具结果追加到 state.messages 之后，判断是否触发完整压缩
+		// 压缩成功后，state.Messages 将被替换为 system + 一段连续性摘要
 		if compactManager.ShouldAutoCompact(state.Messages) {
 			beforeSize := compactManager.EstimateSize(state.Messages)
 			newMessages, cerr := compactManager.CompactHistory(state.Messages)
@@ -242,7 +242,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		// 推送上下文占用快照：反映本轮工具结果追加与完整压缩后的真实占用
 		emitContextUsageWeb(s, payload.SystemPrompt, toolList)
 
-		// Limit the maximum number of rounds to avoid infinite loops
+		// 限制最大回合数以避免无限循环
 		if state.TurnCount >= cfg.AgentLoop.MaxTurns {
 			logs.Warn("Reaching the maximum round, stop the loop", zap.Int("max_turns", cfg.AgentLoop.MaxTurns))
 			em.EmitInfo(fmt.Sprintf("reached max turns (%d), stop", cfg.AgentLoop.MaxTurns))
@@ -265,7 +265,7 @@ func filterAllowedCalls(toolCalls []tools.ToolCall, decisions []hook.HookResult)
 	return allowedCalls, allowedIndex
 }
 
-// mergeToolResults merges execution results back in original order; positions blocked by hook are filled with block results.
+// mergeToolResults 按原始顺序合并执行结果；被 hook 阻止的位置用阻止结果填充。
 func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 	allowedIndex []int, allowedResults []tools.ToolResult) []tools.ToolResult {
 	results := make([]tools.ToolResult, len(toolCalls))
@@ -285,8 +285,8 @@ func mergeToolResults(toolCalls []tools.ToolCall, decisions []hook.HookResult,
 	return results
 }
 
-// runPostToolUseHooks triggers PostToolUse event for each tool result.
-// When exit=2, inject Message as OneShot reminder into pipeline.
+// runPostToolUseHooks 为每个工具结果触发 PostToolUse 事件。
+// 当 exit=2 时，将 Message 作为 OneShot 提醒注入流水线。
 func runPostToolUseHooks(runner *hook.Runner, toolCalls []tools.ToolCall, results []tools.ToolResult, pipeline *prompt.MessagePipeline) {
 	for i, tc := range toolCalls {
 		if results[i].IsError {
@@ -337,7 +337,7 @@ func chatWithHooks(hookRunner *hook.Runner, client clients.ChatClient, model str
 			return nil, fmt.Errorf("LLM call blocked by pre-chat hook: %s", preDecision.Message)
 		}
 
-		// 2. Chat with LLM
+		// 2. 调用 LLM 对话
 		response, err := client.Chat(model, fullMessages, toolList, options)
 
 		// 3. LLMError：调用失败时重试
@@ -413,7 +413,7 @@ func estimateTokens(messages []clients.Message) int {
 	return totalChars/4 + 1
 }
 
-// messageContentToString safely converts clients.Message.Content (interface{}) to a readable string.
+// messageContentToString 将 clients.Message.Content（interface{}）安全地转换为可读字符串。
 func messageContentToString(content any) string {
 	switch v := content.(type) {
 	case nil:
@@ -429,7 +429,7 @@ func messageContentToString(content any) string {
 	}
 }
 
-// formatArgsPreview compresses tool call arguments into a one-line preview for frontend rendering.
+// formatArgsPreview 将工具调用参数压缩为一行预览，用于前端渲染。
 func formatArgsPreview(args map[string]interface{}) string {
 	if len(args) == 0 {
 		return ""

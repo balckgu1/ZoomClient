@@ -376,7 +376,7 @@ func TestMergeFailureDoesNotMutate(t *testing.T) {
 	}
 }
 
-// ---------- Render ----------
+// ---------- Render（渲染）----------
 
 func TestRender(t *testing.T) {
 	tests := []struct {
@@ -443,7 +443,7 @@ func TestRender(t *testing.T) {
 	}
 }
 
-// ---------- Reminder & rounds ----------
+// ---------- Reminder & rounds（提醒与轮次）----------
 
 func TestReminder(t *testing.T) {
 	tests := []struct {

@@ -18,7 +18,7 @@ import (
 	"zoomClient/utils"
 )
 
-// AgentSession aggregates all session-level dependencies
+// AgentSession 聚合一次 Agent 运行所需的全部会话级依赖。
 type AgentSession struct {
 	State           *fsm.State
 	Cfg             *utils.Config

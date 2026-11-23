@@ -21,7 +21,7 @@ type Rule struct {
 	Content  string   `mapstructure:"content"  yaml:"content"  json:"content"`
 }
 
-// BuildPermissionRules converts the PermissionRuleConfig list in config to permission.Rule.
+// BuildPermissionRules 将 config 中的 PermissionRuleConfig 列表转换为 permission.Rule。
 func BuildPermissionRules(rawRules []utils.PermissionRuleConfig) []Rule {
 	rules := make([]Rule, 0, len(rawRules))
 

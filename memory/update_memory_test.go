@@ -25,7 +25,7 @@ func TestUpdateMemoryTool_Name(t *testing.T) {
 func TestUpdateMemoryTool_Call(t *testing.T) {
 	tests := []struct {
 		name        string
-		memDir      string // "temp" means create temp dir
+		memDir      string // "temp" 表示创建临时目录
 		args        map[string]any
 		wantOk      bool
 		wantErr     bool

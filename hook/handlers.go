@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// OnSessionStart Print session start information
+// OnSessionStart 打印会话开始信息
 func OnSessionStart(payload map[string]any) HookResult {
 	log := logger.Log
 	model := payload["model"].(string)
@@ -23,7 +23,7 @@ func OnSessionStart(payload map[string]any) HookResult {
 func PreToolBlockDangerous(payload map[string]any) HookResult {
 	toolName, _ := payload["tool_name"].(string)
 
-	// if not run_bash tool, continue
+	// 如果不是 run_bash 工具，则继续
 	if toolName != "run_bash" {
 		return HookResult{ExitCode: ExitContinue}
 	}
@@ -32,7 +32,7 @@ func PreToolBlockDangerous(payload map[string]any) HookResult {
 	cmd, _ := input["command"].(string)
 	lowered := strings.ToLower(cmd)
 
-	// dangerous command patterns（统一数据源，大小写不敏感匹配）
+	// 危险命令模式（统一数据源，大小写不敏感匹配）
 	for _, pattern := range permission.DangerousBashPatterns() {
 		if strings.Contains(lowered, pattern) {
 			return HookResult{

@@ -12,6 +12,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// maxDescriptionLen description 进入 system prompt 的最大长度（按 rune 计）。
+const maxDescriptionLen = 200
+
+// sanitizeDescription 净化 description：
+func sanitizeDescription(desc string) string {
+	replacer := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ")
+	out := replacer.Replace(desc)
+	out = strings.Join(strings.Fields(out), " ") // 折叠连续空白
+	runes := []rune(out)
+	if len(runes) > maxDescriptionLen {
+		out = string(runes[:maxDescriptionLen]) + "…"
+	}
+	return out
+}
+
 // SkillRegistry skills 注册表
 type SkillRegistry struct {
 	skillsDir string                    // skills 存放路径
@@ -57,6 +72,18 @@ func (r *SkillRegistry) walkFunc(path string, d os.DirEntry, err error) error {
 		return nil
 	}
 
+	// 跳过符号链接。
+	// 否则可以把 skills 目录之外的任意文件（~/.ssh/id_rsa、/etc/passwd 等）
+	// 以「SKILL.md」的名字软链进来，其内容会被当成 skill 正文注入模型上下文，
+	// 等于给攻击者开了一条「借 skill 读取敏感文件」的通道。
+	if d.Type()&os.ModeSymlink != 0 {
+		if logger.Log != nil {
+			logger.Log.Warn("Skip symlinked SKILL.md (directory injection guard)",
+				zap.String("skill_file", path))
+		}
+		return nil
+	}
+
 	// 处理 SKILL.md
 	if !strings.EqualFold(d.Name(), "SKILL.md") {
 		return nil
@@ -69,6 +96,16 @@ func (r *SkillRegistry) walkFunc(path string, d os.DirEntry, err error) error {
 		log := logger.Log
 		log.Warn("The skill.md format is incorrect or corrupted", zap.String("skill_file", d.Name()), zap.Error(parseErr))
 		return nil
+	}
+
+	// 静态flag扫描的 block 级拦截：命中高危的 skill 直接拒绝注册
+	if highestSeverity(skillDoc.VetFlags) == FlagBlock {
+		log := logger.Log
+		log.Warn("Skill blocked by security vetting policy",
+			zap.String("skill_name", skillDoc.Manifest.Name),
+			zap.String("skill_file", path),
+			zap.Any("flags", skillDoc.VetFlags))
+		return nil // 不注册该 skill，其余 skill 继续加载
 	}
 
 	// 注册到 Map 中
@@ -103,9 +140,7 @@ func (r *SkillRegistry) parseSkillFile(path string) (*SkillDocument, error) {
 	if name == "" {
 		name = filepath.Base(filepath.Dir(path))
 	}
-
-	// 构建并返回文档对象
-	return &SkillDocument{
+	doc := &SkillDocument{
 		Manifest: SkillManifest{
 			Name:          name,
 			Description:   skillMeta.Description,
@@ -115,7 +150,20 @@ func (r *SkillRegistry) parseSkillFile(path string) (*SkillDocument, error) {
 		},
 		Body: body,
 		Path: path,
-	}, nil
+	}
+	doc.VetFlags = vetSkill(doc.Manifest, doc.Body)
+
+	// 名称校验
+	if nameErr := validateSkillName(name); nameErr != nil {
+		doc.VetFlags = append(doc.VetFlags, RedFlag{
+			Severity: FlagBlock,
+			Reason:   "非法 skill 名称: " + nameErr.Error(),
+			Source:   "name",
+		})
+	}
+
+	// 构建并返回文档对象
+	return doc, nil
 }
 
 // Names 返回所有已加载 skill 的名称
@@ -151,11 +199,16 @@ func (r *SkillRegistry) DescribeAvailable() string {
 	var b strings.Builder
 	for _, name := range r.Names() {
 		skillDoc := r.skills[name]
-		skillDescription := skillDoc.Manifest.Description
+		// 名称与 description 都是攻击者可控文本，进入 system prompt 前均需净化：
+		//  - name 用 sanitizeNameForPrompt 兜底（加载期已强校验，这里是纵深防御），
+		//    确保永远不会出现换行/冒号而伪造出新的目录条目；
+		//  - description 去换行、折叠空白并截断，防止用块标量注入第二行指令。
+		safeName := sanitizeNameForPrompt(name)
+		skillDescription := sanitizeDescription(skillDoc.Manifest.Description)
 		if skillDescription == "" {
 			skillDescription = "No description provided."
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", name, skillDescription)
+		fmt.Fprintf(&b, "- %s: %s\n", safeName, skillDescription)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -172,6 +225,14 @@ func (r *SkillRegistry) LoadFullText(name string) (string, error) {
 		return "", fmt.Errorf("skill %q not found", name)
 	}
 
+	// 命中降级红旗的 skill：在正文最前面附加“不可信数据”声明，
+	// 让模型在读到 skill 正文之前先看到边界，降低把正文当指令执行的概率
+	body := doc.Body
+	safeName := sanitizeNameForPrompt(name)
+	if highestSeverity(doc.VetFlags) >= FlagWarn {
+		body = untrustedSkillBanner(safeName, doc.VetFlags) + "\n\n" + body
+	}
+
 	// 计算 SKILL.md 所在目录
 	basedir := filepath.Dir(doc.Path)
 
@@ -184,9 +245,9 @@ func (r *SkillRegistry) LoadFullText(name string) (string, error) {
 	}
 
 	wrapper := skillWrapper{
-		Name:    doc.Manifest.Name,
+		Name:    safeName,
 		BaseDir: basedir,
-		Body:    doc.Body,
+		Body:    body,
 	}
 
 	output, err := xml.Marshal(wrapper)

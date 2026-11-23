@@ -13,8 +13,8 @@ import (
 	"zoomClient/model"
 )
 
-// handleSessionCommand handles commands shared across Web REPL modes.
-// Returns true if the command signals session exit.
+// handleSessionCommand 处理各 Web REPL 模式之间共享的命令。
+// 若命令表示会话退出，则返回 true。
 func handleSessionCommand(action string, s *AgentSession) bool {
 	switch action {
 	case "clear":
@@ -53,15 +53,15 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 	return false
 }
 
-// handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
-// Shared commands (clear, compact, exit) are delegated to handleSessionCommand.
+// handleSlashCommand 处理 REPL 斜杠命令。返回 true 表示退出主循环。
+// 共享命令（clear、compact、exit）委托给 handleSessionCommand。
 func handleSlashCommand(input string, s *AgentSession) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return false
 	}
 	cmd := strings.ToLower(parts[0])
-	// Delegate shared commands to handleSessionCommand (strip leading "/")
+	// 将共享命令委托给 handleSessionCommand（去掉开头的 "/"）
 	switch cmd {
 	case "/clear", "/compact", "/exit", "/quit":
 		action := strings.TrimPrefix(cmd, "/")
@@ -70,7 +70,7 @@ func handleSlashCommand(input string, s *AgentSession) bool {
 		}
 		return handleSessionCommand(action, s)
 	}
-	// Slash-only commands
+	// 仅斜杠命令
 	switch cmd {
 	case "/setmode":
 		handleSetMode(parts[1:], s)

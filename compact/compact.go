@@ -16,7 +16,7 @@ import (
 // microCompactPlaceholder 替换旧 ToolResult 用的占位文本
 const microCompactPlaceholder = "[Earlier tool result omitted for brevity]"
 
-// CompactConfig Context compact configuration.
+// CompactConfig 上下文压缩配置。
 type CompactConfig struct {
 	PersistThreshold      int    // 单条ToolResult超过该字节数则落盘
 	PreviewBytes          int    // 落盘后保留的预览字节数
@@ -25,7 +25,7 @@ type CompactConfig struct {
 	PersistDir            string // 落盘目录
 }
 
-// DefaultConfig Returns a set of default values for the config.
+// DefaultConfig 返回该配置的一组默认值。
 func DefaultConfig(cfg utils.Config) *CompactConfig {
 	return &CompactConfig{
 		PersistThreshold:      cfg.Compact.PersistThreshold,

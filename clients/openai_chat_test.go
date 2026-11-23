@@ -81,17 +81,17 @@ func TestConvertToOpenAIMessages(t *testing.T) {
 		t.Fatalf("expected 4 messages, got %d", len(result))
 	}
 
-	// system
+	// system 消息
 	if result[0].Role != "system" || result[0].Content != "You are a helpful assistant" {
 		t.Errorf("system message mismatch: %+v", result[0])
 	}
 
-	// user
+	// user 消息
 	if result[1].Role != "user" || result[1].Content != "Hello" {
 		t.Errorf("user message mismatch: %+v", result[1])
 	}
 
-	// assistant with tool calls
+	// assistant 带工具调用
 	if result[2].Role != "assistant" {
 		t.Errorf("expected role assistant, got %s", result[2].Role)
 	}
@@ -104,7 +104,7 @@ func TestConvertToOpenAIMessages(t *testing.T) {
 	if result[2].ToolCalls[0].Function.Name != "read_file" {
 		t.Errorf("expected function name 'read_file', got %s", result[2].ToolCalls[0].Function.Name)
 	}
-	// arguments should be JSON string
+	// arguments 应为 JSON 字符串
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(result[2].ToolCalls[0].Function.Arguments), &args); err != nil {
 		t.Errorf("arguments should be valid JSON: %v", err)
@@ -113,7 +113,7 @@ func TestConvertToOpenAIMessages(t *testing.T) {
 		t.Errorf("expected path '/tmp/test.txt', got %v", args["path"])
 	}
 
-	// tool
+	// tool 消息
 	if result[3].Role != "tool" || result[3].ToolCallID != "call_123" {
 		t.Errorf("tool message mismatch: %+v", result[3])
 	}

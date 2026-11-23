@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// ========== ReadFileTool Basic Properties ==========
+// ========== ReadFileTool 基本属性 ==========
 
-// TestReadFileTool_Name verifies the tool name is correct.
+// TestReadFileTool_Name 验证工具名称是否正确。
 func TestReadFileTool_Name(t *testing.T) {
 	tool := ReadFileTool{}
 	if got := tool.Name(); got != "read_file" {
@@ -16,7 +16,7 @@ func TestReadFileTool_Name(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Description verifies the description is not empty.
+// TestReadFileTool_Description 验证描述不为空。
 func TestReadFileTool_Description(t *testing.T) {
 	tool := ReadFileTool{}
 	if desc := tool.Description(); desc == "" {
@@ -24,7 +24,7 @@ func TestReadFileTool_Description(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Parameters verifies the parameter schema is correct.
+// TestReadFileTool_Parameters 验证参数模式是否正确。
 func TestReadFileTool_Parameters(t *testing.T) {
 	tool := ReadFileTool{}
 	params := tool.Parameters()
@@ -57,9 +57,9 @@ func TestReadFileTool_Parameters(t *testing.T) {
 	}
 }
 
-// ========== ReadFileTool.Call Functional Tests ==========
+// ========== ReadFileTool.Call 功能测试 ==========
 
-// TestReadFileTool_Call_Success verifies reading a file successfully.
+// TestReadFileTool_Call_Success 验证成功读取文件。
 func TestReadFileTool_Call_Success(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -84,7 +84,7 @@ func TestReadFileTool_Call_Success(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_FileNotFound verifies error when the file does not exist.
+// TestReadFileTool_Call_FileNotFound 验证文件不存在时的错误。
 func TestReadFileTool_Call_FileNotFound(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -101,7 +101,7 @@ func TestReadFileTool_Call_FileNotFound(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_MissingFilename verifies error when filename argument is missing.
+// TestReadFileTool_Call_MissingFilename 验证缺少 filename 参数时的错误。
 func TestReadFileTool_Call_MissingFilename(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -118,7 +118,7 @@ func TestReadFileTool_Call_MissingFilename(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_EmptyFilename verifies error when filename is an empty string.
+// TestReadFileTool_Call_EmptyFilename 验证 filename 为空字符串时的错误。
 func TestReadFileTool_Call_EmptyFilename(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -135,7 +135,7 @@ func TestReadFileTool_Call_EmptyFilename(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_FilenameWrongType verifies error when filename is not a string.
+// TestReadFileTool_Call_FilenameWrongType 验证 filename 不是字符串时的错误。
 func TestReadFileTool_Call_FilenameWrongType(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -152,7 +152,7 @@ func TestReadFileTool_Call_FilenameWrongType(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_PathTraversal verifies path traversal attempts are blocked.
+// TestReadFileTool_Call_PathTraversal 验证路径遍历尝试被阻止。
 func TestReadFileTool_Call_PathTraversal(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -169,7 +169,7 @@ func TestReadFileTool_Call_PathTraversal(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_AbsolutePathEscape verifies absolute paths outside workDir are blocked.
+// TestReadFileTool_Call_AbsolutePathEscape 验证 workDir 之外的绝对路径被阻止。
 func TestReadFileTool_Call_AbsolutePathEscape(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -187,7 +187,7 @@ func TestReadFileTool_Call_AbsolutePathEscape(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_UnicodeContent verifies reading files with Unicode content.
+// TestReadFileTool_Call_UnicodeContent 验证读取包含 Unicode 内容的文件。
 func TestReadFileTool_Call_UnicodeContent(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -210,7 +210,7 @@ func TestReadFileTool_Call_UnicodeContent(t *testing.T) {
 	}
 }
 
-// TestReadFileTool_Call_LargeFile verifies reading a large file.
+// TestReadFileTool_Call_LargeFile 验证读取大文件。
 func TestReadFileTool_Call_LargeFile(t *testing.T) {
 	workDir := t.TempDir()
 	tool := ReadFileTool{}
@@ -237,9 +237,9 @@ func TestReadFileTool_Call_LargeFile(t *testing.T) {
 	}
 }
 
-// ========== Registry Integration ==========
+// ========== Registry 集成 ==========
 
-// TestReadFileTool_ViaRegistry verifies execution through the Registry.
+// TestReadFileTool_ViaRegistry 验证通过 Registry 执行。
 func TestReadFileTool_ViaRegistry(t *testing.T) {
 	workDir := t.TempDir()
 	registry := NewToolRegister()

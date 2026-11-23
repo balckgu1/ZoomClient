@@ -53,7 +53,7 @@ func (d *DeleteMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		return tools.ToolResult{Ok: false, Content: "Error: name parameter must be a non-empty string", IsError: true}
 	}
 
-	// Check Memory Directory parameter
+	// 检查 Memory Directory 参数
 	if d.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}

@@ -112,12 +112,12 @@ func TestWriteFileTool_Parameters(t *testing.T) {
 	params := tool.Parameters()
 	paramrequired := []string{"filename", "content"}
 
-	// Check if the top-level type is "object"
+	// 检查顶层 type 是否为 "object"
 	if params["type"] != "object" {
 		t.Errorf("Testing Error, expect: %q, actual: %q", "object", params["type"])
 	}
 
-	// Check if the properties include `filename` and `content` fields
+	// 检查 properties 是否包含 `filename` 和 `content` 字段
 	for _, value := range paramrequired {
 		_, exists := params["properties"].(map[string]any)[value]
 		if !exists {
@@ -125,7 +125,7 @@ func TestWriteFileTool_Parameters(t *testing.T) {
 		}
 	}
 
-	// Check if the required fields include `filename` and `content`
+	// 检查 required 字段是否包含 `filename` 和 `content`
 	required, ok := params["required"].([]string)
 	if !ok {
 		t.Fatalf("Testing Error, `required` field is missing or not an array")

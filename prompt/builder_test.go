@@ -133,6 +133,14 @@ func TestSkillsSection_And_SkillCount(t *testing.T) {
 	if !strings.Contains(section, "Skills available") || !strings.Contains(section, "code-review") {
 		t.Errorf("SkillsSection() 应包含 skills 目录，实际 %q", section)
 	}
+	// 信任边界声明必须排在目录之后（格式串占位符与参数一一对应的回归保护）
+	descIdx := strings.Index(section, "Skills available")
+	boundaryIdx := strings.Index(section, "Skill trust boundary")
+	if boundaryIdx < 0 {
+		t.Errorf("SkillsSection() 应包含信任边界声明，实际 %q", section)
+	} else if boundaryIdx < descIdx {
+		t.Error("信任边界声明应排在 skills 目录之后")
+	}
 	if builder.SkillCount() != 1 {
 		t.Errorf("SkillCount() 应返回 1，实际 %d", builder.SkillCount())
 	}

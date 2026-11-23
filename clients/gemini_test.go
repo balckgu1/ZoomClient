@@ -214,12 +214,12 @@ func TestConvertToGeminiContents_UserAndAssistant(t *testing.T) {
 		t.Errorf("expected system text, got %q", systemText)
 	}
 
-	// user
+	// 用户
 	if contents[0].Role != "user" {
 		t.Errorf("expected first role 'user', got %s", contents[0].Role)
 	}
 
-	// assistant -> model
+	// assistant 映射为 model
 	if contents[1].Role != "model" {
 		t.Errorf("expected second role 'model', got %s", contents[1].Role)
 	}
@@ -246,12 +246,12 @@ func TestConvertToGeminiContents_AssistantWithToolCalls(t *testing.T) {
 		t.Fatalf("expected 2 contents, got %d", len(contents))
 	}
 
-	// assistant with tool call -> model with FunctionCall part
+	// 带工具调用的 assistant 转为带 FunctionCall 部分的 model
 	modelContent := contents[1]
 	if modelContent.Role != "model" {
 		t.Fatalf("expected model role, got %s", modelContent.Role)
 	}
-	if len(modelContent.Parts) != 2 { // text + function_call
+	if len(modelContent.Parts) != 2 { // 文本 + function_call
 		t.Fatalf("expected 2 parts, got %d", len(modelContent.Parts))
 	}
 }
@@ -272,7 +272,7 @@ func TestConvertToGeminiContents_ToolResults(t *testing.T) {
 		t.Fatalf("expected 2 contents, got %d", len(contents))
 	}
 
-	// tool results -> user with FunctionResponse parts
+	// 工具结果转为带 FunctionResponse 部分的 user
 	toolContent := contents[1]
 	if toolContent.Role != "user" {
 		t.Errorf("expected user role for tool results, got %s", toolContent.Role)
@@ -303,7 +303,7 @@ func TestConvertToGeminiContents_MultipleToolResults(t *testing.T) {
 		t.Fatalf("expected 2 contents, got %d", len(contents))
 	}
 
-	// multiple tool results merged into single user message
+	// 多个工具结果合并为单条 user 消息
 	toolContent := contents[1]
 	if len(toolContent.Parts) != 2 {
 		t.Errorf("expected 2 function response parts, got %d", len(toolContent.Parts))
@@ -320,7 +320,7 @@ func TestConvertToGeminiContents_UnknownToolName(t *testing.T) {
 		t.Fatalf("expected 1 content, got %d", len(contents))
 	}
 
-	// unknown tool name should fallback to "unknown"
+	// 未知的工具名称应回退为 "unknown"
 	if contents[0].Parts[0].FunctionResponse.Name != "unknown" {
 		t.Errorf("expected fallback name 'unknown', got %s", contents[0].Parts[0].FunctionResponse.Name)
 	}

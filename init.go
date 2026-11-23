@@ -28,7 +28,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// cliFlags holds parsed command-line flags.
+// cliFlags 保存解析后的命令行标志。
 type cliFlags struct {
 	ModelType  string
 	OutputMode string
@@ -65,7 +65,7 @@ func initEmitter(outputMode string) (emitter.Emitter, *ui.Renderer, *web.Session
 	}
 }
 
-// initClient creates the ChatClient and resolves model name based on backend type.
+// initClient 创建 ChatClient 并根据后端类型解析模型名称。
 func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (clients.ChatClient, string) {
 	log := logger.Log
 	switch strings.ToLower(modelType) {
@@ -146,17 +146,17 @@ func initClient(modelType string, cfg *utils.Config, em emitter.Emitter) (client
 	}
 }
 
-// initTools creates the tool registry and registers all tools.
+// initTools 创建工具注册表并注册所有工具。
 func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	skillregistry *skills.SkillRegistry, toolCtx *tools.ToolContext, state *fsm.State,
 	permitMgr *permission.Manager) (*tools.ToolRegister, *tools.TodoManager, *compact.CompactManager) {
 
-	// logger
+	// 日志记录器
 	log := logger.Log
 
 	registry := tools.NewToolRegister()
 
-	// Register basic tools
+	// 注册基础工具
 	registry.Register(tools.WriteFileTool{})
 	registry.Register(tools.EditFileTool{})
 	registry.Register(tools.ReadFileTool{})
@@ -164,20 +164,20 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	registry.Register(tools.RunBashTool{})
 	registry.Register(tools.GlobSearch{})
 
-	// Register load_skills tool
+	// 注册 load_skills 工具
 	registry.Register(skills.NewLoadSkillTool(skillregistry))
 
-	// Register memory tools
+	// 注册记忆工具
 	registry.Register(memory.NewSaveMemoryTool(cfg.Memory.Dir))
 	registry.Register(memory.NewSearchMemoryTool(cfg.Memory.Dir))
 	registry.Register(memory.NewUpdateMemoryTool(cfg.Memory.Dir))
 	registry.Register(memory.NewDeleteMemoryTool(cfg.Memory.Dir))
 
-	// Instantiate and register todo manager
+	// 实例化并注册待办管理器
 	todoManager := tools.NewTodoManager()
 	registry.Register(todoManager)
 
-	// Instantiate and register task manager
+	// 实例化并注册任务管理器
 	taskManager := task.NewTaskManager(cfg.Tasks.Dir)
 	registry.Register(task.NewCreateTaskTool(taskManager))
 	registry.Register(task.NewListTasksTool(taskManager))
@@ -185,11 +185,11 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	registry.Register(task.NewClaimTaskTool(taskManager))
 	registry.Register(task.NewCompleteTaskTool(taskManager))
 
-	// Instantiate and register compact manager
+	// 实例化并注册压缩管理器
 	compactManager := compact.NewCompactManager(compact.DefaultConfig(*cfg), client, modelname)
 	registry.Register(compact.NewCompactTool(compactManager))
 
-	// Create subagent and register sub_task tool
+	// 创建子代理并注册子任务工具
 	options := map[string]interface{}{
 		"temperature": cfg.Subagent.Temperature,
 	}
@@ -207,7 +207,7 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	}
 	registry.Register(subagent.NewTaskTool(subAgentRunner, parentMessagesProvider))
 
-	// Share permission policy with subagent's independent registry
+	// 与子代理的独立注册表共享权限策略
 	if subAgent.Registry != nil {
 		subAgent.Registry.SetPermissionDecider(permitMgr.Decide)
 	}
@@ -216,7 +216,7 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	return registry, todoManager, compactManager
 }
 
-// initPermissionManager creates the permission manager based on output mode.
+// initPermissionManager 根据输出模式创建权限管理器。
 func initPermissionManager(outputMode string, cfg *utils.Config, webSess *web.Session) *permission.Manager {
 	var asker permission.Asker
 	switch outputMode {
@@ -260,7 +260,7 @@ func openMetricsFile(path string) (*os.File, string, error) {
 // 返回写句柄（未启用或打开失败时为 nil），由调用方在退出时关闭。
 func initHookRunner(cfg *utils.Config) (*hook.Runner, io.WriteCloser) {
 	log := logger.Log
-	// Build a new hook runner instance
+	// 构建新的 hook runner 实例
 	runner := hook.NewRunner()
 
 	// 指标采集（可选）：纯观察者，必须先于业务 handler 注册，
@@ -277,29 +277,29 @@ func initHookRunner(cfg *utils.Config) (*hook.Runner, io.WriteCloser) {
 		}
 	}
 
-	// Register hooks for session start
+	// 注册会话开始的 hooks
 	runner.HookRegister(hook.EventSessionStart, hook.OnSessionStart)
 
-	// Register hooks around LLM calls (pre/post chat + error retry)
+	// 注册 LLM 调用相关的 hooks（聊天前后 + 错误重试）
 	runner.HookRegister(hook.EventPreChat, hook.PreChatAuditLog)
 	runner.HookRegister(hook.EventPostChat, hook.PostChatValidate)
 	runner.HookRegister(hook.EventLLMError, hook.OnLLMErrorRetry)
 
-	// Register hooks for tool use
+	// 注册工具使用的 hooks
 	runner.HookRegister(hook.EventPreToolUse, hook.PreToolBlockDangerous)
 	runner.HookRegister(hook.EventPreToolUse, hook.PreToolRateLimit)
 	runner.HookRegister(hook.EventPreToolUse, hook.PreToolSensitiveFileGuard)
 
-	// Register hooks for tool use completion and errors
+	// 注册工具使用完成与错误的 hooks
 	runner.HookRegister(hook.EventPostToolUse, hook.PostToolAuditLog)
 	runner.HookRegister(hook.EventToolError, hook.OnToolErrorRecovery)
 
-	// Register hooks for session end
+	// 注册会话结束的 hooks
 	runner.HookRegister(hook.EventSessionEnd, hook.OnSessionEnd)
 	return runner, metricsWC
 }
 
-// buildAsker selects the interaction method when ask is triggered based on config.
+// buildAsker 在触发询问时根据配置选择交互方式。
 //   - interactive=true + CLI mode   → StdinAsker（终端文本交互）
 //   - interactive=false             → DenyAsker（安全默认值）
 func buildAsker(interactive bool, apiMode bool, w io.Writer) permission.Asker {

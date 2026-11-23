@@ -282,5 +282,5 @@ func (r *Renderer) EmitTodoPanel(rendered string, _ []tools.PlanItem) { r.PrintT
 func (r *Renderer) EmitCompact(beforeBytes, afterBytes int)           { r.PrintCompact(beforeBytes, afterBytes) }
 func (r *Renderer) EmitError(scope, msg string)                       { r.PrintError(scope, msg) }
 func (r *Renderer) EmitInfo(msg string)                               { r.PrintInfo(msg) }
-func (r *Renderer) EmitEmotion(state string, meta map[string]string)  {} // CLI 模式无宠物情绪
+func (r *Renderer) EmitPhase(state string, meta map[string]string)    {} // CLI 模式无
 func (r *Renderer) EmitSystem(event string, data map[string]string)   {} // CLI 模式无系统事件流

@@ -81,8 +81,8 @@ func getPriority(typ string) int {
 	return 99
 }
 
-// rebuildIndex Rebuild the MEMORY.md index file, listing all valid memory entries in memoryDir.
-// Format: - name: description [type]
+// rebuildIndex 重建 MEMORY.md 索引文件，列出 memoryDir 中所有有效记忆条目。
+// 格式：- name: description [type]
 func rebuildIndex(memoryDir string) error {
 	entries, err := os.ReadDir(memoryDir)
 	if err != nil {

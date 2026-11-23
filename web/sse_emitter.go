@@ -25,7 +25,7 @@ func (e *SseEmitter) emit(ch string, data any) {
 }
 
 // ─── 会话生命周期 ───
-
+// EmitSessionStart 推送会话开始事件
 func (e *SseEmitter) EmitSessionStart(model, logPath string) {
 	e.emit("system", map[string]string{
 		"event":    "ready",
@@ -61,6 +61,7 @@ func (e *SseEmitter) EmitReasoning(text string) {
 	})
 }
 
+// EmitDone 发送一次任务结束通知
 func (e *SseEmitter) EmitDone() {
 	e.emit("agent", map[string]string{
 		"type": "done",
@@ -146,14 +147,14 @@ func (e *SseEmitter) EmitInfo(msg string) {
 	})
 }
 
-func (e *SseEmitter) EmitEmotion(state string, meta map[string]string) {
+func (e *SseEmitter) EmitPhase(state string, meta map[string]string) {
 	data := map[string]any{
 		"state": state,
 	}
 	for k, v := range meta {
 		data[k] = v
 	}
-	e.emit("emotion", data)
+	e.emit("phase", data)
 }
 
 func (e *SseEmitter) EmitSystem(event string, data map[string]string) {

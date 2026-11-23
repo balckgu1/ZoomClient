@@ -5,7 +5,7 @@ import "zoomClient/clients"
 // APIPayload 最终组装的模型输入载荷。
 type APIPayload struct {
 	SystemPrompt string
-	Messages     []clients.Message // normalize + reminders + attachments
+	Messages     []clients.Message // 规范化 + reminders + 附件
 }
 
 // MessagePipeline 模型输入的完整组装管道 ==> prompt blocks / normalized messages / reminders / attachments。
@@ -29,13 +29,13 @@ func (p *MessagePipeline) AssemblePayload(rawMessages []clients.Message) APIPayl
 	// 1. 构建 system prompt（走已有的 Builder）
 	systemPrompt := p.builder.Build()
 
-	// 2. Normalize messages
+	// 2. 规范化消息
 	messages := p.normalizeMessages(rawMessages)
 
-	// 3. Inject reminders（以 system role 追加到末尾）
+	// 3. 注入 reminders（以 system role 追加到末尾）
 	messages = p.injectReminders(messages)
 
-	// 4. Inject attachments（预留）
+	// 4. 注入附件（预留）
 	messages = p.injectAttachments(messages)
 
 	return APIPayload{SystemPrompt: systemPrompt, Messages: messages}

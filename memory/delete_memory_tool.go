@@ -40,6 +40,10 @@ func (d *DeleteMemoryTool) Parameters() map[string]any {
 }
 
 func (d *DeleteMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext) tools.ToolResult {
+	// 串行化对 memory 目录的读-改-写，避免与后台抽取 / 并行工具批次的并发写入丢失索引更新
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
 	nameRaw, exist := args["name"]
 	if !exist {
 		return tools.ToolResult{Ok: false, Content: "Error: name parameter is required", IsError: true}
@@ -49,7 +53,7 @@ func (d *DeleteMemoryTool) Call(args map[string]any, toolCtx *tools.ToolContext)
 		return tools.ToolResult{Ok: false, Content: "Error: name parameter must be a non-empty string", IsError: true}
 	}
 
-	// Check Memory Directory parameter
+	// 检查 Memory Directory 参数
 	if d.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}

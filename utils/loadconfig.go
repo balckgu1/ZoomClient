@@ -7,22 +7,22 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config config struct
+// Config 配置结构体
 type Config struct {
-	OpenAI         OpenAIConfig         `mapstructure:"openai"`
-	Ollama         OllamaConfig         `mapstructure:"ollama"`
-	Anthropic      AnthropicConfig      `mapstructure:"anthropic"`
-	Gemini         GeminiConfig         `mapstructure:"gemini"`
-	Subagent       SubagentConfig       `mapstructure:"subagent"`
-	Skills         SkillsConfig         `mapstructure:"skills"`
-	Memory         MemoryConfig         `mapstructure:"memory"`
-	Session        SessionConfig        `mapstructure:"session"`
-	Tasks          TasksConfig          `mapstructure:"tasks"`
-	AgentLoop      AgentLoopConfig      `mapstructure:"agentloop"`
-	Compact        CompactConfig        `mapstructure:"compact"`
-	Permission     PermissionConfig     `mapstructure:"permission"`
-	Tools          ToolsConfig          `mapstructure:"tools"`
-	Observability  ObservabilityConfig  `mapstructure:"observability"`
+	OpenAI        OpenAIConfig        `mapstructure:"openai"`
+	Ollama        OllamaConfig        `mapstructure:"ollama"`
+	Anthropic     AnthropicConfig     `mapstructure:"anthropic"`
+	Gemini        GeminiConfig        `mapstructure:"gemini"`
+	Subagent      SubagentConfig      `mapstructure:"subagent"`
+	Skills        SkillsConfig        `mapstructure:"skills"`
+	Memory        MemoryConfig        `mapstructure:"memory"`
+	Session       SessionConfig       `mapstructure:"session"`
+	Tasks         TasksConfig         `mapstructure:"tasks"`
+	AgentLoop     AgentLoopConfig     `mapstructure:"agentloop"`
+	Compact       CompactConfig       `mapstructure:"compact"`
+	Permission    PermissionConfig    `mapstructure:"permission"`
+	Tools         ToolsConfig         `mapstructure:"tools"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
 // ObservabilityConfig 可观测性配置
@@ -59,7 +59,7 @@ type GeminiConfig struct {
 	ModelName string `mapstructure:"model_name"`
 }
 
-// SubagentConfig subagent config
+// SubagentConfig subagent 配置
 type SubagentConfig struct {
 	DefaultMaxTurns         int     `mapstructure:"defaultMaxTurns"`
 	DefaultSystemPrompt     string  `mapstructure:"defaultSystemPrompt"`
@@ -72,7 +72,8 @@ type SkillsConfig struct {
 }
 
 type MemoryConfig struct {
-	Dir string `mapstructure:"dir"`
+	Dir               string `mapstructure:"dir"`
+	AutoExtractOnTurn bool   `mapstructure:"autoExtractOnTurn"` // 每轮对话结束后后台增量抽取记忆，默认开启
 }
 
 // SessionConfig 会话持久化配置
@@ -125,7 +126,7 @@ type PermissionRuleConfig struct {
 	Content  string `mapstructure:"content"`
 }
 
-// global config variable
+// 全局配置变量
 var (
 	globalConfig *Config
 	configOnce   sync.Once
@@ -139,23 +140,25 @@ func InitConfig() {
 // InitConfigWithDir 初始化配置文件，可指定配置目录路径。
 func InitConfigWithDir(configDir string) {
 	configOnce.Do(func() {
-		// Config file name
+		// 配置文件名称
 		viper.SetConfigName("config")
-		// Config file type
+		// 配置文件类型
 		viper.SetConfigType("yaml")
-		// config file path
+		// memory 自动抽取默认开启：旧配置文件缺少该字段时仍保持 per-turn 行为
+		viper.SetDefault("memory.autoExtractOnTurn", true)
+		// 配置文件路径
 		if configDir != "" {
 			viper.AddConfigPath(configDir)
 		} else {
 			viper.AddConfigPath("./config")
 		}
-		// find config file and read it
+		// 查找配置文件并读取
 		err := viper.ReadInConfig()
 		if err != nil {
 			log.Fatalf("Fatal error config file: %s \n", err)
 		}
 
-		// parse config to struct `globalConfig` and save it to global variable
+		// 将配置解析到结构体 `globalConfig` 并保存到全局变量
 		globalConfig = &Config{}
 		if err := viper.Unmarshal(globalConfig); err != nil {
 			log.Fatalf("Fatal error unmarshaling config: %s \n", err)

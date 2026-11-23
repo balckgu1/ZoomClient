@@ -307,9 +307,15 @@ export function App() {
       return;
     }
 
-    if (evt.ch === "emotion") {
+    if (evt.ch === "phase") {
       if (d.state === "thinking") {
+        // // AgentStatus 显示三点呼吸动画 + "思考中…"
         setAgentPhase("thinking");
+        // 清空工具名（已不属于处理工具阶段）
+        setCurrentToolName("");
+      } else if (d.state === "memory") {
+        // 回合生成已结束、同步记忆抽取进行中：显示“记忆更新中…”，busy 保持到 done 事件
+        setAgentPhase("memory");
         setCurrentToolName("");
       }
       return;

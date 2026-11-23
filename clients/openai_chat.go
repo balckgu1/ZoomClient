@@ -12,11 +12,11 @@ import (
 	"zoomClient/tools"
 )
 
-// OpenAIClient is an OpenAI Client
+// OpenAIClient 是一个 OpenAI 客户端
 type OpenAIClient struct {
-	BaseURL string       // API base url
-	APIKey  string       // API Key
-	Client  *http.Client // HTTP Client
+	BaseURL string       // API 基础地址
+	APIKey  string       // API 密钥
+	Client  *http.Client // HTTP 客户端
 }
 
 // OpenAITool 表示发送给 OpenAI 的 tool 定义

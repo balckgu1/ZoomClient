@@ -16,7 +16,7 @@ func init() {
 	logger.Log, _ = zap.NewDevelopment()
 }
 
-// tempStore creates a Store backed by a temporary directory; cleanup is automatic.
+// tempStore 创建一个由临时目录支持的 Store；清理是自动的。
 func tempStore(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -80,7 +80,7 @@ func TestStore_SaveAndLoad(t *testing.T) {
 				t.Fatalf("Save() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			// Verify file exists on disk
+			// 验证文件存在于磁盘上
 			path := filepath.Join(s.Dir(), tt.record.ID+".json")
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				t.Fatal("session file not created")
@@ -108,7 +108,7 @@ func TestStore_List(t *testing.T) {
 		name      string
 		records   []*SessionRecord
 		wantCount int
-		wantFirst string // ID of the most recent (first in list)
+		wantFirst string // 最近一次的 ID（列表中的第一个）
 	}{
 		{
 			name: "three sessions sorted by UpdatedAt desc",
@@ -164,7 +164,7 @@ func TestStore_Delete(t *testing.T) {
 	tests := []struct {
 		name       string
 		id         string
-		setupFirst bool // whether to save the record before deleting
+		setupFirst bool // 删除前是否保存记录
 		wantErr    bool
 	}{
 		{
@@ -202,13 +202,13 @@ func TestStore_Delete(t *testing.T) {
 				t.Fatalf("Delete() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			// Verify file is gone
+			// 验证文件已删除
 			path := filepath.Join(s.Dir(), tt.id+".json")
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Error("session file still exists after delete")
 			}
 
-			// Verify index is clean
+			// 验证索引已清理
 			metas, _ := s.List()
 			for _, m := range metas {
 				if m.ID == tt.id {
@@ -289,7 +289,7 @@ func TestStore_InvalidID(t *testing.T) {
 	tests := []struct {
 		name string
 		id   string
-		op   string // "load" or "delete"
+		op   string // "load" 或 "delete"
 	}{
 		{name: "load with path traversal", id: "../etc/passwd", op: "load"},
 		{name: "delete with path traversal", id: "../../bad", op: "delete"},
@@ -318,7 +318,7 @@ func TestStore_InvalidID(t *testing.T) {
 func TestStore_Reconcile(t *testing.T) {
 	tests := []struct {
 		name       string
-		setupFiles []*SessionRecord // files written to disk before NewStore
+		setupFiles []*SessionRecord // NewStore 之前写入磁盘的文件
 		wantCount  int
 		wantIDs    []string
 	}{

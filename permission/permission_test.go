@@ -285,7 +285,7 @@ func TestCheck_DenyRule_ExtendedRegex(t *testing.T) {
 	}
 }
 
-// ===================== Step 4: allow rules =====================
+// ===================== Step 4: allow 规则 =====================
 
 // allow rule 应能让 default 模式下原本要 ask 的调用直接放行
 func TestCheck_AllowRule_HitInDefaultMode(t *testing.T) {
@@ -309,7 +309,7 @@ func TestCheck_AllowRule_CannotOverridePlanMode(t *testing.T) {
 	}
 }
 
-// ===================== Step 5: ask fallback =====================
+// ===================== Step 5: ask 兜底 =====================
 
 func TestCheck_DefaultMode_AsksWhenUnknown(t *testing.T) {
 	m := newManagerWithMode(ModeDefault, DenyAsker{})

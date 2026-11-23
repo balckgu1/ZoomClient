@@ -5,7 +5,7 @@ import (
 	"zoomClient/skills"
 )
 
-// SystemPromptBuilder Prompt Builder
+// SystemPromptBuilder 系统提示词构建器
 type SystemPromptBuilder struct {
 	skillRegistry *skills.SkillRegistry
 	memoryDir     string

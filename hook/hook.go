@@ -7,21 +7,21 @@ import (
 )
 
 const (
-	EventSessionStart = "SessionStart" // Session start
+	EventSessionStart = "SessionStart" // 会话开始
 	EventPreChat      = "PreChat"      // LLM 调用前
 	EventPostChat     = "PostChat"     // LLM 调用后
 	EventLLMError     = "LLMError"     // LLM 调用失败
-	EventPreToolUse   = "PreToolUse"   // Tool execution before
-	EventPostToolUse  = "PostToolUse"  // Tool execution after
-	EventToolError    = "ToolError"    // Tool execution error
-	EventSessionEnd   = "SessionEnd"   // Session end
+	EventPreToolUse   = "PreToolUse"   // 工具执行前
+	EventPostToolUse  = "PostToolUse"  // 工具执行后
+	EventToolError    = "ToolError"    // 工具执行错误
+	EventSessionEnd   = "SessionEnd"   // 会话结束
 )
 
 const (
-	ExitContinue = 0 // Continue
-	ExitBlock    = 1 // Block
-	ExitInject   = 2 // Inject
-	ExitRetry    = 3 // Retry
+	ExitContinue = 0 // 继续
+	ExitBlock    = 1 // 阻断
+	ExitInject   = 2 // 注入
+	ExitRetry    = 3 // 重试
 )
 
 type HookHandlerFunc = func(payload map[string]any) HookResult
@@ -41,12 +41,12 @@ func NewRunner() *Runner {
 	}
 }
 
-// HookRegister Register a hook handler for a specific event
+// HookRegister 为特定事件注册一个钩子处理器
 func (r *Runner) HookRegister(event string, handler HookHandlerFunc) {
 	r.handlers[event] = append(r.handlers[event], handler)
 }
 
-// HookRun Run all hook handlers for a specific event
+// HookRun 运行特定事件的所有钩子处理器
 func (r *Runner) HookRun(event string, args map[string]any) HookResult {
 
 	handlers, exists := r.handlers[event]

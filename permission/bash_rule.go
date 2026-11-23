@@ -19,7 +19,7 @@ var dangerousBashSubstrings = []string{
 	"shutdown",
 	"reboot",
 	"> /dev/sda",
-	":(){:|:&};:", // Classic fork bomb
+	":(){:|:&};:", // 经典 fork 炸弹
 	// 扩展 Windows 破坏性 / 持久化命令
 	"remove-partition",
 	"delete-volume",
@@ -59,7 +59,7 @@ func DangerousBashPatterns() []string {
 	return dangerousBashSubstrings
 }
 
-// isDangerousBash Determine whether a bash command should be rejected
+// isDangerousBash 判断 bash 命令是否应被拒绝
 func isDangerousBash(command string) (bool, string) {
 	cmd := strings.TrimSpace(command)
 	if cmd == "" {

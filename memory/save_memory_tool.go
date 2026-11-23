@@ -57,6 +57,10 @@ func (m *SaveMemoryTool) Parameters() map[string]any {
 }
 
 func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolContext) tools.ToolResult {
+	// 串行化对 memory 目录的读-改-写，避免与后台抽取 / 并行工具批次的并发写入丢失索引更新
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
 	nameRaw, exist := args["name"]
 	if !exist {
 		return tools.ToolResult{Ok: false, Content: "Error: name parameter is required", IsError: true}
@@ -82,7 +86,7 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		return tools.ToolResult{Ok: false, Content: "Error: type parameter must be a non-empty string", IsError: true}
 	}
 
-	// Check typ parameter
+	// 校验 typ 参数
 	validTypes := map[string]bool{"user": true, "feedback": true, "project": true, "reference": true}
 	if !validTypes[typ] {
 		return tools.ToolResult{
@@ -97,16 +101,16 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		return tools.ToolResult{Ok: false, Content: "Error: content parameter is required", IsError: true}
 	}
 
-	// Front Matter + Content
+	// Front Matter + 内容
 	fileContent := fmt.Sprintf("---\nname: %s\ndescription: %s\ntype: %s\n---\n%s\n",
 		yamlQuote(name), yamlQuote(description), typ, content)
 
-	// Check Memory Directory parameter
+	// 检查内存目录参数
 	if m.memoryDir == "" {
 		return tools.ToolResult{Ok: false, Content: "Error: MemoryDir is not configured", IsError: true}
 	}
 
-	// Check if a memory with the same name already exists
+	// 检查是否已存在同名 memory
 	indexPath := filepath.Join(m.memoryDir, "MEMORY.md")
 	exists, memErr := MemoryExists(indexPath, name)
 	if memErr != nil {
@@ -123,7 +127,7 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	// Create Memory Directory if not exists
+	// 若不存在则创建内存目录
 	if err := os.MkdirAll(m.memoryDir, 0755); err != nil {
 		return tools.ToolResult{
 			Ok:      false,
@@ -132,13 +136,13 @@ func (m *SaveMemoryTool) Call(args map[string]interface{}, toolCtx *tools.ToolCo
 		}
 	}
 
-	// Generate a secure file path
+	// 生成安全的文件路径
 	safeName := sanitizeFilename(name)
 	filePath := filepath.Join(m.memoryDir, safeName+".md")
 
 	toolCtx.Logger.Info("Saving memory", zap.String("session", toolCtx.SessionID), zap.String("path", filePath))
 
-	// Write file to disk
+	// 将文件写入磁盘
 	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
 		return tools.ToolResult{
 			Ok:      false,

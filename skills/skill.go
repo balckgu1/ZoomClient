@@ -17,4 +17,5 @@ type SkillDocument struct {
 	Manifest SkillManifest // 元信息
 	Body     string        // SKILL.md 去掉 frontmatter 后的正文
 	Path     string        // 源文件路径
+	VetFlags []RedFlag     // 静态扫描结果（为空则表示未命中任何flag）
 }

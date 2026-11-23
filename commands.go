@@ -13,11 +13,13 @@ import (
 	"zoomClient/model"
 )
 
-// handleSessionCommand handles commands shared across Web REPL modes.
-// Returns true if the command signals session exit.
+// handleSessionCommand 处理各 Web REPL 模式之间共享的命令。
+// 若命令表示会话退出，则返回 true。
 func handleSessionCommand(action string, s *AgentSession) bool {
 	switch action {
 	case "clear":
+		// 清空历史前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		if len(s.State.Messages) > 0 && s.State.Messages[0].Role == "system" {
 			s.State.Messages = s.State.Messages[:1]
 		} else {
@@ -28,6 +30,8 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 		// 历史已清空，推送最新占用快照刷新前端指示器
 		emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
 	case "compact":
+		// 压缩替换消息序列前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		if len(s.State.Messages) <= 1 {
 			s.Em.EmitInfo("no history to compact")
 			return false
@@ -49,15 +53,15 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 	return false
 }
 
-// handleSlashCommand handles REPL slash commands. Returns true to exit the main loop.
-// Shared commands (clear, compact, exit) are delegated to handleSessionCommand.
+// handleSlashCommand 处理 REPL 斜杠命令。返回 true 表示退出主循环。
+// 共享命令（clear、compact、exit）委托给 handleSessionCommand。
 func handleSlashCommand(input string, s *AgentSession) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return false
 	}
 	cmd := strings.ToLower(parts[0])
-	// Delegate shared commands to handleSessionCommand (strip leading "/")
+	// 将共享命令委托给 handleSessionCommand（去掉开头的 "/"）
 	switch cmd {
 	case "/clear", "/compact", "/exit", "/quit":
 		action := strings.TrimPrefix(cmd, "/")
@@ -66,7 +70,7 @@ func handleSlashCommand(input string, s *AgentSession) bool {
 		}
 		return handleSessionCommand(action, s)
 	}
-	// Slash-only commands
+	// 仅斜杠命令
 	switch cmd {
 	case "/setmode":
 		handleSetMode(parts[1:], s)
@@ -244,6 +248,8 @@ func handleSessionCmd(args []string, s *AgentSession) {
 			s.Em.EmitInfo("Usage: /session load <id>")
 			return
 		}
+		// 替换当前消息序列前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		id := args[1]
 		record, err := s.SessionMgr.Load(id)
 		if err != nil {
@@ -259,6 +265,8 @@ func handleSessionCmd(args []string, s *AgentSession) {
 			record.Title, len(record.Messages), record.TurnCount))
 
 	case "new":
+		// 丢弃当前消息序列前，同步抽取未处理的增量窗口（阻塞），避免记忆丢失
+		s.runMemoryExtraction(false)
 		record := s.SessionMgr.CreateSession()
 		s.State.Messages = nil
 		s.State.TurnCount = 0

@@ -79,12 +79,12 @@ func TestConvertToAnthropicMessages_UserAndAssistant(t *testing.T) {
 		t.Errorf("expected system text, got %q", systemText)
 	}
 
-	// user message
+	// 用户消息
 	if result[0].Role != "user" {
 		t.Errorf("expected first message role 'user', got %s", result[0].Role)
 	}
 
-	// assistant message
+	// 助手消息
 	if result[1].Role != "assistant" {
 		t.Errorf("expected second message role 'assistant', got %s", result[1].Role)
 	}
@@ -112,12 +112,12 @@ func TestConvertToAnthropicMessages_AssistantWithToolCalls(t *testing.T) {
 		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
 
-	// assistant message should have tool_use block
+	// 助手消息应包含 tool_use 块
 	assistantMsg := result[1]
 	if assistantMsg.Role != "assistant" {
 		t.Fatalf("expected assistant role, got %s", assistantMsg.Role)
 	}
-	if len(assistantMsg.Content) != 2 { // text block + tool_use block
+	if len(assistantMsg.Content) != 2 { // 文本块 + tool_use 块
 		t.Fatalf("expected 2 content blocks, got %d", len(assistantMsg.Content))
 	}
 }
@@ -135,12 +135,12 @@ func TestConvertToAnthropicMessages_ToolResults(t *testing.T) {
 	}
 
 	result, _ := convertToAnthropicMessages(messages)
-	// user + assistant(with tool call) + tool result(user message) = 3 messages
+	// 用户 + 助手(含工具调用) + 工具结果(用户消息) = 3 条消息
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
 
-	// tool results should be merged into a user message
+	// 工具结果应合并为一条用户消息
 	toolResultMsg := result[2]
 	if toolResultMsg.Role != "user" {
 		t.Errorf("expected tool results merged into user message, got role %s", toolResultMsg.Role)
@@ -161,12 +161,12 @@ func TestConvertToAnthropicMessages_MultipleToolResults(t *testing.T) {
 	}
 
 	result, _ := convertToAnthropicMessages(messages)
-	// assistant(with tool calls) + merged tool results(user message) = 2 messages
+	// 助手(含工具调用) + 合并后的工具结果(用户消息) = 2 条消息
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
 
-	// both tool results should be in a single user message
+	// 两个工具结果应位于同一条用户消息中
 	if result[1].Role != "user" {
 		t.Errorf("expected user role, got %s", result[1].Role)
 	}
@@ -184,7 +184,7 @@ func TestConvertToAnthropicMessages_EmptyAssistant(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
-	// empty assistant should still have at least one text block
+	// 空的助手消息仍应至少有一个文本块
 	if len(result[0].Content) != 1 {
 		t.Errorf("expected 1 content block for empty assistant, got %d", len(result[0].Content))
 	}
@@ -218,9 +218,9 @@ func TestBuildAnthropicTools(t *testing.T) {
 	if result[0].OfTool.Name != "read_file" {
 		t.Errorf("expected name 'read_file', got %s", result[0].OfTool.Name)
 	}
-	// Description is set via anthropic.String() helper in buildAnthropicTools
-	// The param.Opt[string] type handles optional values; we just verify the tool name is correct
-	// and assume the SDK handles description properly
+	// 描述在 buildAnthropicTools 中通过 anthropic.String() 辅助函数设置
+	// param.Opt[string] 类型处理可选值；我们只验证工具名是否正确
+	// 并假设 SDK 会正确处理描述
 }
 
 func TestNewAnthropicClient(t *testing.T) {
@@ -228,5 +228,5 @@ func TestNewAnthropicClient(t *testing.T) {
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
-	// anthropic.Client is a struct (not a pointer), so we just verify the wrapper is created
+	// anthropic.Client 是结构体(不是指针)，因此我们只验证包装器已被创建
 }

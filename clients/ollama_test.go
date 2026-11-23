@@ -104,7 +104,7 @@ func TestOllamaClient_Chat_Success(t *testing.T) {
 }
 
 func TestOllamaClient_Chat_NDJSON(t *testing.T) {
-	// Ollama may return NDJSON even with stream:false
+	// Ollama 即使 stream:false 也可能返回 NDJSON
 	lines := []ChatResponse{
 		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: "Hello"}},
 		{Model: "qwen3:8b", Message: Message{Role: "assistant", Content: " world"}},
@@ -282,7 +282,7 @@ func TestOllamaClient_Chat_InvalidJSON(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("this is not json\n"))
-		// write a valid line after invalid ones
+		// 在无效行之后写入一行有效数据
 		resp := ChatResponse{
 			Model:   "qwen3:8b",
 			Message: Message{Role: "assistant", Content: "valid"},
@@ -316,7 +316,7 @@ func TestOllamaClient_Chat_WithTools(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// verify request body contains tools
+		// 校验请求体包含工具
 		var req ChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("failed to decode request: %v", err)

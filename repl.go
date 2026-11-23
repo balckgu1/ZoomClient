@@ -23,7 +23,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// runWebREPL starts the web server and runs the web mode REPL loop.
+// isStopChClosed 报告 stop 通道是否已被关闭（用户主动中断了本轮生成）。
+// nil 通道视为未中断。用于回合结束时决定是否跳过同步记忆抽取。
+func isStopChClosed(stopCh <-chan struct{}) bool {
+	if stopCh == nil {
+		return false
+	}
+	select {
+	case <-stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// runWebREPL 启动 web 服务器并运行 web 模式的 REPL 循环。
 func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webPort int, sessMgr *session.Manager) {
 	log := logger.Log
 	// 初始化工作目录镜像，使 GET /api/workdir 立即可返回当前目录
@@ -39,7 +53,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 		Pipeline:      s.Pipeline,
 		Config:        s.Cfg,
 	}, webPort)
-	// run http server
+	// 运行 HTTP 服务器
 	go func() {
 		log.Info("Web server starting", zap.String("addr", webServer.Addr()))
 		if err := webServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -48,7 +62,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 	}()
 	// 启动时推送一次上下文占用快照：前端首屏指示器与 GET /api/context-usage 缓存立即可用
 	emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
-	// Open browser after short delay
+	// 短暂延迟后打开浏览器
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		url := webServer.Addr()
@@ -67,7 +81,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 	}()
 	log.Info("Web UI available at", zap.String("url", webServer.Addr()))
 
-	// Web REPL loop: read commands from CmdCh, with ctx cancellation support
+	// Web REPL 循环：从 CmdCh 读取命令，并支持 ctx 取消
 	for {
 		select {
 		case <-ctx.Done():
@@ -86,15 +100,25 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 			}
 			switch cmd.Action {
 			case "chat":
+				// 将agent状态设置为忙碌
 				webSess.Busy.Store(true)
-				s.Em.EmitEmotion("thinking", nil)
+
+				// 推送一次思考事件到前端
+				s.Em.EmitPhase("thinking", nil)
+
+				// 追加用户消息到会话消息中
 				s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: cmd.Message})
-				// Create a fresh stop channel for this generation
+				// 为本轮生成创建一个新的 stop 通道
 				webSess.StopCh = make(chan struct{})
 				agentLoop(s, webSess.StopCh)
+				// 每轮结束后同步执行记忆抽取，跑完才结束该轮。用户主动中断时跳过抽取
+				if !isStopChClosed(webSess.StopCh) {
+					s.runMemoryExtraction(true)
+				}
 				webSess.Busy.Store(false)
+				s.Em.EmitDone()
 
-				// Save session after each turn
+				// 每轮结束后保存会话
 				title := webSess.ExistingTitle
 				if title == "" || title == "NewSession" {
 					title = "NewSession"
@@ -117,7 +141,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 					log.Warn("save session failed", zap.Error(err))
 				}
 
-				// Generate title only for new sessions (not loaded from disk)
+				// 仅为新会话（非从磁盘加载的）生成标题
 				if webSess.IsNew {
 					webSess.IsNew = false
 					go func() {
@@ -132,7 +156,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 							if serr := sessMgr.Save(record); serr != nil {
 								log.Warn("save title failed", zap.Error(serr))
 							}
-							// Push title update via SSE
+							// 通过 SSE 推送标题更新
 							if sseEm, ok := s.Em.(*web.SseEmitter); ok {
 								sseEm.EmitSessionRenamed(record.ID, generatedTitle)
 							}
@@ -151,11 +175,11 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				}
 
 			case "stop":
-				// Close the stop channel to interrupt a running agentLoop
+				// 关闭 stop 通道以中断正在运行的 agentLoop
 				if webSess.StopCh != nil {
 					select {
 					case <-webSess.StopCh:
-						// already closed
+						// 已关闭
 					default:
 						close(webSess.StopCh)
 					}
@@ -200,7 +224,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 	}
 }
 
-// runCLIREPL runs the CLI mode REPL loop, reading input from stdin.
+// runCLIREPL 运行 CLI 模式的 REPL 循环，从 stdin 读取输入。
 func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 	defer view.Close()
 	for {
@@ -212,18 +236,21 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 		if input == "" {
 			continue
 		}
-		// Slash command handling
+		// 斜杠命令处理
 		if strings.HasPrefix(input, "/") {
 			if handleSlashCommand(input, s) {
-				break // /exit
+				break // 退出（/exit）
 			}
 			continue
 		}
-		// Append user message and run agentLoop
+		// 追加用户消息并运行 agentLoop
 		s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: input})
 		agentLoop(s, nil)
+		// 每轮结束后同步执行记忆抽取（阻塞），随后补发 done（api/Tauri 模式需要真实 done 事件）
+		s.runMemoryExtraction(true)
+		s.Em.EmitDone()
 
-		// Save session after each turn
+		// 每轮结束后保存会话
 		if s.SessionMgr != nil {
 			record := &session.SessionRecord{
 				ID:        s.SessionRecordID,
@@ -238,7 +265,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 			if err := s.SessionMgr.Save(record); err != nil {
 				logger.Log.Warn("save session failed", zap.Error(err))
 			}
-			// Generate title for new sessions (async)
+			// 为新会话生成标题（异步）
 			if s.IsNewSession {
 				s.IsNewSession = false
 				go func() {

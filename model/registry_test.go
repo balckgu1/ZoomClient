@@ -27,7 +27,7 @@ func TestAddAndList(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("expected 2 presets, got %d", len(list))
 	}
-	// List is sorted by name
+	// List 按名称排序
 	if list[0].Name != "deepseek" || list[1].Name != "gpt4o" {
 		t.Fatalf("unexpected sort order: %v", list)
 	}
@@ -38,7 +38,7 @@ func TestAddPersistence(t *testing.T) {
 	r1 := NewRegistry(fp)
 	r1.Add(&Preset{Name: "test", Type: "openai", BaseURL: "http://localhost", APIKey: "k", ModelName: "m"})
 
-	// Reload from file
+	// 从文件重新加载
 	r2 := NewRegistry(fp)
 	if r2.Get("test") == nil {
 		t.Fatal("expected preset to persist across reload")
@@ -83,7 +83,7 @@ func TestRemove(t *testing.T) {
 		t.Fatalf("expected active cleared, got %q", r.Active())
 	}
 
-	// Verify persistence
+	// 验证持久化
 	r2 := NewRegistry(fp)
 	if r2.Get("x") != nil {
 		t.Fatal("expected removal to persist")
@@ -101,13 +101,13 @@ func TestRegisterDefault(t *testing.T) {
 	r := NewRegistry(tempFile(t))
 	r.Add(&Preset{Name: "openai", Type: "openai", APIKey: "custom", ModelName: "custom-model"})
 
-	// RegisterDefault should not overwrite
+	// RegisterDefault 不应覆盖
 	r.RegisterDefault(&Preset{Name: "openai", Type: "openai", APIKey: "default", ModelName: "default-model"})
 	if r.Get("openai").APIKey != "custom" {
 		t.Fatal("RegisterDefault should not overwrite existing preset")
 	}
 
-	// RegisterDefault should add new
+	// RegisterDefault 应添加新预设
 	r.RegisterDefault(&Preset{Name: "ollama", Type: "ollama", ModelName: "llama"})
 	if r.Get("ollama") == nil {
 		t.Fatal("RegisterDefault should add new preset")
@@ -123,7 +123,7 @@ func TestBuildClient(t *testing.T) {
 		{"ollama", false},
 		{"anthropic", false},
 		{"gemini", false},
-		{"unknown", false}, // defaults to openai
+		{"unknown", false}, // 默认使用 openai
 	}
 	for _, tt := range tests {
 		p := &Preset{Name: "test", Type: tt.presetType, BaseURL: "http://localhost:1234", APIKey: "k", ModelName: "m"}
@@ -143,7 +143,7 @@ func TestSaveAndLoad(t *testing.T) {
 	r.Add(&Preset{Name: "a", Type: "openai", BaseURL: "http://a", APIKey: "ka", ModelName: "ma"})
 	r.Add(&Preset{Name: "b", Type: "ollama", BaseURL: "http://b", ModelName: "mb"})
 
-	// Verify file exists
+	// 验证文件存在
 	if _, err := os.Stat(fp); err != nil {
 		t.Fatalf("expected file to exist: %v", err)
 	}

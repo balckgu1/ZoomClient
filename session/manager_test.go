@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	// Initialize logger for tests
+	// 为测试初始化 logger
 	logger.Log, _ = zap.NewDevelopment()
 }
 
@@ -81,7 +81,7 @@ func TestManager_SaveEmptySkipped(t *testing.T) {
 	mgr := tempManager(t)
 
 	r := mgr.CreateSession()
-	// Empty session - no messages, TurnCount=0
+	// 空会话 - 无消息，TurnCount=0
 	if err := mgr.Save(r); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestManager_Delete(t *testing.T) {
 	r2.Messages = []clients.Message{{Role: "user", Content: "test2"}}
 	mgr.Save(r2)
 
-	// Delete current (r2), should switch to r1
+	// 删除当前会话 (r2)，应切换到 r1
 	if err := mgr.Delete(r2.ID); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestManager_DeleteLastCreatesNew(t *testing.T) {
 	mgr.Save(r)
 
 	mgr.Delete(r.ID)
-	// Should auto-create a new session
+	// 应自动创建一个新会话
 	if mgr.Current() == "" {
 		t.Error("should have a current session after deleting the last one")
 	}

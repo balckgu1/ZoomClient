@@ -1,6 +1,6 @@
 // SSE event from backend
 export interface SSEEvent {
-  ch: "agent" | "system" | "emotion";
+  ch: "agent" | "system" | "phase";
   data: Record<string, unknown>;
 }
 

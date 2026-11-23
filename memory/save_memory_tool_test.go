@@ -17,13 +17,13 @@ func TestSaveMemoryTool_Name(t *testing.T) {
 func TestSaveMemoryTool_Call(t *testing.T) {
 	tests := []struct {
 		name        string
-		memDir      string // "" means use empty string; "temp" means create temp dir
+		memDir      string // "" 表示使用空字符串；"temp" 表示创建临时目录
 		args        map[string]any
 		wantOk      bool
 		wantErr     bool
-		wantContain string                         // substring that Content should contain
-		setupFunc   func(t *testing.T, dir string) // optional setup before Call
-		verifyFunc  func(t *testing.T, dir string) // optional verify after Call
+		wantContain string                         // Content 应包含的子字符串
+		setupFunc   func(t *testing.T, dir string) // 调用 Call 之前可选的前置设置
+		verifyFunc  func(t *testing.T, dir string) // 调用 Call 之后可选的校验
 	}{
 		{
 			name:        "missing name param",
@@ -128,7 +128,7 @@ func TestSaveMemoryTool_Call(t *testing.T) {
 				if !strings.Contains(content, "Hello World") {
 					t.Error("expected body to contain Hello World")
 				}
-				// MEMORY.md should exist
+				// MEMORY.md 应当存在
 				if _, err := os.Stat(filepath.Join(dir, "MEMORY.md")); err != nil {
 					t.Error("expected MEMORY.md index to be created")
 				}
@@ -150,7 +150,7 @@ func TestSaveMemoryTool_Call(t *testing.T) {
 				if !strings.Contains(content, `"DB连接: host:port"`) {
 					t.Errorf("expected description to be quoted, got:\n%s", content)
 				}
-				// Verify roundtrip: parse it back
+				// 验证往返转换：再解析回来
 				doc := ParseFrontMatter(content)
 				if doc.FrontMatter.Description != "DB连接: host:port" {
 					t.Errorf("roundtrip description mismatch: got %q", doc.FrontMatter.Description)

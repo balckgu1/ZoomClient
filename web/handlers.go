@@ -186,7 +186,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		record := s.sessionMgr.CreateSession()
 		s.session.RecordID = record.ID
-		// Reset state for new session
+		// 为新会话重置状态
 		s.session.State.Messages = nil
 		s.session.State.TurnCount = 0
 		s.session.IsNew = true
@@ -214,7 +214,7 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
-		// Switch backend state to loaded session
+		// 将后端状态切换为已加载的会话
 		s.session.RecordID = record.ID
 		s.session.State.Messages = record.Messages
 		s.session.State.TurnCount = record.TurnCount
@@ -362,7 +362,7 @@ func (s *Server) handleModelByID(w http.ResponseWriter, r *http.Request) {
 		if req.Type == "" {
 			req.Type = "openai"
 		}
-		// Remove old preset and add updated one
+		// 移除旧预设并添加更新后的预设
 		_ = s.modelRegistry.Remove(name)
 		preset := &model.Preset{
 			Name:      name,

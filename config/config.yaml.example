@@ -58,6 +58,7 @@ skills:
 # memory config
 memory:
   dir: "./.memory"  # memory directory
+  autoExtractOnTurn: true  # 每轮对话结束后后台增量抽取记忆
 
 # session config
 session:

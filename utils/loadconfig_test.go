@@ -42,7 +42,7 @@ func TestConfigMapstructureTags(t *testing.T) {
 	var walk func(tp reflect.Type)
 	seen := make(map[reflect.Type]bool)
 	walk = func(tp reflect.Type) {
-		for tp.Kind() == reflect.Ptr || tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array {
+		for tp.Kind() == reflect.Pointer || tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array {
 			tp = tp.Elem()
 		}
 		if tp.Kind() != reflect.Struct || seen[tp] {
@@ -118,7 +118,7 @@ func tagKeys(tag reflect.StructTag) []string {
 
 // isStructKind 判断类型（含指针/切片元素）是否为结构体。
 func isStructKind(tp reflect.Type) bool {
-	for tp.Kind() == reflect.Ptr || tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array {
+	for tp.Kind() == reflect.Pointer || tp.Kind() == reflect.Slice || tp.Kind() == reflect.Array {
 		tp = tp.Elem()
 	}
 	return tp.Kind() == reflect.Struct

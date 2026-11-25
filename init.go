@@ -54,8 +54,11 @@ func parseFlagsFrom(args []string) cliFlags {
 	fs.StringVar(&f.ConfigDir, "config-dir", "", "Config directory path (default: ./config)")
 	fs.StringVar(&f.WorkDir, "workdir", "", "Project working directory (default: current directory)")
 	fs.IntVar(&f.WebPort, "port", 8080, "Web server port (web mode only)")
-	// Parse 出错时 ExitOnError 会直接退出，与改造前的 flag.Parse 行为一致。
-	_ = fs.Parse(args)
+	// Parse 出错时 ExitOnError 会直接退出，与改造前的 flag.Parse 行为一致；
+	// 因此下面的错误分支实际不可达，显式处理只是为了满足 errcheck（check-blank）。
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
 
 	// 显式传入 -mode 时以 -mode 为准，否则 -web 等价于 -mode web。
 	modeSet := false

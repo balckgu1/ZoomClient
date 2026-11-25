@@ -45,7 +45,7 @@ type OpenAIConfig struct {
 }
 
 type OllamaConfig struct {
-	BaseURL   string `mapstructre:"base_url"`
+	BaseURL   string `mapstructure:"base_url"`
 	ModelName string `mapstructure:"model_name"`
 }
 

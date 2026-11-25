@@ -9,5 +9,9 @@ import "embed"
 // go build 与 go test 仍能编译通过（此时仅提供占位内容）；一旦执行前端构建，
 // 真实产物（index.html 与 assets/）会被一并嵌入并由二进制对外服务。
 //
+// 注意：vite build 默认清空 dist 目录，dist/.gitkeep 会被删除；因此仓库同时
+// 提交了 frontend/public/.gitkeep，构建时由 vite 复制到 dist 下自动重建，
+// 保证占位文件不会因一次构建就从版本库中消失。请勿删除这两个文件。
+//
 //go:embed all:frontend/dist
 var frontendFS embed.FS

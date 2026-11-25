@@ -97,10 +97,32 @@ function renderMessage(msg: ChatMessage) {
   }
 }
 
+// messageWeight 返回一条消息的内容量，用于驱动"跟随滚动"。
+// 打字机与流式更新只改 content、不改数组长度，仅靠 messages.length 无法感知内容增长。
+function messageWeight(msg: ChatMessage): number {
+  switch (msg.role) {
+    case "user":
+    case "assistant":
+    case "reasoning":
+    case "system":
+      return msg.content.length;
+    case "tool_call":
+      return msg.args.length + (msg.result?.length ?? 0);
+    case "sub_agent":
+      return msg.prompt.length;
+    case "hook_blocked":
+      return msg.reason.length;
+    default:
+      return 0;
+  }
+}
+
 export function MessageList({ messages, agentPhase, toolName, onSuggestion }: Props) {
-  const endRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLElement>(null);
   const userScrolledUp = useRef(false);
+
+  // followKey 为最后一条消息的内容量：流式期间它逐帧变化，用来触发跟随滚动。
+  const followKey = messages.length > 0 ? messageWeight(messages[messages.length - 1]) : 0;
 
   // 判断用户是否在底部附近（距离底部 80px 以内视为"在底部"）
   const isNearBottom = useCallback(() => {
@@ -120,12 +142,18 @@ export function MessageList({ messages, agentPhase, toolName, onSuggestion }: Pr
     return () => el.removeEventListener("scroll", handleScroll);
   }, [isNearBottom]);
 
-  // 自动滚动：仅在用户处于底部附近时触发
+  // 自动滚动：仅在用户处于底部附近时触发。
+  //
+  // 依赖里必须带上 followKey，否则流式打字期间数组长度不变、effect 不重跑，
+  // 视口会停在原处而文字在下面继续变长（表现为"字在长、视口不跟"）。
+  // 这里直接写 scrollTop 而不是 scrollIntoView({behavior:"smooth"})：后者每帧启动一次
+  // 平滑滚动动画，高频调用会互相打断，反而更抖。
   useEffect(() => {
-    if (!userScrolledUp.current) {
-      endRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages.length, agentPhase]);
+    if (userScrolledUp.current) return;
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages.length, followKey, agentPhase, toolName]);
 
   return (
     <main class="thread" ref={listRef}>
@@ -161,7 +189,8 @@ export function MessageList({ messages, agentPhase, toolName, onSuggestion }: Pr
 
         {messages.map((msg) => renderMessage(msg))}
         <AgentStatus phase={agentPhase} toolName={toolName} />
-        <div ref={endRef} />
+        {/* 尾部占位：保留 flex gap 带来的底部留白（滚动定位已改为直接设置 scrollTop） */}
+        <div />
       </div>
     </main>
   );

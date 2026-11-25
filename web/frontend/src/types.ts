@@ -71,7 +71,11 @@ export interface ModelPreset {
   name: string;
   type: string;
   base_url?: string;
+  // api_key 只用于"提交"新密钥：后端不会在列表接口回传明文，
+  // 展示层一律使用下面两个字段（是否已设置 + 掩码）。
   api_key?: string;
+  api_key_set?: boolean;
+  api_key_masked?: string;
   model_name: string;
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 
 	"zoomClient/model"
 	"zoomClient/permission"
@@ -125,16 +126,41 @@ func (s *Server) Addr() string {
 	return fmt.Sprintf("http://localhost:%d", s.port)
 }
 
-// corsMiddleware 为开发环境添加 CORS 头
+// corsMiddleware 只对本机来源放行跨域请求。
+//
+// 前端由同一个进程在 / 提供（生产走 go:embed，开发走 Vite 代理），本来就同源，
+// 根本不需要 CORS 头。此前无条件返回 "*"，等于允许任意网页读取 /api/models、
+// /api/permission/config 等接口；这里只在来源是本机时才回显，保留本地多端口开发
+// 的便利（例如直连 8080 调试页面），同时让外部站点既读不到响应也发不出预检。
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if origin := r.Header.Get("Origin"); origin != "" && isLocalOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isLocalOrigin 判断 Origin 是否指向本机（localhost / 127.0.0.1 / ::1，端口不限）。
+func isLocalOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }

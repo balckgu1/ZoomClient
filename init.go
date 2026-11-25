@@ -37,14 +37,39 @@ type cliFlags struct {
 	WorkDir    string
 }
 
+// parseFlags 解析 os.Args 中的命令行标志。
 func parseFlags() cliFlags {
+	return parseFlagsFrom(os.Args[1:])
+}
+
+// parseFlagsFrom 按给定参数解析标志。使用独立的 FlagSet 而非全局 flag.CommandLine，
+// 既保留 -h 的用法输出，也便于单元测试（不受进程全局状态影响）。
+func parseFlagsFrom(args []string) cliFlags {
 	var f cliFlags
-	flag.StringVar(&f.ModelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
-	flag.StringVar(&f.OutputMode, "mode", "cli", "Output mode: cli (terminal) | web (browser UI)")
-	flag.StringVar(&f.ConfigDir, "config-dir", "", "Config directory path (default: ./config)")
-	flag.StringVar(&f.WorkDir, "workdir", "", "Project working directory (default: current directory)")
-	flag.IntVar(&f.WebPort, "port", 8080, "Web server port (web mode only)")
-	flag.Parse()
+	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	fs.StringVar(&f.ModelType, "m", "openai", "Model backend type: ollama | openai | anthropic | gemini, default: openai")
+	fs.StringVar(&f.OutputMode, "mode", "cli", "Output mode: cli (terminal) | web (browser UI)")
+	// webAlias 是历史别名，等价于 -mode web，保留以兼容旧脚本与旧版文档。
+	webAlias := fs.Bool("web", false, "Shorthand for -mode web (deprecated, use -mode web)")
+	fs.StringVar(&f.ConfigDir, "config-dir", "", "Config directory path (default: ./config)")
+	fs.StringVar(&f.WorkDir, "workdir", "", "Project working directory (default: current directory)")
+	fs.IntVar(&f.WebPort, "port", 8080, "Web server port (web mode only)")
+	// Parse 出错时 ExitOnError 会直接退出，与改造前的 flag.Parse 行为一致；
+	// 因此下面的错误分支实际不可达，显式处理只是为了满足 errcheck（check-blank）。
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	// 显式传入 -mode 时以 -mode 为准，否则 -web 等价于 -mode web。
+	modeSet := false
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name == "mode" {
+			modeSet = true
+		}
+	})
+	if *webAlias && !modeSet {
+		f.OutputMode = "web"
+	}
 	return f
 }
 

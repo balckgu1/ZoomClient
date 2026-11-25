@@ -28,7 +28,8 @@ export function StatusBar({ status, workDir }: Props) {
           <span class="eyebrow">turn</span> {status.turnCount}
         </span>
         <span class={`topbar__conn ${status.connected ? "is-on" : "is-off"}`}>
-          <span class="led led--on" aria-hidden="true" />
+          {/* 指示灯必须跟随连接状态，否则断线时会显示成"绿灯 + 未连接" */}
+          <span class={`led ${status.connected ? "led--on" : "led--off"}`} aria-hidden="true" />
           {status.connected ? "已连接" : "未连接"}
         </span>
       </div>

@@ -1,0 +1,67 @@
+# ZoomClient Release 配置（GoReleaser v2）
+# 触发方式：推送 v* 标签后由 .github/workflows/release.yml 调用
+# 构建说明：前端产物 web/frontend/dist 由 workflow 在调用前构建，
+#           Web 二进制通过 //go:embed 内嵌该目录，因此这里只负责编译 Go 主程序。
+
+version: 2
+
+project_name: zoomclient
+
+builds:
+  - id: zoomclient
+    # 入口位于仓库根目录（package main）
+    main: .
+    binary: zoomclient
+    # 纯 Go 依赖，禁用 CGO 以保证交叉编译稳定
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    # 去除符号表与调试信息，减小分发体积
+    ldflags:
+      - -s -w
+
+archives:
+  - id: zoomclient
+    # Windows 平台使用 zip，方便双击解压使用
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_windows_amd64"
+    files:
+      - LICENSE
+      - README.md
+      - README_ZH.md
+      # 附带示例配置，用户解压后可直接复制为 config/config.yaml 修改使用
+      - src: config/config.yaml.example
+        dst: config/config.yaml.example
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  # 基于 git 历史生成，自动关联 PR 与提交
+  use: github
+  filters:
+    # 过滤与发布内容无关的提交噪音
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+      - "^Merge pull request"
+      - "^Merge branch"
+
+release:
+  # 推送 v* 标签后直接创建正式 Release
+  draft: false
+  # 含 -rc / -beta 等后缀的标签自动标记为预发布
+  prerelease: auto
+  name_template: "ZoomClient {{ .Tag }}"
+  footer: |
+    **Windows 用户**：下载 `zoomclient_{{ .Version }}_windows_amd64.zip`，解压后参照 `config/config.yaml.example` 创建配置即可运行。

@@ -50,4 +50,7 @@ web/frontend/node_modules/
 web/frontend/dist/*
 !web/frontend/dist/.gitkeep
 
-scripts/ 
+# GoReleaser 本地快照构建产物
+dist/
+
+scripts/

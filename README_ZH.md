@@ -207,15 +207,17 @@ permission:
 
 ## 🚀 使用方法
 
+> ⚠️ `main` 包已拆分为多个文件（`main.go`、`init.go`、`agent.go`、`repl.go` 等），必须按包运行 `go run .`。`go run main.go` 只会编译单个文件，会报出一批 `undefined` 错误。
+
 ### 🎛️ 切换模型后端
 
 使用 `-m` 命令行参数选择后端：
 
 ```bash
-go run main.go -m openai     # OpenAI 兼容（默认）
-go run main.go -m ollama     # 本地 Ollama
-go run main.go -m anthropic  # Anthropic Claude
-go run main.go -m gemini     # Google Gemini
+go run . -m openai     # OpenAI 兼容（默认）
+go run . -m ollama     # 本地 Ollama
+go run . -m anthropic  # Anthropic Claude
+go run . -m gemini     # Google Gemini
 ```
 
 ### 🌐 启动 Web 服务器
@@ -223,8 +225,10 @@ go run main.go -m gemini     # Google Gemini
 启动 Web UI 模式替代 CLI TUI：
 
 ```bash
-go run main.go -m openai -web
+go run . -m openai -mode web     # 旧写法等价：go run . -m openai -web
 ```
+
+`-web` 作为 `-mode web` 的废弃别名保留；可用 `-port` 修改监听端口（默认 `8080`）。
 
 这将启动 HTTP 服务器（默认端口在 `web/server.go` 中定义），提供完整的 HTML 前端，支持 SSE 实时流式传输、会话浏览和模型切换。
 

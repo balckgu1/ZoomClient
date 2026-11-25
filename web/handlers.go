@@ -261,9 +261,15 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		// 列表接口绝不回传明文 API Key：前端只需要"是否已设置 + 掩码"做展示。
+		// 明文一旦进入响应体，任何能读到该响应的页面都能取走全部密钥。
 		presets := s.modelRegistry.List()
+		views := make([]modelPresetView, 0, len(presets))
+		for _, p := range presets {
+			views = append(views, newModelPresetView(p))
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"models": presets,
+			"models": views,
 			"active": s.modelRegistry.Active(),
 		})
 	case http.MethodPost:
@@ -300,6 +306,44 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// modelPresetView 是 GET /api/models 的响应视图。
+//
+// 与 model.Preset 的关键区别是不含明文 API Key，只给出"是否已设置"与掩码：
+// 前端据此提示"已保存的密钥"，用户不重新输入就不会改动密钥。
+type modelPresetView struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	BaseURL      string `json:"base_url,omitempty"`
+	APIKeySet    bool   `json:"api_key_set"`
+	APIKeyMasked string `json:"api_key_masked,omitempty"`
+	ModelName    string `json:"model_name"`
+}
+
+// newModelPresetView 把预设转换为可安全返回给前端的视图。
+func newModelPresetView(p *model.Preset) modelPresetView {
+	return modelPresetView{
+		Name:         p.Name,
+		Type:         p.Type,
+		BaseURL:      p.BaseURL,
+		APIKeySet:    p.APIKey != "",
+		APIKeyMasked: maskAPIKey(p.APIKey),
+		ModelName:    p.ModelName,
+	}
+}
+
+// maskAPIKey 生成密钥掩码：保留前 3 位与后 4 位，足够让用户认出是哪把密钥，
+// 又不足以还原。长度不足时整体打码，避免"掩码"本身泄露短密钥。
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	runes := []rune(key)
+	if len(runes) <= 8 {
+		return "****"
+	}
+	return string(runes[:3]) + "…" + string(runes[len(runes)-4:])
 }
 
 // handleSelectModel 处理 POST /api/model/select
@@ -362,6 +406,13 @@ func (s *Server) handleModelByID(w http.ResponseWriter, r *http.Request) {
 		if req.Type == "" {
 			req.Type = "openai"
 		}
+		// API Key 留空表示"沿用已保存的密钥"。更新接口是整体替换语义，
+		// 若不在这里回填，前端一次"只改模型名"的保存就会把密钥清空。
+		if req.APIKey == "" {
+			if old := s.modelRegistry.Get(name); old != nil {
+				req.APIKey = old.APIKey
+			}
+		}
 		// 移除旧预设并添加更新后的预设
 		_ = s.modelRegistry.Remove(name)
 		preset := &model.Preset{
@@ -386,6 +437,7 @@ func (s *Server) handleModelTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		Name      string `json:"name"`
 		Type      string `json:"type"`
 		BaseURL   string `json:"base_url"`
 		APIKey    string `json:"api_key"`
@@ -394,6 +446,25 @@ func (s *Server) handleModelTest(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
+	}
+
+	// 编辑已有模型时前端不再回传明文密钥，只带模型名：这里按名称回填已保存的配置，
+	// 让"测试连通性"无需用户重新输入密钥也能验证。
+	if req.Name != "" && req.Name != "_test_" {
+		if saved := s.modelRegistry.Get(req.Name); saved != nil {
+			if req.APIKey == "" {
+				req.APIKey = saved.APIKey
+			}
+			if req.BaseURL == "" {
+				req.BaseURL = saved.BaseURL
+			}
+			if req.Type == "" {
+				req.Type = saved.Type
+			}
+			if req.ModelName == "" {
+				req.ModelName = saved.ModelName
+			}
+		}
 	}
 
 	preset := &model.Preset{

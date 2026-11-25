@@ -48,6 +48,10 @@ export function Composer({
   const [activeIdx, setActiveIdx] = useState(0);
   const [escDismissed, setEscDismissed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // composingRef 记录输入法是否正在组合候选词。
+  // 用 ref 而不是 state：组合事件在一次按键处理内就可能连着发生，
+  // 用 state 会因为批处理读到上一帧的旧值。
+  const composingRef = useRef(false);
 
   const permMeta = permissionModeMeta(permissionMode);
   const allItems = buildSlashItems(skills);
@@ -113,6 +117,9 @@ export function Composer({
 
   // handleKeyDown 扩展框展开时接管导航键，收起时只处理 Enter 发送。
   const handleKeyDown = (e: JSX.TargetedKeyboardEvent<HTMLTextAreaElement>) => {
+    // 输入法组合态下 Enter/方向键属于"选词"，不是"发送/移动高亮"。
+    // Safari 的 Enter 不置 isComposing，只给 keyCode 229，两者都要判。
+    if (e.isComposing || composingRef.current || e.keyCode === 229) return;
     if (menuOpen && items.length > 0) {
       if (e.key === "ArrowDown") { e.preventDefault(); stepActive(1); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); stepActive(-1); return; }
@@ -168,6 +175,8 @@ export function Composer({
             value={text}
             onInput={handleInput}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             disabled={disabled}

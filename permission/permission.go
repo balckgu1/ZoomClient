@@ -38,6 +38,7 @@ type Decision struct {
 var readOnlyTools = map[string]bool{
 	"read_file":      true,
 	"list_directory": true,
+	"load_skill":     true,
 	"todo":           true,
 	"compact":        true,
 	"glob_search":    true,

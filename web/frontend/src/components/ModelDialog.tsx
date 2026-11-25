@@ -27,10 +27,18 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
       setName(initial.name);
       setType(initial.type);
       setBaseURL(initial.base_url || "");
-      setApiKey(initial.api_key || "");
+      // 明文密钥不回填到表单：输入框只显示"已保存 xxx"，用户不重新输入就不改密钥。
+      // 后端列表接口只回传掩码，明文密钥不会出现在 DOM 里。
+      setApiKey("");
       setModelName(initial.model_name);
     }
   }, [initial]);
+
+  // maskedHint 说明已保存的密钥与"留空即保持不变"的语义，避免用户以为密钥丢了。
+  const maskedHint =
+    mode === "edit" && initial?.api_key_set
+      ? `已保存 ${initial.api_key_masked || "****"}，留空则不修改`
+      : "sk-...";
 
   const handleSave = () => {
     if (!name.trim()) return;
@@ -38,6 +46,8 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
       name: name.trim(),
       type,
       base_url: baseURL.trim() || undefined,
+      // 留空表示"沿用已保存的密钥"：undefined 在 JSON 里会被整个丢掉，
+      // 后端收到空串后按名称取回旧密钥。
       api_key: apiKey.trim() || undefined,
       model_name: modelName.trim() || name.trim(),
     });
@@ -48,7 +58,8 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
     setTestResult(null);
     try {
       const result = await testModel({
-        name: "_test_",
+        // 编辑已有模型时不回传明文密钥：把模型名交给后端，由后端回填已保存的密钥
+        name: mode === "edit" && initial ? initial.name : "_test_",
         type,
         base_url: baseURL.trim() || undefined,
         api_key: apiKey.trim() || undefined,
@@ -112,7 +123,7 @@ export function ModelDialog({ mode, initial, onSave, onClose }: Props) {
                 type="password"
                 value={apiKey}
                 onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
-                placeholder="sk-..."
+                placeholder={maskedHint}
               />
             </label>
           )}

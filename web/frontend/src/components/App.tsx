@@ -92,10 +92,13 @@ export function App() {
   const [todoPlan, setTodoPlan] = useState<TodoPlan | null>(null);
 
   // Typewriter effect refs
+  //
+  // 打字机按消息 _id 定位目标消息而不是数组下标：下标在并发追加（reasoning / tool_call）
+  // 或 /clear 清空之后会失效，把内容写到别的消息行上；按 id 更新天然幂等，也不会写错位置。
   const typewriterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingText = useRef<string>("");
   const currentIndex = useRef<number>(0);
-  const streamingMsgIdx = useRef<number>(-1);
+  const streamingMsgId = useRef<number>(-1);
 
   // Message ID counter for stable React keys
   const nextMsgId = useRef(0);
@@ -121,6 +124,14 @@ export function App() {
   const displayPhase: AgentPhase = viewingRunning ? agentPhase : "idle";
   const displayTool = viewingRunning ? currentToolName : "";
 
+  // withAssistantContent 把 _id 匹配的 assistant 消息内容替换为指定文本。
+  // 目标已被移除（例如打字机播放期间执行了 /clear）时原样返回，调用方无需额外判断。
+  const withAssistantContent = useCallback(
+    (msgs: ChatMessage[], id: number, content: string, streaming: boolean): ChatMessage[] =>
+      msgs.map((m): ChatMessage => (m.role === "assistant" && m._id === id ? { ...m, content, streaming } : m)),
+    []
+  );
+
   // Finish typewriter: flush remaining text immediately
   const finishTypewriter = useCallback(() => {
     if (typewriterTimer.current) {
@@ -129,36 +140,39 @@ export function App() {
     }
     const remaining = pendingText.current;
     const idx = currentIndex.current;
-    const msgIdx = streamingMsgIdx.current;
-    if (msgIdx >= 0 && idx < remaining.length) {
-      updateRunning((prev) => {
-        const updated = [...prev];
-        if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
-          updated[msgIdx] = { ...updated[msgIdx], content: remaining, streaming: false } as ChatMessage;
-        }
-        return updated;
-      });
+    const msgId = streamingMsgId.current;
+    if (msgId > 0 && idx < remaining.length) {
+      updateRunning((prev) => withAssistantContent(prev, msgId, remaining, false));
     }
     currentIndex.current = 0;
     pendingText.current = "";
-    streamingMsgIdx.current = -1;
-  }, [updateRunning]);
+    streamingMsgId.current = -1;
+  }, [updateRunning, withAssistantContent]);
 
   // showToast 入队一条轻提示。tone 缺省为 info，只有明确的成败才需要指定。
   const showToast = useCallback((text: string, tone: ToastTone = "info") => {
     setToastQueue((prev) => [...prev, { text, tone }]);
   }, []);
 
-  // Process toast queue: show next when current disappears
+  // Toast 出队：当前没有展示项时才取下一条。
+  //
+  // 必须与"到点关闭"拆成两个 effect。若在同一次 effect 里既 setCurrentToast 又登记
+  // timer，这个 setState 会使该 effect 的依赖变化，下一次 run 之前会先执行上一次的
+  // cleanup，把刚登记的 timer 清掉；而新一轮 run 又因为 currentToast 非空直接返回，
+  // 再也不登记 timer。结果是提示永久停留、队列彻底堵死。
   useEffect(() => {
-    if (currentToast === null && toastQueue.length > 0) {
-      const [next, ...rest] = toastQueue;
-      setCurrentToast(next);
-      setToastQueue(rest);
-      const timer = setTimeout(() => setCurrentToast(null), 3000);
-      return () => clearTimeout(timer);
-    }
+    if (currentToast !== null || toastQueue.length === 0) return;
+    const [next, ...rest] = toastQueue;
+    setCurrentToast(next);
+    setToastQueue(rest);
   }, [currentToast, toastQueue]);
+
+  // Toast 到点关闭：只依赖当前展示项，清空后由上面的 effect 取用下一条。
+  useEffect(() => {
+    if (currentToast === null) return;
+    const timer = setTimeout(() => setCurrentToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [currentToast]);
 
   // Refresh session list from backend
   const refreshSessions = useCallback(async () => {
@@ -222,13 +236,13 @@ export function App() {
     }
   }, []);
 
-  // Start typewriter effect for a given assistant message
-  const startTypewriter = useCallback((fullText: string, msgIdx: number) => {
+  // Start typewriter effect for a given assistant message (按 _id 定位)
+  const startTypewriter = useCallback((fullText: string, msgId: number) => {
     // Clear any existing timer
     if (typewriterTimer.current) clearInterval(typewriterTimer.current);
     pendingText.current = fullText;
     currentIndex.current = 0;
-    streamingMsgIdx.current = msgIdx;
+    streamingMsgId.current = msgId;
     setAgentPhase("streaming");
 
     // Speed: ~15ms per char for short text, faster for long text
@@ -242,26 +256,14 @@ export function App() {
         // Done streaming
         if (typewriterTimer.current) clearInterval(typewriterTimer.current);
         typewriterTimer.current = null;
-        updateRunning((prev) => {
-          const updated = [...prev];
-          if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
-            updated[msgIdx] = { ...updated[msgIdx], content: text, streaming: false } as ChatMessage;
-          }
-          return updated;
-        });
-        streamingMsgIdx.current = -1;
+        updateRunning((prev) => withAssistantContent(prev, msgId, text, false));
+        streamingMsgId.current = -1;
         setAgentPhase("idle");
         return;
       }
-      updateRunning((prev) => {
-        const updated = [...prev];
-        if (updated[msgIdx] && updated[msgIdx].role === "assistant") {
-          updated[msgIdx] = { ...updated[msgIdx], content: text.slice(0, ci), streaming: true } as ChatMessage;
-        }
-        return updated;
-      });
+      updateRunning((prev) => withAssistantContent(prev, msgId, text.slice(0, ci), true));
     }, speed);
-  }, [updateRunning]);
+  }, [updateRunning, withAssistantContent]);
 
   // Handle incoming SSE events
   const handleSSEEvent = useCallback((evt: SSEEvent) => {
@@ -327,23 +329,22 @@ export function App() {
         // Finish any ongoing typewriter first
         finishTypewriter();
         const fullText = d.content;
-        // Add empty assistant message, then start typewriter
-        updateRunning((prev) => {
-          const updated = [...prev, { _id: genId(), role: "assistant", content: "", streaming: true } as ChatMessage];
-          const newIdx = updated.length - 1;
-          // Schedule typewriter after state update
-          setTimeout(() => startTypewriter(fullText, newIdx), 0);
-          return updated;
-        });
+        // 先构造好消息（含唯一 _id）再入队，然后单独启动打字机。
+        // setState 的 updater 必须是纯函数：在里面调 genId() 或 setTimeout 属于副作用，
+        // 一旦被重复执行（重渲染、未来的并发/重放）就会重复计时甚至写重复消息。
+        const msgId = genId();
+        const msg: ChatMessage = { _id: msgId, role: "assistant", content: "", streaming: true };
+        updateRunning((prev) => [...prev, msg]);
+        // 等这次更新渲染出来后再开始逐字播放
+        setTimeout(() => startTypewriter(fullText, msgId), 0);
       } else if (type === "reasoning") {
-        updateRunning((prev) => [...prev, { _id: genId(), role: "reasoning", content: d.content }]);
+        const msg: ChatMessage = { _id: genId(), role: "reasoning", content: d.content };
+        updateRunning((prev) => [...prev, msg]);
         setAgentPhase("thinking");
       } else if (type === "tool_call") {
         finishTypewriter();
-        updateRunning((prev) => [
-          ...prev,
-          { _id: genId(), role: "tool_call", name: d.name, args: d.args },
-        ]);
+        const msg: ChatMessage = { _id: genId(), role: "tool_call", name: d.name, args: d.args };
+        updateRunning((prev) => [...prev, msg]);
         setAgentPhase("handling");
         setCurrentToolName(d.name || "");
       } else if (type === "tool_result") {
@@ -366,12 +367,11 @@ export function App() {
         setAgentPhase("thinking");
         setCurrentToolName("");
       } else if (type === "sub_agent") {
-        updateRunning((prev) => [...prev, { _id: genId(), role: "sub_agent", prompt: d.prompt }]);
+        const msg: ChatMessage = { _id: genId(), role: "sub_agent", prompt: d.prompt };
+        updateRunning((prev) => [...prev, msg]);
       } else if (type === "hook_blocked") {
-        updateRunning((prev) => [
-          ...prev,
-          { _id: genId(), role: "hook_blocked", tool: d.tool, reason: d.reason },
-        ]);
+        const msg: ChatMessage = { _id: genId(), role: "hook_blocked", tool: d.tool, reason: d.reason };
+        updateRunning((prev) => [...prev, msg]);
       } else if (type === "todo_panel") {
         // 后端推送任务计划：items 为结构化条目数组，驱动顶部计划进度条。
         // items 为空数组时视为未生成计划，清空进度条（不渲染）。
@@ -409,10 +409,18 @@ export function App() {
   // Send a chat message
   const handleSend = useCallback(
     async (message: string) => {
+      // 没有选中会话时必须拦下：updateRunning 依赖 runningSessionId，空 id 会直接
+      // 丢弃本轮所有事件，而后端仍会跑完一整轮（白烧 token），用户看到的是
+      // "消息发出去了但界面毫无反应"。
+      if (!currentSessionId) {
+        showToast("请先新建或选择一个会话", "error");
+        return;
+      }
       // 标记运行会话：本轮所有 SSE 事件与打字机都写入该会话缓冲
       runningSessionId.current = currentSessionId;
       busyRef.current = true;
-      updateRunning((prev) => [...prev, { _id: genId(), role: "user", content: message }]);
+      const userMsg: ChatMessage = { _id: genId(), role: "user", content: message };
+      updateRunning((prev) => [...prev, userMsg]);
       setBusy(true);
       setAgentPhase("thinking");
       try {

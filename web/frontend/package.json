@@ -11,6 +11,7 @@
     "test": "tsc --noEmit"
   },
   "dependencies": {
+    "dompurify": "^3.5.0",
     "marked": "^18.0.5",
     "preact": "^10.26.0"
   },

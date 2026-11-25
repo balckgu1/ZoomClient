@@ -71,8 +71,11 @@ export function Sidebar({
     setEditingId(null);
   };
 
-  // 回车确认、Esc 取消
+  // 回车确认、Esc 取消。
+  // 输入法是异步挂起的：用中文/日文输入法选词时按 Enter 只是确认候选词，
+  // 事件仍会冒泡到 keydown，若不拦下会直接提交半截标题。
   const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter") confirmRename();
     if (e.key === "Escape") setEditingId(null);
   };

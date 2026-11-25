@@ -207,15 +207,17 @@ permission:
 
 ## 🚀 Usage
 
+> ⚠️ The `main` package is split across several files (`main.go`, `init.go`, `agent.go`, `repl.go`, ...), so run it as a package with `go run .`. Running `go run main.go` compiles only that single file and fails with a batch of `undefined` errors.
+
 ### 🎛️ Switching Model Backends
 
 Use the `-m` CLI flag to select a backend:
 
 ```bash
-go run main.go -m openai     # OpenAI-compatible (default)
-go run main.go -m ollama     # Local Ollama
-go run main.go -m anthropic  # Anthropic Claude
-go run main.go -m gemini     # Google Gemini
+go run . -m openai     # OpenAI-compatible (default)
+go run . -m ollama     # Local Ollama
+go run . -m anthropic  # Anthropic Claude
+go run . -m gemini     # Google Gemini
 ```
 
 ### 🌐 Running as Web Server
@@ -223,8 +225,10 @@ go run main.go -m gemini     # Google Gemini
 Start the web UI server instead of the CLI TUI:
 
 ```bash
-go run main.go -m openai -web
+go run . -m openai -mode web     # legacy shorthand: go run . -m openai -web
 ```
+
+`-web` is kept as a deprecated alias for `-mode web`. Use `-port` to change the listening port (default `8080`).
 
 This launches an HTTP server (default port defined in `web/server.go`) serving a full HTML frontend with SSE real-time streaming, session browsing, and model switching.
 

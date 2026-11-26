@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"zoomClient/clients"
+	"zoomClient/prompt"
 	"zoomClient/utils"
 )
 
@@ -240,7 +241,7 @@ func (m *CompactManager) CompactHistory(messages []clients.Message) ([]clients.M
 	}
 	newMessages = append(newMessages, clients.Message{
 		Role:    "user",
-		Content: "This conversation was compacted for continuity.\n\n" + summary,
+		Content: prompt.CompactionMarker + "\n\n" + summary,
 	})
 
 	// 保留尾部未完成的 assistant(tool_calls) 及其配对的 ToolResult

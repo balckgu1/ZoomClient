@@ -10,7 +10,7 @@ import (
 )
 
 // TestBuild_EmptyRegistryAndMemoryDir 测试空 registry + 空 memoryDir 场景。
-// 预期：core + memory(save rules only) + dynamic 三段非空，tools 和 CLAUDE.md 为空。
+// 预期：除 skills 与 CLAUDE.md 外的各段均非空（core/communication/tool protocol/safety/memory/context/dynamic）。
 func TestBuild_EmptyRegistryAndMemoryDir(t *testing.T) {
 	reg, _ := skills.NewSkillRegistry("")
 	builder := NewSystemPromptBuilder(reg, "", "test-model", "./workdir")
@@ -18,7 +18,7 @@ func TestBuild_EmptyRegistryAndMemoryDir(t *testing.T) {
 	result := builder.Build()
 
 	// core 段：应包含核心身份说明
-	if !strings.Contains(result, "helpful assistant") {
+	if !strings.Contains(result, "AI agent powered by ZoomClient") {
 		t.Errorf("Build() should contain core prompt, got:\n%s", result)
 	}
 
@@ -52,7 +52,7 @@ func TestBuild_NilRegistry(t *testing.T) {
 	if result == "" {
 		t.Error("Build() should return non-empty string even with nil registry")
 	}
-	if !strings.Contains(result, "helpful assistant") {
+	if !strings.Contains(result, "AI agent powered by ZoomClient") {
 		t.Errorf("Build() should still contain core prompt, got:\n%s", result)
 	}
 }
@@ -64,7 +64,7 @@ func TestBuild_DynamicSection(t *testing.T) {
 	result := builder.Build()
 
 	expectations := []string{
-		"## Current Environment",
+		"Current Environment",
 		"- Date:",
 		"- Working directory: /home/user/project",
 		"- Model: deepseek-v4",

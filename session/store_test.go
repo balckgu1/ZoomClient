@@ -382,3 +382,64 @@ func TestStore_Reconcile(t *testing.T) {
 		})
 	}
 }
+
+// TestStore_ContextRoundtrip 验证上下文洞察快照的保存/读取/非法 ID 拒绝
+func TestStore_ContextRoundtrip(t *testing.T) {
+	s := tempStore(t)
+	data := []byte(`{"seq":7,"model":"m"}`)
+	if err := s.SaveContext("ctx-test", data); err != nil {
+		t.Fatalf("SaveContext failed: %v", err)
+	}
+	got, err := s.LoadContext("ctx-test")
+	if err != nil || string(got) != string(data) {
+		t.Fatalf("LoadContext = %q, %v; want roundtrip", got, err)
+	}
+	// 不存在的快照返回可识别的 not-exist 错误（调用方据此降级）
+	if _, err := s.LoadContext("missing"); !os.IsNotExist(err) {
+		t.Fatalf("LoadContext(missing) err = %v, want not-exist", err)
+	}
+	// 非法 ID（路径穿越）必须拒绝
+	if err := s.SaveContext("../evil", data); err == nil {
+		t.Fatal("SaveContext should reject invalid id")
+	}
+	if _, err := s.LoadContext("../evil"); err == nil {
+		t.Fatal("LoadContext should reject invalid id")
+	}
+}
+
+// TestStore_DeleteRemovesContext 验证删除会话连带删除快照文件
+func TestStore_DeleteRemovesContext(t *testing.T) {
+	s := tempStore(t)
+	r := &SessionRecord{ID: "del-ctx", Title: "t", CreatedAt: time.Now(), UpdatedAt: time.Now(), TurnCount: 1}
+	if err := s.Save(r); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	if err := s.SaveContext("del-ctx", []byte(`{}`)); err != nil {
+		t.Fatalf("SaveContext failed: %v", err)
+	}
+	if err := s.Delete("del-ctx"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	if _, err := s.LoadContext("del-ctx"); !os.IsNotExist(err) {
+		t.Fatalf("context file should be removed with session, err = %v", err)
+	}
+}
+
+// TestStore_ReconcileIgnoresContextFiles 验证快照文件不会被 reconcile 误入索引
+func TestStore_ReconcileIgnoresContextFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "orphan.context.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	metas, err := s.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Fatalf("context file leaked into index: %+v", metas)
+	}
+}

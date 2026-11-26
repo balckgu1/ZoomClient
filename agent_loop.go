@@ -6,8 +6,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"zoomClient/clients"
+	"zoomClient/compact"
+	"zoomClient/ctxinsight"
 	"zoomClient/hook"
 	"zoomClient/logger"
 	"zoomClient/prompt"
@@ -41,7 +44,9 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		default:
 		}
 		// 上下文压缩：微压缩，用占位符替换较旧的工具结果
+		beforeMicro := state.Messages
 		state.Messages = compactManager.MicroCompact(state.Messages)
+		s.CtxRecorder.RecordMicroCompact(diffMicroCompact(beforeMicro, state.Messages, compactManager))
 
 		// 流水线组装：系统提示词 + state.messages + 提醒 + 附件
 		payload := pipeline.AssemblePayload(state.Messages)
@@ -53,6 +58,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		fullMessages := append([]clients.Message{{Role: "system", Content: payload.SystemPrompt}}, payload.Messages...)
 
 		// LLM chat（带 hook 干预：PreChat / LLMError / PostChat，失败或空回复时自动重试）
+		chatStart := time.Now()
 		response, err := chatWithHooks(hookRunner, client, model, fullMessages, toolList,
 			map[string]interface{}{
 				"temperature":      temp,
@@ -65,6 +71,16 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 			em.EmitError("LLM", err.Error())
 			break
 		}
+
+		// 上下文洞察：记录本次请求的组成快照与 provider 真实用量
+		s.CtxRecorder.RecordStep(ctxinsight.StepInput{
+			SystemPrompt:    payload.SystemPrompt,
+			SkillsSection:   s.Pipeline.SkillsSection(),
+			ToolList:        toolList,
+			PayloadMessages: payload.Messages,
+			Response:        response,
+			ActiveMs:        time.Since(chatStart).Milliseconds(),
+		})
 
 		// 将 assistant 的回复添加到 state.messages
 		state.Messages = append(state.Messages, clients.Message{
@@ -162,6 +178,9 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 		results := mergeToolResults(toolCalls, preDecisions, allowedIndex, allowedResults)
 
 		// 按调用顺序将工具结果写回 Messages
+		// recordedContents/Errs 收集实际写回的内容（大输出落盘后的预览），供上下文洞察记录
+		recordedContents := make([]string, 0, len(results))
+		recordedErrs := make([]bool, 0, len(results))
 		for resultIndex, result := range results {
 			logs.Info("tool call finished",
 				zap.String("tool name", toolCalls[resultIndex].Name),
@@ -186,7 +205,10 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 					zap.String("tool name", toolCalls[resultIndex].Name),
 					zap.Int("origin bytes", len(result.Content)),
 				)
+				s.CtxRecorder.RecordPersistPrune(toolCalls[resultIndex].Name, len(result.Content)-len(persistedContent))
 			}
+			recordedContents = append(recordedContents, persistedContent)
+			recordedErrs = append(recordedErrs, result.IsError)
 
 			// 将 toolCallID 添加到 state.messages
 			state.Messages = append(state.Messages, clients.Message{
@@ -195,6 +217,9 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 				ToolCallID: toolCalls[resultIndex].ID,
 			})
 		}
+
+		// 上下文洞察：工具结果节点入表面
+		s.CtxRecorder.RecordToolResults(toolCalls, recordedContents, recordedErrs)
 
 		// Hook：PostToolUse
 		runPostToolUseHooks(hookRunner, toolCalls, results, pipeline)
@@ -236,6 +261,7 @@ func agentLoop(s *AgentSession, stopCh <-chan struct{}) {
 				)
 				em.EmitCompact(beforeSize, afterSize)
 				state.Messages = newMessages
+				s.CtxRecorder.RecordCompaction(newMessages, beforeSize-afterSize)
 			}
 		}
 
@@ -411,6 +437,32 @@ func estimateTokens(messages []clients.Message) int {
 		return 0
 	}
 	return totalChars/4 + 1
+}
+
+// diffMicroCompact 对比微压缩前后的消息序列，找出被占位符替换的工具结果。
+// MicroCompact 保证返回等长副本，按下标对齐即可；字节口径复用 EstimateSize。
+func diffMicroCompact(before, after []clients.Message, cm *compact.CompactManager) []ctxinsight.ReplacedTool {
+	if len(before) != len(after) {
+		return nil
+	}
+	var replaced []ctxinsight.ReplacedTool
+	for i := range before {
+		if before[i].Role != "tool" {
+			continue
+		}
+		oldText, ok1 := before[i].Content.(string)
+		newText, ok2 := after[i].Content.(string)
+		if !ok1 || !ok2 || oldText == newText {
+			continue
+		}
+		replaced = append(replaced, ctxinsight.ReplacedTool{
+			CallID:   after[i].ToolCallID,
+			OldBytes: cm.EstimateSize(before[i : i+1]),
+			NewBytes: cm.EstimateSize(after[i : i+1]),
+			Text:     newText,
+		})
+	}
+	return replaced
 }
 
 // messageContentToString 将 clients.Message.Content（interface{}）安全地转换为可读字符串。

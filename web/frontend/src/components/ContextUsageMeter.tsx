@@ -5,6 +5,8 @@ import type { ContextUsage } from "../types";
 interface Props {
   usage: ContextUsage | null;
   onCompact: () => void;
+  /** 打开上下文洞察面板（组成/趋势/浏览器/事件） */
+  onOpenDetail: () => void;
 }
 
 // usagePct 计算某部分字节数占总阈值的百分比；阈值无效时返回 0
@@ -23,7 +25,7 @@ function levelClass(pct: number): string {
 // ContextUsageMeter —— 右下角上下文窗口占用指示器。
 // 折叠态仅显示迷你进度条与总百分比；悬停展开明细面板（各组成部分占比 + 压缩按钮），
 // 鼠标移开延迟 200ms 关闭，保证指针可以移入面板内操作。
-export function ContextUsageMeter({ usage, onCompact }: Props) {
+export function ContextUsageMeter({ usage, onCompact, onOpenDetail }: Props) {
   const [open, setOpen] = useState(false);
   // closeTimer 延迟关闭定时器：进入面板时取消，避免面板闪闭
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +91,9 @@ export function ContextUsageMeter({ usage, onCompact }: Props) {
           <button class="ctx-meter__compact" onClick={onCompact}>
             <span class="ctx-meter__compact-icon">🗜</span>
             压缩上下文
+          </button>
+          <button class="ctx-meter__detail" onClick={onOpenDetail}>
+            上下文洞察 →
           </button>
         </div>
       )}

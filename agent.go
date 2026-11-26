@@ -5,6 +5,7 @@ package main
 import (
 	"zoomClient/clients"
 	"zoomClient/compact"
+	"zoomClient/ctxinsight"
 	"zoomClient/emitter"
 	"zoomClient/fsm"
 	"zoomClient/hook"
@@ -41,6 +42,7 @@ type AgentSession struct {
 	IsNewSession    bool                // 是否为新建会话（用于触发自动命名）
 	cachedTitle     string              // 缓存的会话标题，避免每帧读磁盘
 	MemoryExtractor *memory.Extractor   // per-turn 同步记忆抽取器（nil 表示功能关闭）
+	CtxRecorder     *ctxinsight.Recorder // 上下文洞察折叠器（nil 时所有记录入口为 no-op）
 }
 
 // SwitchModel 热切换到指定模型预设，保留对话历史。

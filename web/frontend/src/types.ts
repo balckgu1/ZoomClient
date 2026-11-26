@@ -169,3 +169,122 @@ export interface PlanItem {
 export interface TodoPlan {
   items: PlanItem[];
 }
+
+// ─── 上下文洞察（对应 Go ctxinsight 包）───
+
+// 上下文组成分类，与后端 ctxinsight.Category 一一对应
+export type CtxCategory = "system" | "skills" | "tools" | "user" | "inject" | "assistant" | "tool";
+
+// 各分类字节占用（对应 ctxinsight.Composition）
+export interface CtxComposition {
+  system: number;
+  skills: number;
+  tools: number;
+  user: number;
+  inject: number;
+  assistant: number;
+  tool: number;
+  total: number;
+}
+
+// 全会话累计计数（对应 ctxinsight.Counts）
+export interface CtxCounts {
+  turns: number;
+  steps: number;
+  human_inputs: number;
+  compactions: number;
+  prunes: number;
+  injects: number;
+}
+
+// 消息表面节点（对应 ctxinsight.SurfaceNode）。
+// gone 非零表示已被移除，值为移除事件的 seq；
+// 节点在请求 R 中存活：seq < R.seq 且 (gone 未设 或 gone > R.seq)。
+export interface CtxSurfaceNode {
+  seq: number;
+  time: number;
+  cat: CtxCategory;
+  bytes: number;
+  text?: string;
+  truncated?: boolean;
+  tool?: string;
+  call_id?: string;
+  err?: boolean;
+  name?: string;
+  gone?: number;
+}
+
+// 单个工具的 schema 摘要（对应 ctxinsight.ToolInfo）
+export interface CtxToolInfo {
+  name: string;
+  bytes: number;
+  schema?: string;
+}
+
+// 请求头纪元（对应 ctxinsight.HeaderEpoch）：system/skills/工具 schema 的一组快照
+export interface CtxHeaderEpoch {
+  seq: number;
+  time: number;
+  system_bytes: number;
+  skills_bytes: number;
+  tools_bytes: number;
+  system_text?: string;
+  skills_text?: string;
+  tools?: CtxToolInfo[];
+}
+
+// 一次 LLM 请求的组成记录（对应 ctxinsight.RequestRecord）
+export interface CtxRequestRecord {
+  seq: number;
+  time: number;
+  turn: number;
+  step: number;
+  header_seq: number;
+  system: number;
+  skills: number;
+  tools: number;
+  user: number;
+  inject: number;
+  assistant: number;
+  tool: number;
+  total: number;
+  prompt_tokens?: number;
+  output_tokens?: number;
+  cache_hit_tokens?: number;
+  active_ms?: number;
+}
+
+// 上下文事件（对应 ctxinsight.ContextEvent）
+export interface CtxEvent {
+  seq: number;
+  time: number;
+  kind: "compaction" | "prune" | "inject" | "model" | "clear";
+  bytes?: number;
+  name?: string;
+  detail?: string;
+  turn?: number;
+  step?: number;
+}
+
+// 轻量头部快照（GET /api/context/timeline 与 SSE context_timeline 事件）
+export interface ContextTimelineHead {
+  model?: string;
+  limit_bytes: number;
+  current: CtxComposition;
+  counts: CtxCounts;
+  last?: CtxRequestRecord;
+  detail_rev: number;
+}
+
+// 按需详情载荷（GET /api/context/timeline/detail）
+export interface ContextTimelineDetail {
+  rev: number;
+  requests: CtxRequestRecord[];
+  events: CtxEvent[];
+  nodes: CtxSurfaceNode[];
+  archive: CtxSurfaceNode[];
+  headers: CtxHeaderEpoch[];
+  dropped_nodes?: number;
+  surface_floor?: number;
+  archive_floor?: number;
+}

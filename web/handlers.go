@@ -191,6 +191,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		s.session.State.TurnCount = 0
 		s.session.IsNew = true
 		s.session.ExistingTitle = ""
+		// 上下文洞察同步重置并通知前端
+		s.recorder.Reset()
+		s.pushTimelineHead()
 		writeJSON(w, http.StatusCreated, record.ToMeta())
 
 	default:
@@ -221,15 +224,23 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		s.session.IsNew = false
 		s.session.ExistingTitle = record.Title
 		s.session.ExistingCreatedAt = record.CreatedAt
+		// 恢复该会话的上下文洞察快照并通知前端
+		s.restoreRecorder(record.ID)
+		s.pushTimelineHead()
 		writeJSON(w, http.StatusOK, record)
 
 	case http.MethodDelete:
+		wasCurrent := id == s.session.RecordID
 		if err := s.sessionMgr.Delete(id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		// 如果删除的是当前会话，更新 session.RecordID
 		s.session.RecordID = s.sessionMgr.Current()
+		if wasCurrent {
+			s.recorder.Reset()
+			s.pushTimelineHead()
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 
 	case http.MethodPatch:

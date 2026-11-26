@@ -88,6 +88,31 @@ export async function fetchContextUsage(): Promise<ContextUsage> {
   return res.json();
 }
 
+// ─── 上下文洞察 API ───
+
+import type { ContextTimelineHead, ContextTimelineDetail } from "../types";
+
+// fetchContextTimeline 查询洞察头部快照（GET /api/context/timeline）
+export async function fetchContextTimeline(): Promise<ContextTimelineHead> {
+  const res = await fetch(`${BASE}/api/context/timeline`);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+// fetchContextTimelineDetail 按需拉取洞察详情（GET /api/context/timeline/detail），
+// 仅在 Context 面板打开时调用。空集合兜底为 []：旧版后端可能序列化为 null。
+export async function fetchContextTimelineDetail(): Promise<ContextTimelineDetail> {
+  const res = await fetch(`${BASE}/api/context/timeline/detail`);
+  if (!res.ok) throw new Error(res.statusText);
+  const d = (await res.json()) as ContextTimelineDetail;
+  d.requests ??= [];
+  d.events ??= [];
+  d.nodes ??= [];
+  d.archive ??= [];
+  d.headers ??= [];
+  return d;
+}
+
 // ─── Session API ───
 
 import type { SessionMeta, SessionRecord } from "../types";

@@ -92,6 +92,16 @@ func (m *Manager) List() ([]SessionMeta, error) {
 	return m.store.List()
 }
 
+// SaveContext 保存会话的上下文洞察快照（透传 Store）
+func (m *Manager) SaveContext(id string, data []byte) error {
+	return m.store.SaveContext(id, data)
+}
+
+// LoadContext 读取会话的上下文洞察快照（透传 Store）
+func (m *Manager) LoadContext(id string) ([]byte, error) {
+	return m.store.LoadContext(id)
+}
+
 // Load 加载指定会话的完整数据并设为当前活跃会话
 func (m *Manager) Load(id string) (*SessionRecord, error) {
 	record, err := m.store.Load(id)

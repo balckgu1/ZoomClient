@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"zoomClient/clients"
+	"zoomClient/ctxinsight"
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
@@ -162,6 +163,7 @@ func main() {
 		PermissionMgr:  permitMgr,
 		Temperature:    0.7,
 		ReasonLevel:    "high",
+		CtxRecorder:    ctxinsight.New(cfg.Compact.ContextLimit, modelname),
 	}
 
 	// Per-turn 同步增量记忆抽取器：回合结束时内联阻塞执行，跑完才结束该轮

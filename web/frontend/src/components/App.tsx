@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type {
   ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
   PermissionConfig, PermissionMode, ContextUsage, SkillMeta, TodoPlan,
+  ContextTimelineHead,
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
@@ -22,6 +23,7 @@ import { WorkDirPanel } from "./WorkDirPanel";
 import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
 import { TodoPlanProgress } from "./TodoPlanProgress";
+import { ContextPanel } from "./ctx/ContextPanel";
 import { IconAlert, IconCheck, IconSpark } from "../lib/icons";
 
 // ToastTone 是轻提示的三种语气：普通消息、成功、失败。
@@ -86,6 +88,10 @@ export function App() {
 
   // 上下文窗口占用快照（后端 SSE 推送 + 首屏拉取）
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+
+  // 上下文洞察：头部快照由 SSE context_timeline 事件维护，面板打开时按 detailRev 重拉详情
+  const [ctxHead, setCtxHead] = useState<ContextTimelineHead | null>(null);
+  const [showContext, setShowContext] = useState(false);
 
   // 当前任务计划（模型调用 todo tool 后由后端推送）。
   // 仅当模型实际使用了 todo tool 时为非空，此时顶部渲染计划进度条；否则为 null 不显示。
@@ -305,6 +311,10 @@ export function App() {
         // 上下文占用快照：后端每轮/压缩/清空后推送，驱动右下角指示器
         const usage = d.usage as unknown as ContextUsage | undefined;
         if (usage) setContextUsage(usage);
+      } else if (event === "context_timeline") {
+        // 上下文洞察头部快照：驱动洞察面板按 detailRev 增量刷新
+        const head = (evt.data as Record<string, unknown>).head as ContextTimelineHead | undefined;
+        if (head) setCtxHead(head);
       }
       return;
     }
@@ -446,6 +456,10 @@ export function App() {
     async (cmd: string) => {
       const { head, name, rest } = parseSlashInput(cmd);
       try {
+        if (head === "/context") {
+          setShowContext(true);
+          return;
+        }
         if (head === "/clear") {
           await sendClear();
           const sid = currentSessionId;
@@ -724,6 +738,7 @@ export function App() {
           onAddModel={handleModelAdd}
           onEditModel={handleModelEdit}
           onCompact={handleCompact}
+          onOpenContext={() => setShowContext(true)}
         />
         {showWorkDir && (
           <WorkDirPanel
@@ -738,6 +753,9 @@ export function App() {
             onSave={handlePermissionSave}
             onClose={() => setShowPermission(false)}
           />
+        )}
+        {showContext && (
+          <ContextPanel head={ctxHead} onClose={() => setShowContext(false)} />
         )}
       </div>
     </div>

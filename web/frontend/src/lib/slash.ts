@@ -24,6 +24,7 @@ export interface SlashItem {
 // 刻意不列 /models、/workspace、/session 等 CLI 专有命令：它们在 Web 模式没有对应处理分支，
 // 列出来只会得到"未知命令"的提示。菜单里的每一项都必须点了就有用。
 export const WEB_COMMANDS: SlashItem[] = [
+  { kind: "command", name: "context", hint: "打开上下文洞察面板：组成、趋势、内容浏览与事件" },
   { kind: "command", name: "clear", hint: "清空当前会话的历史消息" },
   { kind: "command", name: "compact", hint: "把早期对话摘要压缩，腾出上下文空间" },
   { kind: "command", name: "exit", hint: "结束会话并关闭后端服务" },

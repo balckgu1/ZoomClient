@@ -29,6 +29,8 @@ workdir/
 
 logs/
 
+plugin/
+
 desktop/node_modules/
 
 desktop/package-lock.json

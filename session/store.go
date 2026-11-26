@@ -49,6 +49,37 @@ func (s *Store) sessionPath(id string) string {
 	return filepath.Join(s.dir, id+".json")
 }
 
+// contextPath 返回指定会话的上下文洞察快照文件路径。
+// 独立于会话主文件存放，避免膨胀 SessionRecord；文件名含点号，
+// reconcile 的 ID 校验会自然跳过它，不会误入索引。
+func (s *Store) contextPath(id string) string {
+	return filepath.Join(s.dir, id+".context.json")
+}
+
+// SaveContext 保存会话的上下文洞察快照（ctxinsight.State 的 JSON 序列化）。
+func (s *Store) SaveContext(id string, data []byte) error {
+	if !isValidID(id) {
+		return fmt.Errorf("invalid session id: %s", id)
+	}
+	if err := os.WriteFile(s.contextPath(id), data, 0644); err != nil {
+		return fmt.Errorf("write context file: %w", err)
+	}
+	return nil
+}
+
+// LoadContext 读取会话的上下文洞察快照。文件不存在时返回 os.ErrNotExist，
+// 调用方据此降级为空 timeline（旧会话没有快照属正常情况）。
+func (s *Store) LoadContext(id string) ([]byte, error) {
+	if !isValidID(id) {
+		return nil, fmt.Errorf("invalid session id: %s", id)
+	}
+	data, err := os.ReadFile(s.contextPath(id))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // readIndex 读取 index.json，文件不存在时返回空切片
 func (s *Store) readIndex() ([]SessionMeta, error) {
 
@@ -146,6 +177,10 @@ func (s *Store) Delete(id string) error {
 	// 删除会话文件（不存在不报错）
 	if err := os.Remove(s.sessionPath(id)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete session file: %w", err)
+	}
+	// 连带删除上下文洞察快照文件（不存在不报错）
+	if err := os.Remove(s.contextPath(id)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete context file: %w", err)
 	}
 
 	// 更新索引

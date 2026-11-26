@@ -52,6 +52,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 		PermissionMgr: s.PermissionMgr,
 		Pipeline:      s.Pipeline,
 		Config:        s.Cfg,
+		Recorder:      s.CtxRecorder,
 	}, webPort)
 	// 运行 HTTP 服务器
 	go func() {
@@ -107,6 +108,7 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				s.Em.EmitPhase("thinking", nil)
 
 				// 追加用户消息到会话消息中
+				s.CtxRecorder.RecordUserMessage(cmd.Message)
 				s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: cmd.Message})
 				// 为本轮生成创建一个新的 stop 通道
 				webSess.StopCh = make(chan struct{})
@@ -140,6 +142,8 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				if err := sessMgr.Save(record); err != nil {
 					log.Warn("save session failed", zap.Error(err))
 				}
+				// 上下文洞察快照随会话一并落盘
+				saveCtxTimeline(s, sessMgr, webSess.RecordID)
 
 				// 仅为新会话（非从磁盘加载的）生成标题
 				if webSess.IsNew {
@@ -165,9 +169,11 @@ func runWebREPL(ctx context.Context, s *AgentSession, webSess *web.Session, webP
 				}
 
 			case "select_model":
+				prevModel := s.ModelName
 				if err := s.SwitchModel(cmd.ModelName); err != nil {
 					s.Em.EmitError("model", fmt.Sprintf("switch failed: %s", err.Error()))
 				} else {
+					s.CtxRecorder.RecordModelSwitch(prevModel, s.ModelName)
 					s.Em.EmitInfo(fmt.Sprintf("Switched to model %q (%s)", cmd.ModelName, s.ModelName))
 					if webSess != nil {
 						webSess.Model = s.ModelName
@@ -244,6 +250,7 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 			continue
 		}
 		// 追加用户消息并运行 agentLoop
+		s.CtxRecorder.RecordUserMessage(input)
 		s.State.Messages = append(s.State.Messages, clients.Message{Role: "user", Content: input})
 		agentLoop(s, nil)
 		// 每轮结束后同步执行记忆抽取（阻塞），随后补发 done（api/Tauri 模式需要真实 done 事件）
@@ -265,6 +272,8 @@ func runCLIREPL(s *AgentSession, view *ui.Renderer) {
 			if err := s.SessionMgr.Save(record); err != nil {
 				logger.Log.Warn("save session failed", zap.Error(err))
 			}
+			// 上下文洞察快照随会话一并落盘
+			saveCtxTimeline(s, s.SessionMgr, s.SessionRecordID)
 			// 为新会话生成标题（异步）
 			if s.IsNewSession {
 				s.IsNewSession = false

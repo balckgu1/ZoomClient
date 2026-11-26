@@ -26,8 +26,10 @@ func contextUsageSnapshot(s *AgentSession, systemPrompt string, toolList []tools
 }
 
 // emitContextUsageWeb 组装快照并推送给 web 前端；非 web 模式（emitter 非 SseEmitter）时为 no-op。
+// 同时推送上下文洞察头部快照，驱动 Context 面板按 detailRev 增量刷新。
 func emitContextUsageWeb(s *AgentSession, systemPrompt string, toolList []tools.Tool) {
 	if sseEm, ok := s.Em.(*web.SseEmitter); ok {
 		sseEm.EmitContextUsage(contextUsageSnapshot(s, systemPrompt, toolList))
+		sseEm.EmitContextTimeline(s.CtxRecorder.Head())
 	}
 }

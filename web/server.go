@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"zoomClient/ctxinsight"
 	"zoomClient/model"
 	"zoomClient/permission"
 	"zoomClient/prompt"
@@ -29,6 +30,7 @@ type ServerDeps struct {
 	PermissionMgr *permission.Manager     // 权限管理器（模式 + deny/allow 规则）
 	Pipeline      *prompt.MessagePipeline // 系统提示词组装管道（切换工作目录时热更新）
 	Config        *utils.Config           // 全局配置（用于展示只读信息，如 interactive）
+	Recorder      *ctxinsight.Recorder    // 上下文洞察折叠器（nil 时洞察端点返回空快照）
 }
 
 // Server 封装 HTTP Server
@@ -41,6 +43,7 @@ type Server struct {
 	permissionMgr *permission.Manager
 	pipeline      *prompt.MessagePipeline
 	config        *utils.Config
+	recorder      *ctxinsight.Recorder
 	mux           *http.ServeMux
 	port          int
 	httpServer    *http.Server
@@ -57,6 +60,7 @@ func NewServer(deps ServerDeps, port int) *Server {
 		permissionMgr: deps.PermissionMgr,
 		pipeline:      deps.Pipeline,
 		config:        deps.Config,
+		recorder:      deps.Recorder,
 		mux:           http.NewServeMux(),
 		port:          port,
 	}
@@ -83,6 +87,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/permission", s.handlePermission)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/context-usage", s.handleContextUsage)
+
+	// ─── 上下文洞察端点（slim head 高频 / detail 按需）───
+	s.mux.HandleFunc("/api/context/timeline", s.handleContextTimeline)
+	s.mux.HandleFunc("/api/context/timeline/detail", s.handleContextTimelineDetail)
 
 	// ─── 会话管理端点 ───
 	s.mux.HandleFunc("/api/sessions", s.handleSessions)

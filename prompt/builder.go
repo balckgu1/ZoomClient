@@ -24,7 +24,7 @@ func NewSystemPromptBuilder(skillRegistry *skills.SkillRegistry,
 	}
 }
 
-// Build 按序调用 6 个 build 方法，收集非空段，用 "\n\n" 拼接返回最终的 system prompt。
+// Build 按序调用 5 个 build 方法，收集非空段，用 "\n\n" 拼接返回最终的 system prompt。
 func (b *SystemPromptBuilder) Build() string {
 	parts := []string{
 		b.buildCore(),

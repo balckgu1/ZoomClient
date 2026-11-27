@@ -25,7 +25,8 @@ ZoomClient 是一个基于 Go 语言、以 Tool-Use 为核心的 AI Agent 运行
 - **🔌 多后端 ChatClient 抽象**：统一 `clients.ChatClient` 接口，内置 **OpenAI 兼容**（DeepSeek / Kimi / Qwen / OpenAI）、**Ollama**（NDJSON 流式协议）、**Anthropic**（Claude）与 **Gemini** 四种实现，通过 `-m` 参数切换。
 - **⚙️ 模型预设与热切换**：`model.Registry` 管理模型预设（客户端类型、地址、API Key、模型名），并持久化到 `config/models.yaml`。可在 CLI 中通过 `/setmode`、`/models`、`/selectmode` 管理，也可在 Web UI 中增删改查与连通性测试；运行时切换后端不丢失对话历史。
 - **🔧 工具控制平面（Tool Control Plane）**：统一的工具注册表 `tools.ToolRegister`，支持工具发现、注册与按名称动态调度执行，内置权限门控（`PermissionDecider`）实现执行前准入控制。
-- **⚡ 并发安全调度**：工具调用按读写属性自动分批，只读工具（如 `read_file`、`glob_search`）并发执行，写操作类工具串行执行，兼顾效率与安全性。
+- **⚡ 并发安全调度**：工具调用按读写属性自动分批，只读工具（如 `read_file`、`glob_search`、`grep_search`、`web_fetch`）并发执行，写操作类工具串行执行，兼顾效率与安全性。
+- **📡 联网与人机协作**：`web_fetch` 抓取 URL（HTML 转文本），配置后可用 `web_search` 通过 Tavily / Brave / Serper / Bocha 联网检索；`ask_user_question` 让模型发起结构化提问并阻塞等待，CLI 走标准输入、Web 走浏览器弹窗（`/api/question`）。
 - **🧬 子智能体（Subagent）**：通过 `sub_task` 工具将子任务委托给独立上下文的子智能体；支持空白上下文模式与 `fork=true` 继承父消息上下文模式，子智能体使用独立的受限工具白名单，避免副作用穿透。
 - **📖 Skills 按需加载**：递归扫描 `.skills/` 下的 `SKILL.md`（含 YAML frontmatter），仅将目录清单注入 system prompt，完整正文通过 `load_skill` 工具按需加载（支持名称模糊匹配）。
 - **🛡️ Skill 安全校验**：对技能名称、描述与正文进行静态红旗扫描（Unicode 归一化、词族共现、凭据/外传组合判定），并包含 description 净化、符号链接拒绝与「不可信」声明包裹；`skilllab/` 提供本地实验台，可直观演示这些防线。
@@ -145,6 +146,10 @@ ZoomClient 是一个基于 Go 语言、以 Tool-Use 为核心的 AI Agent 运行
 | **edit_file** | `tools/` | 搜索替换方式编辑文件 |
 | **run_bash** | `tools/` | 执行 shell 命令（含黑名单保护与超时控制） |
 | **glob_search** | `tools/` | 基于模式的文件搜索 |
+| **grep_search** | `tools/` | 基于正则的内容搜索，带行号、glob 过滤与 content / files / count 三种输出模式 |
+| **web_fetch** | `tools/` | 抓取 HTTP(S) 页面并转换为可读文本 |
+| **web_search** | `tools/` | 通过 Tavily / Brave / Serper / Bocha 联网搜索（需配置 `websearch.api_key`） |
+| **ask_user_question** | `tools/` | 向用户发起结构化提问（CLI 标准输入 / Web 弹窗）并等待回答 |
 | **list_directory** | `tools/` | 列出目录内容 |
 | **todo** | `tools/` | 多步骤会话计划管理（创建/更新/标记） |
 | **create_task** | `task/` | 创建带 `blockedBy` 依赖的持久化任务 |
@@ -240,6 +245,12 @@ subagent:
 
 tools:
   defaultBashTimeout: 120      # 秒
+
+websearch:                     # 可选：配置 api_key 后启用 web_search 工具
+  provider: "tavily"           # tavily | brave | serper | bocha
+  api_key: ""
+  max_results: 5
+  timeoutSeconds: 20
 
 skills:
   dir: "./.skills"

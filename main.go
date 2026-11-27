@@ -19,6 +19,7 @@ import (
 	"zoomClient/skills"
 	"zoomClient/tools"
 	"zoomClient/utils"
+	"zoomClient/web"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -105,6 +106,13 @@ func main() {
 		Logger:             log.Named("tool"),
 		SessionID:          uuid.NewString(),
 		AppState:           map[string]any{"turn": 0},
+	}
+
+	// 结构化提问通道：Web 模式通过 SSE 弹窗交互，CLI 模式通过标准输入交互
+	if webSess != nil {
+		toolCtx.UserAsker = web.NewWebQuestionAsker(webSess)
+	} else {
+		toolCtx.UserAsker = &tools.StdinUserAsker{}
 	}
 
 	// 加载skill

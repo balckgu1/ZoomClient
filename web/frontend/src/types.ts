@@ -22,6 +22,14 @@ export interface PermissionAsk {
   reason: string;
 }
 
+// 结构化提问事件（对应后端 ask_user_question 工具）
+export interface UserQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  options: string[];
+}
+
 // Session metadata (for sidebar list)
 export interface SessionMeta {
   id: string;

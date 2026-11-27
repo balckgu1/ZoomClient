@@ -17,6 +17,7 @@ type ToolContext struct {
 	AppState           map[string]any  //应用状态
 	Messages           []any           // 当前消息列表
 	Notifications      []any           // 通知队列
+	UserAsker          UserAsker       // 结构化提问通道；nil 时 ask_user_question 不可用
 }
 
 type ToolResult struct {

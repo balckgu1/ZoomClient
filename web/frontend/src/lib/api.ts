@@ -63,6 +63,15 @@ export async function sendPermission(
   await post("/api/permission", { id, allow, reason });
 }
 
+// respondQuestion 回答 ask_user_question 的提问；cancelled=true 表示用户跳过
+export async function respondQuestion(
+  id: string,
+  answer: string,
+  cancelled: boolean = false
+): Promise<void> {
+  await post("/api/question", { id, answer, cancelled });
+}
+
 export interface StatusResponse {
   model: string;
   turn_count: number;

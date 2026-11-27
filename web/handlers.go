@@ -141,6 +141,35 @@ func (s *Server) handlePermission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
 }
 
+// ─── 结构化提问回复 ───
+
+// questionAnswerRequest 前端提交的提问回答。
+// cancelled=true 表示用户主动放弃回答，后端将收到取消错误而不是空答案。
+type questionAnswerRequest struct {
+	ID        string `json:"id"`
+	Answer    string `json:"answer"`
+	Cancelled bool   `json:"cancelled"`
+}
+
+// handleQuestion 处理 POST /api/question —— 回答 ask_user_question 的提问
+func (s *Server) handleQuestion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req questionAnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	s.session.ResolveQuestion(req.ID, req.Answer, req.Cancelled)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+}
+
 // ─── 状态查询 ───
 
 // handleStatus 处理 GET /api/status

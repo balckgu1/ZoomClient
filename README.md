@@ -25,7 +25,8 @@ The project follows a modular architecture covering multi-backend model clients,
 - **🔌 Multi-Backend ChatClient Abstraction**: Unified `clients.ChatClient` interface with built-in **OpenAI-compatible** (DeepSeek / Kimi / Qwen / OpenAI), **Ollama** (NDJSON streaming), **Anthropic** (Claude), and **Gemini** implementations, selected with the `-m` CLI flag.
 - **⚙️ Model Presets & Hot Switching**: Presets (client type, base URL, API key, model name) are managed by `model.Registry` and persisted to `config/models.yaml`. Add/list/switch presets from the CLI (`/setmode`, `/models`, `/selectmode`) or the Web UI (CRUD + connectivity test), and hot-switch backends at runtime without losing conversation history.
 - **🔧 Tool Control Plane**: Unified tool registry `tools.ToolRegister` supporting discovery, registration, and dynamic dispatch by name, with a built-in permission gate (`PermissionDecider`) for pre-execution admission control.
-- **⚡ Concurrent-Safe Scheduling**: Tool calls are automatically batched by read/write attributes — read-only tools (e.g., `read_file`, `glob_search`) execute concurrently, while write tools run serially, balancing efficiency and safety.
+- **⚡ Concurrent-Safe Scheduling**: Tool calls are automatically batched by read/write attributes — read-only tools (e.g., `read_file`, `glob_search`, `grep_search`, `web_fetch`) execute concurrently, while write tools run serially, balancing efficiency and safety.
+- **📡 Web Access & Human-in-the-Loop**: `web_fetch` reads URLs (HTML → text) and `web_search` queries Tavily / Brave / Serper / Bocha when configured; `ask_user_question` lets the model block on a structured question, answered via CLI stdin or an in-browser dialog (`/api/question`).
 - **🧬 Subagent**: Delegates subtasks to independently-contextualized subagents via the `sub_task` tool; supports blank-context mode and `fork=true` mode that inherits parent messages, with an independent, restricted tool whitelist to prevent side-effect leakage.
 - **📖 On-Demand Skill Loading**: Recursively scans `SKILL.md` files (with YAML frontmatter) under `.skills/`, injecting only the skill catalog into the system prompt; full content is loaded on demand via `load_skill` (with fuzzy name matching).
 - **🛡️ Skill Security Vetting**: Skill metadata and bodies pass static red-flag scanning (Unicode normalization, word-family co-occurrence, credential/upload/exfiltration combos), description sanitization, symlink rejection, and an "untrusted" banner before any degraded skill body is exposed. `skilllab/` ships a local experiment server for demonstrating these defenses.
@@ -145,6 +146,10 @@ The project adopts a layered architecture, from top to bottom: Agent Loop Layer,
 | **edit_file** | `tools/` | Apply search/replace edits to files |
 | **run_bash** | `tools/` | Execute shell commands with blacklist protection and timeout |
 | **glob_search** | `tools/` | Pattern-based file search |
+| **grep_search** | `tools/` | Regex content search with line numbers, glob filter and content/files/count output modes |
+| **web_fetch** | `tools/` | Fetch an HTTP(S) URL and convert HTML to readable text |
+| **web_search** | `tools/` | Search the web via Tavily / Brave / Serper / Bocha (requires `websearch.api_key`) |
+| **ask_user_question** | `tools/` | Ask the user a structured question (CLI stdin or Web dialog) and wait for the answer |
 | **list_directory** | `tools/` | List directory contents |
 | **todo** | `tools/` | Multi-step session plan management (create/update/mark) |
 | **create_task** | `task/` | Create a persistent task with optional `blockedBy` dependencies |
@@ -240,6 +245,12 @@ subagent:
 
 tools:
   defaultBashTimeout: 120      # seconds
+
+websearch:                     # optional: enables the web_search tool when api_key is set
+  provider: "tavily"           # tavily | brave | serper | bocha
+  api_key: ""
+  max_results: 5
+  timeoutSeconds: 20
 
 skills:
   dir: "./.skills"

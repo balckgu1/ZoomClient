@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"zoomClient/clients"
 	"zoomClient/compact"
@@ -188,6 +189,25 @@ func initTools(cfg *utils.Config, client clients.ChatClient, modelname string,
 	registry.Register(tools.ListDirectory{})
 	registry.Register(tools.RunBashTool{})
 	registry.Register(tools.GlobSearch{})
+	registry.Register(tools.GrepSearch{})
+	registry.Register(tools.WebFetchTool{})
+
+	// 注册结构化提问工具：提问通道已由 main 注入 ToolContext
+	registry.Register(tools.AskUserQuestionTool{})
+
+	// 注册 web_search：未配置 API Key 时不注册，避免向模型暴露不可用的能力
+	if cfg.WebSearch.APIKey != "" {
+		registry.Register(tools.NewWebSearchTool(tools.WebSearchConfig{
+			Provider:   cfg.WebSearch.Provider,
+			APIKey:     cfg.WebSearch.APIKey,
+			BaseURL:    cfg.WebSearch.BaseURL,
+			MaxResults: cfg.WebSearch.MaxResults,
+			Timeout:    time.Duration(cfg.WebSearch.TimeoutSeconds) * time.Second,
+		}))
+		log.Info("web_search enabled", zap.String("provider", cfg.WebSearch.Provider))
+	} else {
+		log.Info("web_search disabled: websearch.api_key is not configured")
+	}
 
 	// 注册 load_skills 工具
 	registry.Register(skills.NewLoadSkillTool(skillregistry))

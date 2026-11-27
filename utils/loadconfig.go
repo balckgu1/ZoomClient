@@ -22,6 +22,7 @@ type Config struct {
 	Compact       CompactConfig       `mapstructure:"compact"`
 	Permission    PermissionConfig    `mapstructure:"permission"`
 	Tools         ToolsConfig         `mapstructure:"tools"`
+	WebSearch     WebSearchConfig     `mapstructure:"websearch"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
@@ -88,6 +89,16 @@ type TasksConfig struct {
 
 type ToolsConfig struct {
 	DefaultBashTimeout int `mapstructure:"defaultBashTimeout"`
+}
+
+// WebSearchConfig web_search 工具的配置。
+// 未配置 api_key 时不注册该工具，避免向模型暴露不可用的能力。
+type WebSearchConfig struct {
+	Provider       string `mapstructure:"provider"`       // tavily | brave | serper | bocha，默认 tavily
+	APIKey         string `mapstructure:"api_key"`        // 服务商 API Key
+	BaseURL        string `mapstructure:"base_url"`       // 可选：覆盖默认 API 端点（代理 / 测试）
+	MaxResults     int    `mapstructure:"max_results"`    // 默认返回条数，上限 10
+	TimeoutSeconds int    `mapstructure:"timeoutSeconds"` // 单次请求超时秒数，缺省 20
 }
 
 type AgentLoopConfig struct {

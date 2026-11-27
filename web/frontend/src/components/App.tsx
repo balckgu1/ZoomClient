@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type {
   ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
   PermissionConfig, PermissionMode, ContextUsage, SkillMeta, TodoPlan,
-  ContextTimelineHead,
+  ContextTimelineHead, UserQuestion,
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
 import { reconstructMessages } from "../lib/history";
 import { findSkill, parseSlashInput, skillPrompt } from "../lib/slash";
 import {
-  sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission,
+  sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission, respondQuestion,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
   fetchModels, addModel, selectModel, updateModel,
   fetchWorkDir, setWorkDir, fetchPermissionConfig, updatePermissionConfig,
@@ -19,6 +19,7 @@ import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { PermissionDialog } from "./PermissionDialog";
+import { QuestionDialog } from "./QuestionDialog";
 import { WorkDirPanel } from "./WorkDirPanel";
 import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
@@ -45,6 +46,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [model, setModel] = useState("");
   const [permission, setPermission] = useState<PermissionAsk | null>(null);
+  // ask_user_question 提问弹窗：同一时刻最多一个待回答问题（工具串行执行）
+  const [question, setQuestion] = useState<UserQuestion | null>(null);
 
   // runningSessionId：当前正在跑 agentLoop 的会话 id。SSE 事件与打字机都写入该会话缓冲，
   // 即使用户此刻正在查看别的会话，运行会话的流式内容也能持续累积、切回即恢复。
@@ -295,6 +298,20 @@ export function App() {
           args: d.args,
           reason: d.reason,
         });
+      } else if (event === "user_question") {
+        // 结构化提问：options 以 JSON 字符串下发，解析失败时按无选项处理
+        let options: string[] = [];
+        try {
+          options = typeof d.options === "string" ? JSON.parse(d.options) : [];
+        } catch {
+          options = [];
+        }
+        setQuestion({
+          id: d.id,
+          question: d.question,
+          header: d.header,
+          options: Array.isArray(options) ? options : [],
+        });
       } else if (event === "session_end") {
         showToast("会话已结束");
       } else if (event === "session_renamed") {
@@ -505,6 +522,20 @@ export function App() {
       setPermission(null);
     },
     [permission, showToast]
+  );
+
+  // Handle question dialog answer
+  const handleQuestionAnswer = useCallback(
+    async (answer: string, cancelled: boolean) => {
+      if (!question) return;
+      try {
+        await respondQuestion(question.id, answer, cancelled);
+      } catch (err) {
+        showToast(`回答提交失败：${err}`, "error");
+      }
+      setQuestion(null);
+    },
+    [question, showToast]
   );
 
   // ─── Session actions ───
@@ -719,6 +750,9 @@ export function App() {
         )}
         {permission && (
           <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
+        )}
+        {question && (
+          <QuestionDialog question={question} onAnswer={handleQuestionAnswer} />
         )}
         <Composer
           disabled={busy}

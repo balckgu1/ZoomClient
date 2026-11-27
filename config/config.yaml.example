@@ -51,6 +51,16 @@ subagent:
 tools:
   defaultBashTimeout: 120  # default timeout in seconds
 
+# web search config (web_search tool)
+# provider: tavily | brave | serper | bocha (default: tavily)
+# Leave api_key empty to disable the tool.
+websearch:
+  provider: "tavily"
+  api_key: ""
+  base_url: ""        # optional: override API endpoint (proxy / self-hosted gateway)
+  max_results: 5      # default number of results, capped at 10
+  timeoutSeconds: 20  # per-request timeout
+
 # skill config
 skills:
   dir: "./.skills"  # skill directory

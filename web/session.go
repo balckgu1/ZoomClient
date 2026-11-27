@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,8 +40,12 @@ type Session struct {
 	// 权限交互（模仿 ApiAsker 的 pending map 模式）
 	permPending sync.Map // id -> chan permResponse
 	permIDSeq   atomic.Int64
-	TurnCount   int          // 运行轮次
-	workDirMu   sync.RWMutex // 保护 workDir 镜像的并发读写
+	// 结构化提问（ask_user_question）交互：与权限交互同构，
+	// 事件推送到前端弹窗，HTTP 回复写入对应通道
+	questionPending sync.Map // id -> chan questionResponse
+	questionIDSeq   atomic.Int64
+	TurnCount       int          // 运行轮次
+	workDirMu       sync.RWMutex // 保护 workDir 镜像的并发读写
 	// workDir 当前工作目录镜像，供 GET /api/workdir 读取；
 	// 实际切换在 REPL 循环中串行更新 toolCtx.WorkPath 后同步到此，避免 HTTP 读取与 REPL 写入竞争
 	workDir string
@@ -110,6 +115,61 @@ func (s *Session) ResolvePermission(id string, ok bool, reason string) {
 	if v, loaded := s.permPending.Load(id); loaded {
 		v.(chan permResponse) <- permResponse{ok: ok, reason: reason}
 	}
+}
+
+// 结构化提问交互，供 WebQuestionAsker 使用
+
+// questionResponse 用户对一次提问的回答。
+type questionResponse struct {
+	answer    string
+	cancelled bool
+}
+
+// RequestQuestion 推送 user_question 事件并返回请求 ID 与等待回答的通道。
+// options 以 JSON 字符串下发，避免不同 SSE 客户端对数组字段解析不一致。
+func (s *Session) RequestQuestion(question, header string, options []string) (string, chan questionResponse) {
+	id := s.questionIDSeq.Add(1)
+	reqID := "web_question_" + itoa(id)
+	ch := make(chan questionResponse, 1)
+	s.questionPending.Store(reqID, ch)
+
+	optionsJSON, err := json.Marshal(options)
+	if err != nil {
+		// []string 序列化不会失败；兜底成空数组，保证事件结构稳定
+		optionsJSON = []byte("[]")
+	}
+	s.EventCh <- Event{
+		CH: "system",
+		Data: map[string]string{
+			"event":    "user_question",
+			"id":       reqID,
+			"question": question,
+			"header":   header,
+			"options":  string(optionsJSON),
+		},
+	}
+	return reqID, ch
+}
+
+// ResolveQuestion 由 HTTP handler 调用，写入用户回答；重复回复被忽略（非阻塞写入）。
+func (s *Session) ResolveQuestion(id, answer string, cancelled bool) {
+	v, ok := s.questionPending.Load(id)
+	if !ok {
+		return
+	}
+	ch, ok := v.(chan questionResponse)
+	if !ok {
+		return
+	}
+	select {
+	case ch <- questionResponse{answer: answer, cancelled: cancelled}:
+	default:
+	}
+}
+
+// DropQuestion 清理指定提问的等待通道（超时或取消时调用）。
+func (s *Session) DropQuestion(id string) {
+	s.questionPending.Delete(id)
 }
 
 // WorkDir 返回当前工作目录镜像（读锁保护）

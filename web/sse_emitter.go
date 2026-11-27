@@ -6,6 +6,7 @@ package web
 
 import (
 	"zoomClient/compact"
+	"zoomClient/ctxinsight"
 	"zoomClient/tools"
 )
 
@@ -129,6 +130,15 @@ func (e *SseEmitter) EmitContextUsage(snap compact.UsageSnapshot) {
 	e.emit("system", map[string]any{
 		"event": "context_usage",
 		"usage": snap,
+	})
+}
+
+// EmitContextTimeline 推送上下文洞察头部快照，
+// 通知前端面板按 detailRev 增量刷新（GET 端点直读折叠器，不依赖此事件）。
+func (e *SseEmitter) EmitContextTimeline(head ctxinsight.HeadSnapshot) {
+	e.emit("system", map[string]any{
+		"event": "context_timeline",
+		"head":  head,
 	})
 }
 

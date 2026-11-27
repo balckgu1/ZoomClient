@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"zoomClient/clients"
+	"zoomClient/prompt"
 	"zoomClient/tools"
 
 	"go.uber.org/zap"
@@ -380,7 +381,7 @@ func TestCompactHistory_Success_ReplaceWithSummary(t *testing.T) {
 	if s, _ := got[1].Content.(string); !strings.Contains(s, "SUMMARY: goal=X") {
 		t.Errorf("摘要消息应包含模型返回的摘要正文，实际：%v", got[1].Content)
 	}
-	if !strings.Contains(got[1].Content.(string), "compacted for continuity") {
+	if !strings.Contains(got[1].Content.(string), prompt.CompactionMarker) {
 		t.Errorf("摘要消息应包含连续性提示语，实际：%v", got[1].Content)
 	}
 

@@ -13,6 +13,9 @@ var concurrencySafeTools = map[string]bool{
 	"read_file":      true,
 	"list_directory": true,
 	"glob_search":    true,
+	"grep_search":    true,
+	"web_fetch":      true,
+	"web_search":     true,
 }
 
 const (

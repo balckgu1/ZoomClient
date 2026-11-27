@@ -99,6 +99,37 @@ func TestCheck_AutoMode_AsksForWrite(t *testing.T) {
 	}
 }
 
+// 新增的只读类工具（内容搜索 / 联网 / 提问）在 auto 模式下应自动放行
+func TestCheck_AutoMode_AllowsNewReadOnlyTools(t *testing.T) {
+	m := newManagerWithMode(ModeAuto, DenyAsker{})
+	for _, tool := range []string{"grep_search", "web_fetch", "web_search", "ask_user_question"} {
+		got := m.Check(tool, map[string]any{})
+		if got.Behavior != BehaviorAllow {
+			t.Errorf("auto mode should allow %s, got %v", tool, got.Behavior)
+		}
+	}
+}
+
+// ask_user_question 在 default 模式下也不应二次询问“能否提问”
+func TestCheck_DefaultMode_AllowsAskUserQuestion(t *testing.T) {
+	m := newManagerWithMode(ModeDefault, DenyAsker{})
+	got := m.Check("ask_user_question", map[string]any{"question": "要不要继续？"})
+	if got.Behavior != BehaviorAllow {
+		t.Fatalf("ask_user_question should be allowed directly, got %v (%s)", got.Behavior, got.Reason)
+	}
+}
+
+// deny 规则优先于交互工具的内置放行
+func TestCheck_DenyRule_BeatsAskUserQuestion(t *testing.T) {
+	m := NewManager(ModeDefault,
+		[]Rule{{Tool: "ask_user_question", Behavior: BehaviorDeny}},
+		nil, DenyAsker{})
+	got := m.Check("ask_user_question", map[string]any{"question": "q"})
+	if got.Behavior != BehaviorDeny {
+		t.Fatalf("deny rule should win, got %v", got.Behavior)
+	}
+}
+
 // ===================== Step 3: bash 兜底安全检查 =====================
 
 func TestCheck_RunBash_DangerousIsDeniedEvenWithoutRule(t *testing.T) {

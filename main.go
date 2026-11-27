@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"zoomClient/clients"
+	"zoomClient/ctxinsight"
 	"zoomClient/fsm"
 	"zoomClient/hook"
 	"zoomClient/logger"
@@ -18,6 +19,7 @@ import (
 	"zoomClient/skills"
 	"zoomClient/tools"
 	"zoomClient/utils"
+	"zoomClient/web"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -106,6 +108,13 @@ func main() {
 		AppState:           map[string]any{"turn": 0},
 	}
 
+	// 结构化提问通道：Web 模式通过 SSE 弹窗交互，CLI 模式通过标准输入交互
+	if webSess != nil {
+		toolCtx.UserAsker = web.NewWebQuestionAsker(webSess)
+	} else {
+		toolCtx.UserAsker = &tools.StdinUserAsker{}
+	}
+
 	// 加载skill
 	skillregistry, err := skills.NewSkillRegistry(cfg.Skills.Dir)
 	if err != nil {
@@ -162,6 +171,7 @@ func main() {
 		PermissionMgr:  permitMgr,
 		Temperature:    0.7,
 		ReasonLevel:    "high",
+		CtxRecorder:    ctxinsight.New(cfg.Compact.ContextLimit, modelname),
 	}
 
 	// Per-turn 同步增量记忆抽取器：回合结束时内联阻塞执行，跑完才结束该轮

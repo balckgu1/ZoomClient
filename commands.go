@@ -26,6 +26,7 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 			s.State.Messages = s.State.Messages[:0]
 		}
 		s.State.TurnCount = 0
+		s.CtxRecorder.RecordClear()
 		s.Em.EmitInfo("history cleared")
 		// 历史已清空，推送最新占用快照刷新前端指示器
 		emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
@@ -44,6 +45,7 @@ func handleSessionCommand(action string, s *AgentSession) bool {
 		}
 		s.State.Messages = newMsgs
 		after := s.CompactManager.EstimateSize(newMsgs)
+		s.CtxRecorder.RecordCompaction(newMsgs, before-after)
 		s.Em.EmitCompact(before, after)
 		// 压缩完成后推送最新占用快照刷新前端指示器
 		emitContextUsageWeb(s, s.Pipeline.BuildSystemPrompt(), s.Registry.GetAll())
@@ -261,6 +263,7 @@ func handleSessionCmd(args []string, s *AgentSession) {
 		s.SessionRecordID = record.ID
 		s.IsNewSession = false
 		s.cachedTitle = record.Title
+		restoreCtxTimeline(s, s.SessionMgr, record.ID, s.Cfg.Compact.ContextLimit)
 		s.Em.EmitInfo(fmt.Sprintf("Loaded session: %s (%d messages, %d turns)",
 			record.Title, len(record.Messages), record.TurnCount))
 
@@ -273,6 +276,7 @@ func handleSessionCmd(args []string, s *AgentSession) {
 		s.SessionRecordID = record.ID
 		s.IsNewSession = true
 		s.cachedTitle = ""
+		s.CtxRecorder.Reset()
 		s.Em.EmitInfo(fmt.Sprintf("New session created: %s", record.ID[:8]+"..."))
 
 	case "delete":

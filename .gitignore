@@ -22,12 +22,15 @@ FRONT-README.md
 .task_outputs/
 
 .memory/
+.skills/
 
 .sessions/
 
 workdir/
 
 logs/
+
+plugin/
 
 desktop/node_modules/
 

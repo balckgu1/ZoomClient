@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type {
   ChatMessage, PermissionAsk, SSEEvent, SessionMeta, ModelPreset,
   PermissionConfig, PermissionMode, ContextUsage, SkillMeta, TodoPlan,
+  ContextTimelineHead, UserQuestion,
 } from "../types";
 import type { AgentPhase } from "./AgentStatus";
 import { connectSSE } from "../lib/sse";
 import { reconstructMessages } from "../lib/history";
 import { findSkill, parseSlashInput, skillPrompt } from "../lib/slash";
 import {
-  sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission,
+  sendChat, sendClear, sendCompact, sendExit, sendStop, sendPermission, respondQuestion,
   fetchSessions, createSession, loadSession, deleteSession, renameSession,
   fetchModels, addModel, selectModel, updateModel,
   fetchWorkDir, setWorkDir, fetchPermissionConfig, updatePermissionConfig,
@@ -18,10 +19,12 @@ import { StatusBar } from "./StatusBar";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { PermissionDialog } from "./PermissionDialog";
+import { QuestionDialog } from "./QuestionDialog";
 import { WorkDirPanel } from "./WorkDirPanel";
 import { PermissionPanel } from "./PermissionPanel";
 import { Sidebar } from "./Sidebar";
 import { TodoPlanProgress } from "./TodoPlanProgress";
+import { ContextPanel } from "./ctx/ContextPanel";
 import { IconAlert, IconCheck, IconSpark } from "../lib/icons";
 
 // ToastTone 是轻提示的三种语气：普通消息、成功、失败。
@@ -43,6 +46,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [model, setModel] = useState("");
   const [permission, setPermission] = useState<PermissionAsk | null>(null);
+  // ask_user_question 提问弹窗：同一时刻最多一个待回答问题（工具串行执行）
+  const [question, setQuestion] = useState<UserQuestion | null>(null);
 
   // runningSessionId：当前正在跑 agentLoop 的会话 id。SSE 事件与打字机都写入该会话缓冲，
   // 即使用户此刻正在查看别的会话，运行会话的流式内容也能持续累积、切回即恢复。
@@ -86,6 +91,10 @@ export function App() {
 
   // 上下文窗口占用快照（后端 SSE 推送 + 首屏拉取）
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+
+  // 上下文洞察：头部快照由 SSE context_timeline 事件维护，面板打开时按 detailRev 重拉详情
+  const [ctxHead, setCtxHead] = useState<ContextTimelineHead | null>(null);
+  const [showContext, setShowContext] = useState(false);
 
   // 当前任务计划（模型调用 todo tool 后由后端推送）。
   // 仅当模型实际使用了 todo tool 时为非空，此时顶部渲染计划进度条；否则为 null 不显示。
@@ -289,6 +298,20 @@ export function App() {
           args: d.args,
           reason: d.reason,
         });
+      } else if (event === "user_question") {
+        // 结构化提问：options 以 JSON 字符串下发，解析失败时按无选项处理
+        let options: string[] = [];
+        try {
+          options = typeof d.options === "string" ? JSON.parse(d.options) : [];
+        } catch {
+          options = [];
+        }
+        setQuestion({
+          id: d.id,
+          question: d.question,
+          header: d.header,
+          options: Array.isArray(options) ? options : [],
+        });
       } else if (event === "session_end") {
         showToast("会话已结束");
       } else if (event === "session_renamed") {
@@ -305,6 +328,10 @@ export function App() {
         // 上下文占用快照：后端每轮/压缩/清空后推送，驱动右下角指示器
         const usage = d.usage as unknown as ContextUsage | undefined;
         if (usage) setContextUsage(usage);
+      } else if (event === "context_timeline") {
+        // 上下文洞察头部快照：驱动洞察面板按 detailRev 增量刷新
+        const head = (evt.data as Record<string, unknown>).head as ContextTimelineHead | undefined;
+        if (head) setCtxHead(head);
       }
       return;
     }
@@ -446,6 +473,10 @@ export function App() {
     async (cmd: string) => {
       const { head, name, rest } = parseSlashInput(cmd);
       try {
+        if (head === "/context") {
+          setShowContext(true);
+          return;
+        }
         if (head === "/clear") {
           await sendClear();
           const sid = currentSessionId;
@@ -491,6 +522,20 @@ export function App() {
       setPermission(null);
     },
     [permission, showToast]
+  );
+
+  // Handle question dialog answer
+  const handleQuestionAnswer = useCallback(
+    async (answer: string, cancelled: boolean) => {
+      if (!question) return;
+      try {
+        await respondQuestion(question.id, answer, cancelled);
+      } catch (err) {
+        showToast(`回答提交失败：${err}`, "error");
+      }
+      setQuestion(null);
+    },
+    [question, showToast]
   );
 
   // ─── Session actions ───
@@ -706,6 +751,9 @@ export function App() {
         {permission && (
           <PermissionDialog permission={permission} onResolve={handlePermissionResolve} />
         )}
+        {question && (
+          <QuestionDialog question={question} onAnswer={handleQuestionAnswer} />
+        )}
         <Composer
           disabled={busy}
           busy={busy}
@@ -724,6 +772,7 @@ export function App() {
           onAddModel={handleModelAdd}
           onEditModel={handleModelEdit}
           onCompact={handleCompact}
+          onOpenContext={() => setShowContext(true)}
         />
         {showWorkDir && (
           <WorkDirPanel
@@ -738,6 +787,9 @@ export function App() {
             onSave={handlePermissionSave}
             onClose={() => setShowPermission(false)}
           />
+        )}
+        {showContext && (
+          <ContextPanel head={ctxHead} onClose={() => setShowContext(false)} />
         )}
       </div>
     </div>

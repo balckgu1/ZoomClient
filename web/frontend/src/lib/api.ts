@@ -63,6 +63,15 @@ export async function sendPermission(
   await post("/api/permission", { id, allow, reason });
 }
 
+// respondQuestion 回答 ask_user_question 的提问；cancelled=true 表示用户跳过
+export async function respondQuestion(
+  id: string,
+  answer: string,
+  cancelled: boolean = false
+): Promise<void> {
+  await post("/api/question", { id, answer, cancelled });
+}
+
 export interface StatusResponse {
   model: string;
   turn_count: number;
@@ -86,6 +95,31 @@ export async function fetchContextUsage(): Promise<ContextUsage> {
   const res = await fetch(`${BASE}/api/context-usage`);
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
+}
+
+// ─── 上下文洞察 API ───
+
+import type { ContextTimelineHead, ContextTimelineDetail } from "../types";
+
+// fetchContextTimeline 查询洞察头部快照（GET /api/context/timeline）
+export async function fetchContextTimeline(): Promise<ContextTimelineHead> {
+  const res = await fetch(`${BASE}/api/context/timeline`);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+// fetchContextTimelineDetail 按需拉取洞察详情（GET /api/context/timeline/detail），
+// 仅在 Context 面板打开时调用。空集合兜底为 []：旧版后端可能序列化为 null。
+export async function fetchContextTimelineDetail(): Promise<ContextTimelineDetail> {
+  const res = await fetch(`${BASE}/api/context/timeline/detail`);
+  if (!res.ok) throw new Error(res.statusText);
+  const d = (await res.json()) as ContextTimelineDetail;
+  d.requests ??= [];
+  d.events ??= [];
+  d.nodes ??= [];
+  d.archive ??= [];
+  d.headers ??= [];
+  return d;
 }
 
 // ─── Session API ───

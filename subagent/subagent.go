@@ -222,13 +222,17 @@ func (subagent *SubAgent) subagentLoop(messages []clients.Message) (string, erro
 	return truncatedSummary, ErrMaxTurnsReached
 }
 
-// BuildSubAgentRegistry 构建子智能体工具注册表
+// BuildSubAgentRegistry 构建子智能体工具注册表。
+// 子代理只获得只读探索类工具：内容搜索与网页抓取能显著提升调研效率，
+// 但不注册提问 / 写文件类工具，避免子代理与用户交互或改动工作区。
 func BuildSubAgentRegistry() *tools.ToolRegister {
 	reg := tools.NewToolRegister()
 	reg.Register(tools.ReadFileTool{})
 	reg.Register(tools.ListDirectory{})
 	reg.Register(tools.RunBashTool{})
 	reg.Register(&tools.GlobSearch{})
+	reg.Register(tools.GrepSearch{})
+	reg.Register(tools.WebFetchTool{})
 	return reg
 }
 

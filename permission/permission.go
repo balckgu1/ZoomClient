@@ -36,17 +36,21 @@ type Decision struct {
 
 // readOnlyTools 只读 & 安全 的tool白名单。
 var readOnlyTools = map[string]bool{
-	"read_file":      true,
-	"list_directory": true,
-	"load_skill":     true,
-	"todo":           true,
-	"compact":        true,
-	"glob_search":    true,
-	"create_task":    true,
-	"list_tasks":     true,
-	"get_task":       true,
-	"claim_task":     true,
-	"complete_task":  true,
+	"read_file":         true,
+	"list_directory":    true,
+	"load_skill":        true,
+	"todo":              true,
+	"compact":           true,
+	"glob_search":       true,
+	"grep_search":       true,
+	"web_fetch":         true,
+	"web_search":        true,
+	"ask_user_question": true,
+	"create_task":       true,
+	"list_tasks":        true,
+	"get_task":          true,
+	"claim_task":        true,
+	"complete_task":     true,
 }
 
 // writeTools 写文件 / 跑命令 / 跨上下文 的tool
@@ -132,6 +136,15 @@ func (m *Manager) Check(toolName string, args map[string]any) Decision {
 		return Decision{
 			Behavior: BehaviorDeny,
 			Reason:   "plan mode blocks write tool: " + toolName,
+		}
+	}
+
+	// ask_user_question 本身就是与用户交互，无需再就“能否提问”征求一次授权。
+	// deny 规则在上面已优先匹配，仍可显式禁止该工具。
+	if toolName == "ask_user_question" {
+		return Decision{
+			Behavior: BehaviorAllow,
+			Reason:   "interactive tool: asking the user is always allowed",
 		}
 	}
 
@@ -273,7 +286,7 @@ func matchPathArg(pattern string, args map[string]any) bool {
 
 // matchContentArg 在常见的"文本类参数"中按模式匹配。
 func matchContentArg(pattern string, args map[string]any) bool {
-	for _, key := range []string{"command", "content", "prompt"} {
+	for _, key := range []string{"command", "content", "prompt", "url", "query", "pattern"} {
 		if v, ok := args[key].(string); ok && substringOrRegex(pattern, v) {
 			return true
 		}

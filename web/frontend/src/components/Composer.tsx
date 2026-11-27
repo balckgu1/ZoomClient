@@ -29,6 +29,8 @@ interface Props {
   onAddModel: (preset: ModelPreset) => void;
   onEditModel: (name: string, preset: ModelPreset) => void;
   onCompact: () => void;
+  /** 打开上下文洞察面板 */
+  onOpenContext: () => void;
 }
 
 // Composer —— 底部输入区，一块"控制台输入板"。
@@ -40,7 +42,7 @@ export function Composer({
   disabled, busy, workDir, permissionMode, models, activeModel, contextUsage, skills,
   onSend, onSlashCommand, onStop,
   onOpenWorkDir, onOpenPermission, onSelectModel, onAddModel, onEditModel,
-  onCompact,
+  onCompact, onOpenContext,
 }: Props) {
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
@@ -219,7 +221,7 @@ export function Composer({
             </div>
 
             <div class="plate__right">
-              <ContextUsageMeter usage={contextUsage} onCompact={onCompact} />
+              <ContextUsageMeter usage={contextUsage} onCompact={onCompact} onOpenDetail={onOpenContext} />
               <button
                 class={`plate__send ${busy ? "plate__send--stop" : ""}`}
                 onClick={busy ? onStop : handleSubmit}
